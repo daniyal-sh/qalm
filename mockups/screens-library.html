@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qalm Library</title>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{--app:#F2F0EB;--side:#EAE7E0;--chrome:#FAF9F6;--line:rgba(28,32,44,.09);--line2:rgba(28,32,44,.15);--text:#20232B;--muted:#7A7F8B;
+        --ink:#1F2A44;--accent:#2F6F5E;--soft:#E2EEE9;--live:#1FA971;--sans:Inter,system-ui,"Segoe UI",sans-serif}
+  *{box-sizing:border-box} body{margin:0;font-family:var(--sans);color:var(--text);-webkit-font-smoothing:antialiased}
+  button{font:inherit;color:inherit;border:0;background:none;padding:0;cursor:pointer}
+  .cap{font-size:12px;color:var(--muted-foreground,#777);margin:2px 2px 8px;font-family:var(--font-sans,var(--sans))}
+  .cap b{color:var(--foreground,#222)}
+  .frame{border-radius:14px;overflow:hidden;border:1px solid var(--line2);box-shadow:0 18px 44px -22px rgba(20,24,36,.4);background:var(--app);position:relative;margin-bottom:26px}
+  svg{flex:none}
+  /* library */
+  .lib{display:grid;grid-template-columns:168px 1fr;height:600px}
+  .side{background:var(--side);padding:14px 10px;display:flex;flex-direction:column;gap:2px;font-size:12.5px;border-right:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;padding:2px 8px 14px;letter-spacing:-.01em}
+  .brand i{width:24px;height:24px;border-radius:7px;background:var(--ink);display:grid;place-items:center}
+  .nav{display:flex;align-items:center;gap:9px;padding:5px 8px;white-space:nowrap;border-radius:8px;color:#454a56}
+  .nav.on{background:#fff;color:var(--text);font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .nav .n{margin-left:auto;font-size:11px;color:var(--muted)}
+  .sh{font-size:10.5px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;padding:14px 8px 4px}
+  .fd{width:9px;height:9px;border-radius:3px}
+  .sfoot{margin-top:auto;display:flex;flex-direction:column;gap:6px}
+  .aicard{background:#fff;border-radius:10px;padding:9px 10px;font-size:11.5px;border:1px solid var(--line)}
+  .aicard b{display:flex;align-items:center;gap:6px;font-size:12px}
+  .aicard span{color:var(--muted)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--live)}
+  .me{display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px}
+  .me i{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#C9A77C,#8E6B4A);display:grid;place-items:center;color:#fff;font-style:normal;font-size:11px;font-weight:600}
+  .me small{display:block;color:var(--muted);font-size:10.5px}
+  .main{display:flex;flex-direction:column;min-width:0;position:relative}
+  .bar{display:flex;align-items:center;gap:10px;padding:14px 18px 10px}
+  .bar h1{font-size:19px;margin:0;letter-spacing:-.02em}
+  .search{flex:1;display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:7px 10px;font-size:12px;color:var(--muted);min-width:0;white-space:nowrap;overflow:hidden}
+  .new{background:var(--ink);color:#fff;border-radius:10px;padding:8px 12px;font-size:12.5px;font-weight:500;display:flex;gap:6px;align-items:center;white-space:nowrap}
+  .sub{display:flex;gap:6px;padding:0 18px 10px;font-size:11.5px;color:var(--muted);align-items:center}
+  .chip{padding:3px 9px;border-radius:99px;background:rgba(0,0,0,.05)} .chip.on{background:var(--text);color:#fff}
+  .grid{flex:1;overflow:hidden;padding:4px 18px 18px;display:grid;grid-template-columns:repeat(4,1fr);gap:16px 14px;align-content:start}
+  .folder{background:#fff;border-radius:10px;padding:10px;display:flex;gap:9px;align-items:center;border:1px solid var(--line);font-size:12px;white-space:nowrap;min-width:0}
+  .folder small{display:block;color:var(--muted);font-size:10.5px}
+  .item{min-width:0}
+  .cover{aspect-ratio:.76;border-radius:3px 8px 8px 3px;position:relative;box-shadow:0 1px 2px rgba(0,0,0,.12),0 8px 18px -10px rgba(0,0,0,.45);overflow:hidden}
+  .cover::before{content:"";position:absolute;left:0;top:0;bottom:0;width:7%;background:linear-gradient(90deg,rgba(0,0,0,.22),rgba(255,255,255,.08) 70%,transparent)}
+  .label{position:absolute;left:18%;right:12%;top:16%;background:rgba(255,255,255,.92);border-radius:4px;padding:5px 6px;font-size:9.5px;font-weight:600;color:#333;text-align:center;letter-spacing:.02em}
+  .band{position:absolute;right:10%;top:0;bottom:0;width:5%;background:rgba(0,0,0,.28)}
+  .t{font-size:12px;font-weight:500;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;gap:5px;align-items:center}
+  .d{font-size:10.5px;color:var(--muted);display:flex;gap:6px;align-items:center}
+  .ai{font-size:9.5px;font-weight:600;color:var(--accent);background:var(--soft);border-radius:5px;padding:0 5px}
+  .paper{background:#fff;border-radius:3px}
+  .paper i{position:absolute;left:12%;right:12%;height:1.5px;background:#d8dbe2;border-radius:2px}
+  .tag{position:absolute;right:6px;top:6px;font-size:9px;font-weight:700;color:#fff;background:#C2453A;border-radius:4px;padding:1px 5px}
+  .pop{position:absolute;right:18px;top:52px;width:236px;background:#fff;border-radius:12px;box-shadow:0 20px 40px -12px rgba(20,24,36,.35),0 0 0 1px var(--line);padding:6px;z-index:4;font-size:12.5px}
+  .pi{display:flex;gap:10px;align-items:center;padding:8px 9px;border-radius:8px}
+  .pi:hover,.pi.hl{background:#F3F2EE}
+  .pi small{display:block;font-size:10.5px;color:var(--muted)}
+  .pi .ic{width:28px;height:28px;border-radius:8px;background:#F3F2EE;display:grid;place-items:center}
+  .psep{height:1px;background:var(--line);margin:4px 6px}
+  /* modal */
+  .dim{position:absolute;inset:0;background:rgba(24,26,32,.38);backdrop-filter:blur(2px)}
+  .sheet{position:absolute;inset:22px 30px;background:var(--chrome);border-radius:16px;box-shadow:0 30px 60px -20px rgba(0,0,0,.5);display:grid;grid-template-columns:200px 1fr;overflow:hidden}
+  .prev{background:#E9E6DF;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;border-right:1px solid var(--line)}
+  .prev .cover{width:118px}
+  .prev .field{width:100%;border:1px solid var(--line2);border-radius:9px;padding:7px 9px;font-size:12.5px;background:#fff;text-align:center;font-weight:500}
+  .prev small{font-size:10.5px;color:var(--muted);text-align:center}
+  .opts{display:flex;flex-direction:column;min-width:0}
+  .tabs{display:flex;gap:4px;padding:14px 16px 0;border-bottom:1px solid var(--line)}
+  .tab{padding:8px 12px;font-size:12.5px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab.on{color:var(--text);border-color:var(--ink);font-weight:500}
+  .body{padding:14px 16px;overflow:hidden;flex:1}
+  .lbl{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 7px}
+  .covers{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;margin-bottom:14px}
+  .covers .cover{border-radius:2px 5px 5px 2px;cursor:pointer;outline:2px solid transparent;outline-offset:2px}
+  .covers .cover.sel{outline-color:var(--ink)}
+  .papers{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:12px}
+  .pp{font-size:10.5px;text-align:center;color:#4a4f5b}
+  .pp div{aspect-ratio:.72;background:#fff;border-radius:4px;border:1px solid var(--line2);margin-bottom:5px;position:relative;overflow:hidden}
+  .pp.sel div{outline:2px solid var(--ink);outline-offset:2px}
+  .row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px}
+  .seg{display:inline-flex;background:#ECEAE4;border-radius:9px;padding:3px;font-size:11.5px}
+  .seg span{padding:4px 9px;border-radius:7px;color:var(--muted);white-space:nowrap}
+  .seg span.on{background:#fff;color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.08);font-weight:500}
+  .sw{display:inline-flex;align-items:center;gap:8px;font-size:12px}
+  .tg{width:28px;height:16px;border-radius:99px;background:#CBCDD3;position:relative}
+  .tg::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff}
+  .tg.on{background:var(--accent)} .tg.on::after{left:14px}
+  .foot{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-top:1px solid var(--line);font-size:11.5px;color:var(--muted)}
+  .btn{padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:500}
+  .btn.p{background:var(--ink);color:#fff} .btn.g{background:#ECEAE4}
+  @media (max-width:640px){.lib{grid-template-columns:1fr}.side{display:none}.grid{grid-template-columns:repeat(3,1fr)}.sheet{grid-template-columns:1fr;inset:12px}.prev{display:none}.covers{grid-template-columns:repeat(4,1fr)}.papers{grid-template-columns:repeat(3,1fr)}}
+</style>
+</head>
+<body>
+
+<div class="cap"><b>1 · Library.</b> Folders, covers and search. The New menu is shown open.</div>
+<div class="frame">
+  <div class="lib">
+    <aside class="side">
+      <div class="brand"><i><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20c4-1 7-4 10-8l4-6-6 4c-4 3-7 6-8 10z"/><path d="M4 20l5-5"/></svg></i>Qalm</div>
+      <div class="nav on"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Documents<span class="n">42</span></div>
+      <div class="nav"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>Favorites<span class="n">6</span></div>
+      <div class="nav"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>Recently deleted</div>
+      <div class="sh">Folders</div>
+      <div class="nav"><span class="fd" style="background:#2F6F5E"></span>Semester 2<span class="n">14</span></div>
+      <div class="nav"><span class="fd" style="background:#2D5BD2"></span>Work<span class="n">9</span></div>
+      <div class="nav"><span class="fd" style="background:#C9A77C"></span>Journal<span class="n">31</span></div>
+      <div class="sfoot">
+        <div class="aicard"><b><span class="dot"></span>AI access</b><span>1 agent connected · comment only</span></div>
+        <div class="me"><i>D</i><div>Daniyal<small>Synced · 1.2 GB of 5 GB</small></div></div>
+      </div>
+    </aside>
+    <section class="main">
+      <div class="bar">
+        <h1>Documents</h1>
+        <div class="search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg>Search titles, PDFs and typed text</div>
+        <button class="new"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New</button>
+      </div>
+      <div class="sub"><span class="chip on">All</span><span class="chip">Notebooks</span><span class="chip">PDFs</span><span class="chip">Shared with AI</span><span style="margin-left:auto">Sorted by last edited ▾</span></div>
+      <div class="grid">
+        <div class="folder"><svg width="22" height="22" viewBox="0 0 24 24" fill="#2F6F5E"><path d="M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg><div>Semester 2<small>14 items</small></div></div>
+        <div class="folder"><svg width="22" height="22" viewBox="0 0 24 24" fill="#2D5BD2"><path d="M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg><div>Work<small>9 items</small></div></div>
+        <div class="folder"><svg width="22" height="22" viewBox="0 0 24 24" fill="#C9A77C"><path d="M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg><div>Journal<small>31 items</small></div></div>
+        <div></div>
+
+        <div class="item"><div class="cover" style="background:#9DB69A"><div class="label">CALCULUS II</div></div><div class="t">Calculus II <span class="ai">AI</span></div><div class="d">Today, 14:02</div></div>
+        <div class="item"><div class="cover" style="background:#1F2A44"><div class="band"></div><div class="label">PRODUCT · Q3</div></div><div class="t">Product strategy <span class="ai">AI</span></div><div class="d">Yesterday</div></div>
+        <div class="item"><div class="cover paper"><i style="top:18%;right:40%;background:#999"></i><i style="top:28%"></i><i style="top:36%"></i><i style="top:44%;right:30%"></i><i style="top:58%"></i><i style="top:66%"></i><span class="tag">PDF</span></div><div class="t">ps4.pdf</div><div class="d">Mon · 3 pages annotated</div></div>
+        <div class="item"><div class="cover" style="background:radial-gradient(circle at 30% 20%,#d6b78f,#b68e62)"><div class="label">READING</div></div><div class="t">Reading notes</div><div class="d">12 Nov</div></div>
+
+        <div class="item"><div class="cover" style="background:#E3B3A6"><div class="label">RECIPES</div></div><div class="t">Recipes</div><div class="d">3 Nov</div></div>
+        <div class="item"><div class="cover" style="background:repeating-linear-gradient(45deg,#2F6F5E 0 3px,#2a6555 3px 6px)"><div class="label">ESPAÑOL B1</div></div><div class="t">Spanish B1</div><div class="d">28 Oct</div></div>
+        <div class="item"><div class="cover" style="background:#3A3F58"><div class="label" style="background:#D9B45A;color:#2a2a2a">SKETCHBOOK</div></div><div class="t">Sketchbook</div><div class="d">20 Oct</div></div>
+        <div class="item"><div class="cover paper" style="background:#FFFDF6"><i style="top:14%;right:50%;background:#2F6F5E;height:2px"></i><i style="top:26%"></i><i style="top:34%;right:30%"></i></div><div class="t">Quick note</div><div class="d">19 Oct</div></div>
+      </div>
+
+      <div class="pop">
+        <div class="pi hl"><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v18"/></svg></span><div>Notebook<small>Pick a cover and a paper</small></div></div>
+        <div class="pi"><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h10l4 4v12H5z"/><path d="M9 13h6M9 17h4"/></svg></span><div>Quick note<small>One page, opens instantly</small></div></div>
+        <div class="pi"><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg></span><div>Folder</div></div>
+        <div class="psep"></div>
+        <div class="pi"><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span><div>Import<small>PDF, images, .qalm</small></div></div>
+        <div class="pi"><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3"/><path d="M4 12h16"/></svg></span><div>Scan a document<small>Uses the tablet camera</small></div></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="cap"><b>2 · New notebook.</b> Pick a cover, a paper and a size. AI access is off by default for each notebook.</div>
+<div class="frame" style="height:610px">
+  <div style="position:absolute;inset:0;background:var(--app);display:grid;grid-template-columns:repeat(5,1fr);gap:18px;padding:70px 30px">
+    <div class="cover" style="background:#9DB69A"></div><div class="cover" style="background:#1F2A44"></div><div class="cover paper"></div><div class="cover" style="background:#c9a77c"></div><div class="cover" style="background:#E3B3A6"></div>
+  </div>
+  <div class="dim"></div>
+  <div class="sheet">
+    <div class="prev">
+      <div class="cover" style="background:#1F2A44"><div class="band"></div><div class="label">ROADMAP</div></div>
+      <div class="field">Roadmap 2027</div>
+      <small>Navy linen · Dotted · A4 portrait</small>
+    </div>
+    <div class="opts">
+      <div class="tabs"><span class="tab on">Cover and paper</span><span class="tab">Template gallery</span></div>
+      <div class="body">
+        <div class="lbl">Cover</div>
+        <div class="covers">
+          <div class="cover sel" style="background:#1F2A44"></div><div class="cover" style="background:#9DB69A"></div><div class="cover" style="background:#E3B3A6"></div><div class="cover" style="background:radial-gradient(circle at 30% 20%,#d6b78f,#b68e62)"></div>
+          <div class="cover" style="background:repeating-linear-gradient(45deg,#2F6F5E 0 3px,#2a6555 3px 6px)"></div><div class="cover" style="background:#3A3F58"></div><div class="cover" style="background:#F3EFE6"></div><div class="cover" style="background:linear-gradient(135deg,#F6D35B,#E59A4C)"></div>
+        </div>
+        <div class="lbl">Paper</div>
+        <div class="papers">
+          <div class="pp"><div></div>Blank</div>
+          <div class="pp"><div style="background:repeating-linear-gradient(#fff 0 8px,#cfd8e6 8px 9px)"></div>Ruled</div>
+          <div class="pp sel"><div style="background:radial-gradient(circle,#b8bcc6 1px,transparent 1.4px) 0 0/9px 9px,#fff"></div>Dotted</div>
+          <div class="pp"><div style="background:linear-gradient(#e1e5ec 1px,transparent 1px) 0 0/9px 9px,linear-gradient(90deg,#e1e5ec 1px,transparent 1px) 0 0/9px 9px,#fff"></div>Grid</div>
+          <div class="pp"><div style="background:linear-gradient(90deg,transparent 30%,#d48 30%,#d48 31%,transparent 31%),linear-gradient(transparent 78%,#999 78%,#999 79%,transparent 79%),repeating-linear-gradient(#fff 0 8px,#e3e7ee 8px 9px)"></div>Cornell</div>
+          <div class="pp"><div style="background:linear-gradient(#333 0 0) 10% 12%/50% 2px no-repeat,linear-gradient(90deg,transparent 49.5%,#ddd 49.5%,#ddd 50.5%,transparent 50.5%),repeating-linear-gradient(#fff 0 22px,#ddd 22px 23px)"></div>Weekly</div>
+        </div>
+        <div class="row">
+          <div><div class="lbl">Size</div><div class="seg"><span class="on">A4</span><span>Letter</span><span>A5</span><span>Infinite · beta</span></div></div>
+          <div><div class="lbl">Orientation</div><div class="seg"><span class="on">Portrait</span><span>Landscape</span></div></div>
+        </div>
+        <div class="row">
+          <div><div class="lbl">Paper colour</div><div class="seg"><span class="on">White</span><span>Cream</span><span>Night</span></div></div>
+          <div><div class="lbl">AI access</div><div class="sw"><span class="tg"></span>Let connected AI read and comment</div></div>
+        </div>
+      </div>
+      <div class="foot"><span>You can change the paper for each page later.</span><span style="display:flex;gap:8px"><button class="btn g">Cancel</button><button class="btn p">Create</button></span></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

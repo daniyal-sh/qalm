@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qalm Architecture</title>
+<style>
+  :root{
+    --fg:var(--foreground,#1d2028); --mf:var(--muted-foreground,#6b707c); --cd:var(--card,#fff); --bd:var(--border,#e3e3e6);
+    --cb:var(--code-background,#f4f4f5); --ac:var(--chart-1,#2F6F5E); --r:var(--radius,10px);
+    --mono:var(--font-mono,ui-monospace,Consolas,monospace);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font-sans,system-ui,sans-serif);color:var(--fg);font-size:13px;line-height:1.5}
+  h2{font-size:15px;margin:26px 0 4px;letter-spacing:-.01em} h2:first-child{margin-top:4px}
+  .lede{color:var(--mf);margin:0 0 12px;font-size:12.5px}
+  .box{background:var(--cd);border:1px solid var(--bd);border-radius:var(--r);padding:16px}
+  /* stack */
+  .layer{display:grid;grid-template-columns:96px 1fr;gap:12px;align-items:stretch;margin-bottom:8px}
+  .layer>.lab{font-size:11px;color:var(--mf);padding-top:8px;line-height:1.35}
+  .layer>.lab b{display:block;color:var(--fg);font-size:12px}
+  .cells{display:grid;gap:8px}
+  .c3{grid-template-columns:repeat(3,1fr)}
+  .cell{border:1px solid var(--bd);border-radius:8px;padding:8px 10px;font-size:12px;background:var(--cd)}
+  .cell b{display:block;font-size:12.5px}
+  .cell small{color:var(--mf);font-size:11px;display:block;line-height:1.4;margin-top:2px}
+  .core{border:1.5px solid color-mix(in srgb,var(--ac) 55%,transparent);background:color-mix(in srgb,var(--ac) 9%,var(--cd));border-radius:8px;padding:10px 12px}
+  .core b{font-size:13px}
+  .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+  .tag{font-size:11px;padding:2px 8px;border-radius:99px;border:1px solid var(--bd);background:var(--cd);white-space:nowrap}
+  .bind{font-size:11px;color:var(--mf);text-align:center;margin:-2px 0 6px 108px}
+  /* flow */
+  .flow{display:grid;grid-template-columns:repeat(5,1fr);gap:0;align-items:stretch}
+  .node{border:1px solid var(--bd);border-radius:8px;padding:9px 10px;background:var(--cd);font-size:11.5px;position:relative}
+  .node b{display:block;font-size:12px;margin-bottom:2px}
+  .node small{color:var(--mf);font-size:10.5px;line-height:1.35;display:block}
+  .arrow{display:flex;align-items:center;justify-content:center;color:var(--mf);font-size:16px}
+  .flow{grid-template-columns:1fr 18px 1fr 18px 1fr 18px 1fr 18px 1fr}
+  .back{margin-top:8px;font-size:11.5px;color:var(--mf);display:flex;gap:8px;align-items:center}
+  .back code{font-family:var(--mono);font-size:11px;color:var(--fg)}
+  /* approaches */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .ap{border:1px solid var(--bd);border-radius:var(--r);padding:12px 13px;background:var(--cd)}
+  .ap.rec{border:1.5px solid var(--ac)}
+  .ap h3{margin:0 0 4px;font-size:13px;display:flex;gap:8px;align-items:center}
+  .ap .n{font-family:var(--mono);font-size:11px;color:var(--mf)}
+  .ap p{margin:0;color:var(--mf);font-size:12px}
+  .ap ul{margin:6px 0 0;padding-left:16px;font-size:12px} .ap li{margin:1px 0}
+  .pill{font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:99px;background:color-mix(in srgb,var(--ac) 16%,transparent);color:var(--fg)}
+  /* bars */
+  .bars{display:grid;grid-template-columns:170px 1fr 56px;gap:8px 10px;align-items:center;font-size:12px}
+  .bars .t{height:12px;background:var(--ac);border-radius:0 4px 4px 0;min-width:3px;position:relative}
+  .bars .tr{position:relative}
+  .bars .v{font-variant-numeric:tabular-nums;font-weight:600;text-align:right}
+  .bars .tr:hover .tip{display:block}
+  .tip{display:none;position:absolute;left:0;bottom:18px;background:var(--popover,#222);color:var(--popover-foreground,#fff);border:1px solid var(--bd);font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;z-index:3}
+  .note{font-size:11.5px;color:var(--mf);margin-top:10px}
+  /* code */
+  pre{margin:0;background:var(--cb);border-radius:8px;padding:12px 13px;font-family:var(--mono);font-size:11.3px;line-height:1.6;overflow-x:auto;white-space:pre}
+  .cm{color:var(--mf)} .kw{color:var(--ac);font-weight:600}
+  /* tools */
+  .tools{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:12px}
+  .tools code{font-family:var(--mono);font-size:11.3px;white-space:nowrap}
+  .tools span{color:var(--mf)}
+  .lv{font-family:var(--mono);font-size:10.5px;color:var(--mf);margin-left:6px}
+  @media (max-width:640px){
+    .c3,.grid2{grid-template-columns:1fr} .layer{grid-template-columns:1fr} .bind{margin-left:0}
+    .flow{grid-template-columns:1fr} .arrow{transform:rotate(90deg);height:18px}
+    .bars{grid-template-columns:120px 1fr 48px}
+  }
+</style>
+</head>
+<body>
+
+<h2>1 · The stack: share the core, go native for the ink</h2>
+<p class="lede">Only the ink surface is written per platform, because pen latency depends on it. Everything else is written once.</p>
+<div class="box">
+  <div class="layer"><div class="lab"><b>App shell</b>UI, library, menus</div>
+    <div class="cells c3">
+      <div class="cell"><b>React Native</b><small>iPad, iPhone, Android tablets and phones (Fabric native views)</small></div>
+      <div class="cell"><b>Electron</b><small>Windows, macOS, Linux. The same Chromium pen stack on all three</small></div>
+      <div class="cell"><b>Web viewer</b><small>Read-only share links for a tutor or teacher. Reuses the desktop renderer</small></div>
+    </div></div>
+  <div class="layer"><div class="lab"><b>Ink surface</b>native, latency-critical, never on the JS thread</div>
+    <div class="cells c3">
+      <div class="cell"><b>iOS · Metal</b><small>Coalesced and predicted UITouches, Pencil hover, squeeze and barrel roll, ProMotion at 120 Hz</small></div>
+      <div class="cell"><b>Android · androidx.ink</b><small>Front-buffered GL rendering, motion prediction, unbuffered dispatch, S Pen</small></div>
+      <div class="cell"><b>Desktop/Web · Canvas or WebGPU</b><small>Pointer events with getCoalescedEvents and getPredictedEvents, plus navigator.ink delegated trails</small></div>
+    </div></div>
+  <div class="layer"><div class="lab"><b>qalm-core</b>Rust, one codebase</div>
+    <div class="core"><b>Document model and everything that must behave the same everywhere</b>
+      <div class="tags">
+        <span class="tag">CRDT doc (Loro / Automerge)</span><span class="tag">stroke smoothing + mesh</span><span class="tag">palm-rejection state machine</span>
+        <span class="tag">PDF via PDFium</span><span class="tag">Q-ink encoder + diffs</span><span class="tag">block clustering</span><span class="tag">search index</span><span class="tag">.qalm file (SQLite + assets)</span>
+      </div></div></div>
+  <div class="bind">UniFFI connects the core to Swift and Kotlin · wasm-bindgen connects it to Electron and the web</div>
+</div>
+
+<h2>2 · Live AI loop: the agent can run on any machine</h2>
+<p class="lede">The device syncs CRDT ops to a relay. A server-side indexer keeps an AI-ready view of the notebook, and an MCP server exposes that view to agents.</p>
+<div class="box">
+  <div class="flow">
+    <div class="node"><b>Device</b><small>Writes strokes locally and works offline. Pushes ops when the writer pauses</small></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>Sync relay</b><small>WebSocket. CRDT ops, revision cursors and presence</small></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>Indexer</b><small>Clusters ops into blocks, recognizes handwriting and math, and renders crops on demand</small></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>MCP server</b><small>Remote over Streamable HTTP. OAuth, plus a share token for each session</small></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>Any agent</b><small>Claude, a tutor service, or the student's own assistant</small></div>
+  </div>
+  <div class="back">↩ The agent writes back with <code>annotate()</code>. Its marks land on a separate <b style="color:var(--fg)">AI layer</b> that the student can show, hide, accept or clear.</div>
+</div>
+
+<h2>3 · Four ways to make handwriting AI-readable</h2>
+<p class="lede">Each option trades cost against how much the model can actually understand. Qalm should support all four and send the cheapest one that is good enough.</p>
+<div class="grid2">
+  <div class="ap"><h3><span class="n">A</span>Screenshots</h3><p>Send a rendered image of the page.</p>
+    <ul><li>The model reads it well, and it's easy to build</li><li>About 2.3k tokens every time it looks, even if only a comma changed</li></ul></div>
+  <div class="ap"><h3><span class="n">B</span>Stroke vectors (Q-ink)</h3><p>Simplify, quantize and delta-encode the strokes.</p>
+    <ul><li>Very cheap for small changes, graphs, arrows and diagrams</li><li>Models read handwriting poorly from coordinates. A full page costs more than a screenshot</li></ul></div>
+  <div class="ap"><h3><span class="n">C</span>Recognize, then send text</h3><p>Run handwriting and math recognition, then send text, LaTeX and shapes with confidence scores.</p>
+    <ul><li>The cheapest option and the easiest for the model to reason over</li><li>Recognition can be wrong. Diagrams don't survive it</li></ul></div>
+  <div class="ap rec"><h3><span class="n">D</span>Layered and diff-based <span class="pill">recommended</span></h3><p>Send C by default, fall back to B and A for each block, and send only what changed.</p>
+    <ul><li>The agent receives diffs once the student pauses, with a confidence score for each block</li><li>When confidence is low, it can ask for a crop of that block</li></ul></div>
+</div>
+
+<h2>4 · One look at a full page of math work</h2>
+<p class="lede">Approximate tokens for one look at about 12 handwritten lines. Images are estimated as width × height ÷ 750.</p>
+<div class="box">
+  <div class="bars" id="bars"></div>
+  <div class="note">Raw input samples (x, y, pressure, tilt and time for every point) would be roughly 140k tokens, so they're left off the chart. Per change rather than per page, the gap grows: a single new line costs about 15–40 tokens as text, against about 2.3k for a fresh screenshot.</div>
+</div>
+
+<h2>5 · The format the agent reads: Q-ink markup</h2>
+<p class="lede">A snapshot of the page (L1), followed by the diff an agent receives from <code style="font-family:var(--mono)">wait_for_changes</code>.</p>
+<pre><span class="kw">@doc</span> "Calculus II — Week 7"  rev 412   <span class="cm"># L0 outline is just these headers</span>
+<span class="kw">@page</span> 3 dots 1000x1414
+b5  text [80,100,560,150]    "Q3. ∫ x² ln x dx"              hw .97
+b6  math [100,215,520,265]   u = \ln x,\ dv = x^2\,dx        hw .91
+b7  math [100,310,560,360]   du = \tfrac{1}{x}dx,\ v = x^3/3  hw .88
+b8  ink  [110,400,610,470]   6 strokes                        hw .41  <span class="cm"># low → crop on request</span>
+<span class="kw">@pdf</span>  ps4.pdf p1 → page 2   text-layer: yes
+<span class="kw">@img</span>  i2 [580,1046,910,1260] "xeˣ vs eˣ.png"  alt: two growth curves
+
+<span class="cm"># ── diff: rev 412 → 415 · writer idle 2.1s ──</span>
+<span class="kw">+</span> b8 math p3 [110,400,610,470]  = \frac{x^3}{3}\ln x - \int \frac{x^2}{3}dx   hw .86
+<span class="kw">~</span> b7 erased 2 strokes, rewrote "x³/3"  (14s on this line)
+<span class="kw">+</span> b9 ink  p3 [640,395,700,440]  shape:arrow → b8                 <span class="cm"># geometry kept as Q-ink</span>
+     P642,437+9-6+14-11+12-9+6-4 P690,404-7+1+8+6</pre>
+
+<h2>6 · MCP tool surface</h2>
+<p class="lede">The tools go from cheap to expensive, so the agent starts with the cheap ones.</p>
+<div class="box tools">
+  <code>list_sessions()</code><span>Live notebooks that have been shared with this agent</span>
+  <code>get_outline(doc)</code><span>Pages, headings and counts for each block <span class="lv">L0</span></span>
+  <code>read_page(doc, page)</code><span>Q-ink markup with recognized text, LaTeX and shapes <span class="lv">L1</span></span>
+  <code>wait_for_changes(doc, since, idle_ms)</code><span>Long-poll. Returns the diff and a new cursor once the student pauses</span>
+  <code>get_strokes(doc, block)</code><span>Compact vectors for one block <span class="lv">L2</span></span>
+  <code>render_region(doc, page, bbox)</code><span>A PNG crop of only that region <span class="lv">L3</span></span>
+  <code>get_pdf_text(doc, page)</code><span>The text layer of an embedded PDF, so the agent never needs to OCR it</span>
+  <code>annotate(doc, page, anchor, …)</code><span>Writes ink, text or a highlight to the AI layer</span>
+</div>
+
+<script>
+  const rows = [
+    ['L0 outline', 30, 'Headings, block counts, timestamps'],
+    ['L1 recognized text + LaTeX', 220, 'Q-ink markup; best for reasoning'],
+    ['L3 crops of 2 unclear blocks', 160, 'Only where recognition confidence is low'],
+    ['L4 full-page image', 2320, '1109×1568 px ÷ 750'],
+    ['L2 vectors, whole page', 7000, '≈300 strokes × 8 pts × 3 tok. Good for deltas, bad for pages'],
+  ];
+  const max = Math.max(...rows.map(r => r[1]));
+  document.getElementById('bars').innerHTML = rows.map(([l, v, tip]) =>
+    `<div>${l}</div><div class="tr"><div class="tip">${tip}</div><div class="t" style="width:${Math.max(.5, v / max * 100)}%"></div></div><div class="v">${v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v}</div>`).join('');
+</script>
+</body>
+</html>

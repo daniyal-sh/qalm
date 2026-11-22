@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qalm Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --app:#EFEDE7; --chrome:#FAF9F6; --chrome-2:#F4F2ED; --line:rgba(28,32,44,.09); --line-2:rgba(28,32,44,.14);
+    --text:#20232B; --muted:#787D89; --faint:#A7AAB2;
+    --paper:#FFFDF8; --ink:#1F2A44; --accent:#2F6F5E; --accent-soft:#E2EEE9; --live:#1FA971;
+    --hl:#F6D35B; --red:#B8452F; --blue:#2D5BD2;
+    --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    --sans:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--sans);color:var(--text);-webkit-font-smoothing:antialiased}
+  button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;padding:0}
+
+  .app{height:780px;display:flex;flex-direction:column;background:var(--app);border-radius:14px;overflow:hidden;
+       border:1px solid var(--line-2);box-shadow:0 20px 50px -20px rgba(20,24,36,.35)}
+  /* top bar */
+  .top{height:48px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;background:var(--chrome);border-bottom:1px solid var(--line)}
+  .crumb{display:flex;align-items:center;gap:8px;min-width:0}
+  .crumb .back{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
+  .crumb .back:hover{background:var(--chrome-2)}
+  .title{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sub{font-size:12px;color:var(--muted);white-space:nowrap}
+  .spacer{flex:1}
+  .ib{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:#4A4F5B}
+  .ib:hover{background:var(--chrome-2)}
+  .toggle{display:flex;align-items:center;gap:7px;font-size:12px;color:#4A4F5B;padding:5px 9px;border-radius:999px;border:1px solid var(--line-2);white-space:nowrap}
+  .sw{width:26px;height:15px;border-radius:999px;background:#CBCDD3;position:relative;transition:.2s}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+  .toggle.on .sw{background:var(--accent)} .toggle.on .sw::after{left:13px}
+  .livepill{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;padding:5px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--live);box-shadow:0 0 0 0 rgba(31,169,113,.5);animation:pulse 1.8s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(31,169,113,.45)}70%{box-shadow:0 0 0 7px rgba(31,169,113,0)}100%{box-shadow:0 0 0 0 rgba(31,169,113,0)}}
+
+  .body{flex:1;display:flex;min-height:0}
+  /* thumbnails */
+  .rail{width:92px;flex:none;border-right:1px solid var(--line);background:var(--chrome-2);padding:14px 0;display:flex;flex-direction:column;align-items:center;gap:14px;overflow:auto}
+  .thumb{width:58px;aspect-ratio:1/1.414;border-radius:4px;background:var(--paper);box-shadow:0 1px 3px rgba(0,0,0,.12);position:relative;cursor:pointer;outline:2px solid transparent;outline-offset:3px}
+  .thumb.cur{outline-color:var(--accent)}
+  .thumb span{position:absolute;bottom:-17px;left:0;right:0;text-align:center;font-size:10px;color:var(--muted)}
+  .thumb i{position:absolute;left:8px;right:8px;height:2px;border-radius:2px;background:#c9ccd4}
+  /* canvas area */
+  .stage{flex:1;min-width:0;position:relative;display:flex;flex-direction:column}
+  .scroll{flex:1;overflow:auto;padding:70px 22px 40px;scroll-behavior:smooth}
+  .tools{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:5;display:flex;align-items:center;gap:2px;padding:5px;
+         background:rgba(250,249,246,.86);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--line-2);border-radius:14px;
+         box-shadow:0 8px 24px -10px rgba(20,24,36,.3);white-space:nowrap}
+  .tb{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;color:#4A4F5B;position:relative}
+  .tb:hover{background:rgba(0,0,0,.05)}
+  .tb.on{background:var(--ink);color:#fff}
+  .sep{width:1px;height:20px;background:var(--line-2);margin:0 5px}
+  .col{width:20px;height:20px;border-radius:50%;margin:0 3px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.9);outline:1.5px solid transparent;outline-offset:1px}
+  .col.on{outline-color:var(--ink)}
+  .wd{width:24px;height:30px;display:grid;place-items:center;border-radius:8px}
+  .wd b{display:block;border-radius:50%;background:#4A4F5B}
+  .wd.on{background:rgba(0,0,0,.07)}
+
+  .page{position:relative;width:100%;max-width:560px;margin:0 auto 26px;aspect-ratio:1/1.414;background:var(--paper);border-radius:3px;
+        box-shadow:0 1px 2px rgba(0,0,0,.06),0 10px 30px -12px rgba(30,30,40,.25);container-type:inline-size;overflow:hidden}
+  .page .num{position:absolute;bottom:2.4cqw;right:3cqw;font-size:1.9cqw;color:var(--faint)}
+  .ruled{background-image:linear-gradient(to right,transparent 11.5cqw,rgba(214,90,90,.28) 11.5cqw,rgba(214,90,90,.28) calc(11.5cqw + 1px),transparent calc(11.5cqw + 1px)),
+                          repeating-linear-gradient(to bottom,transparent 0,transparent calc(5.6cqw - 1px),rgba(70,110,170,.16) calc(5.6cqw - 1px),rgba(70,110,170,.16) 5.6cqw);
+         background-position:0 0,0 9cqw}
+  .dots{background-image:radial-gradient(circle,rgba(40,50,70,.22) .22cqw,transparent .26cqw);background-size:4cqw 4cqw;background-position:2cqw 2cqw}
+  .hw{font-family:Caveat,cursive;color:var(--ink);position:absolute;line-height:1;white-space:nowrap}
+  canvas.ink{position:absolute;inset:0;width:100%;height:100%;touch-action:none;z-index:3;cursor:crosshair}
+  .tool-eraser canvas.ink{cursor:cell}
+  .hlband{position:absolute;background:rgba(246,211,91,.45);mix-blend-mode:multiply;border-radius:.6cqw}
+  .sticker{position:absolute;background:#fff;border-radius:1.2cqw;padding:1.4cqw;box-shadow:0 .4cqw 1.6cqw rgba(0,0,0,.14);transform:rotate(-2deg)}
+  .sticker .cap{font-family:var(--sans);font-size:1.6cqw;color:var(--muted);margin-top:.8cqw}
+  .badge{position:absolute;top:2cqw;left:2cqw;z-index:4;font-size:1.7cqw;font-family:var(--sans);font-weight:500;color:#5C616D;background:rgba(255,255,255,.92);
+         border:1px solid var(--line-2);padding:.6cqw 1.3cqw;border-radius:99px;display:flex;gap:.8cqw;align-items:center}
+  .pdf{position:absolute;inset:0;padding:9cqw 9cqw;font-family:"Source Serif 4",Georgia,serif;color:#2b2b2b;font-size:2.35cqw;line-height:1.5;background:#fff}
+  .pdf h3{font-size:3.4cqw;margin:0 0 .6cqw;font-weight:600}
+  .pdf .meta{font-size:1.9cqw;color:#666;margin-bottom:3cqw;border-bottom:1px solid #ddd;padding-bottom:2cqw}
+  .pdf ol{padding-left:4cqw;margin:0} .pdf li{margin-bottom:5.5cqw}
+  .hint{position:absolute;left:50%;transform:translateX(-50%);bottom:2.6cqw;font-size:1.8cqw;color:var(--accent);background:var(--accent-soft);padding:.8cqw 1.8cqw;border-radius:99px;z-index:4;white-space:nowrap;font-family:var(--sans)}
+
+  .status{height:28px;flex:none;display:flex;align-items:center;gap:14px;padding:0 14px;font-size:11px;color:var(--muted);border-top:1px solid var(--line);background:var(--chrome)}
+  .status .rej{color:var(--red);font-weight:500;opacity:0;transition:opacity .3s}
+  .status .rej.show{opacity:1}
+
+  /* AI panel */
+  .ai{width:292px;flex:none;border-left:1px solid var(--line);background:var(--chrome);display:flex;flex-direction:column;min-height:0}
+  .aih{padding:12px 14px 10px;border-bottom:1px solid var(--line)}
+  .who{display:flex;align-items:center;gap:10px}
+  .av{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#2F6F5E,#5FA38D);display:grid;place-items:center;color:#fff;font-size:13px;font-weight:600}
+  .who b{font-size:13px;display:block} .who small{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .seg{display:flex;margin-top:10px;background:var(--chrome-2);border-radius:9px;padding:3px}
+  .seg button{flex:1;font-size:12px;padding:5px 0;border-radius:7px;color:var(--muted)}
+  .seg button.on{background:#fff;color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.08);font-weight:500}
+  .feed{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+  .ev{background:#fff;border:1px solid var(--line);border-radius:11px;padding:10px 11px;font-size:12px}
+  .ev.new{animation:in .35s ease}
+  @keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .ev .h{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:11px;margin-bottom:5px}
+  .ev .k{font-weight:600;color:var(--text);font-size:12px}
+  .ev .k .op{font-family:var(--mono);color:var(--accent);margin-right:4px}
+  .ev .k .op.del{color:var(--red)}
+  .ev pre{margin:7px 0 0;font-family:var(--mono);font-size:10.5px;line-height:1.45;background:var(--chrome-2);border-radius:7px;padding:7px 8px;white-space:pre-wrap;word-break:break-all;color:#3c4150;max-height:84px;overflow:hidden}
+  .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+  .chip{font-size:10.5px;padding:2px 7px;border-radius:99px;background:var(--chrome-2);color:#555b68;white-space:nowrap}
+  .chip.good{background:var(--accent-soft);color:var(--accent);font-weight:500}
+  .rec{font-family:var(--mono);font-size:11px;color:var(--ink);margin-top:3px}
+  .tool{border-style:dashed;background:transparent}
+  .tool .k{font-family:var(--mono);font-weight:500;font-size:11px}
+  .tool img{display:block;margin-top:7px;max-width:100%;border-radius:6px;border:1px solid var(--line)}
+  .msg{background:var(--accent-soft);border:0;color:#173d33;line-height:1.45;font-size:12.5px}
+  .msg .h{color:var(--accent)}
+  .cost{flex:1;overflow:auto;padding:14px;display:none;font-size:12px}
+  .cost h4{margin:0 0 4px;font-size:12px} .cost p{margin:0 0 12px;color:var(--muted);font-size:11.5px;line-height:1.45}
+  .bar{margin-bottom:12px;position:relative}
+  .bar .l{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:4px}
+  .bar .l b{font-weight:600;font-variant-numeric:tabular-nums}
+  .bar .t{height:10px;border-radius:0 4px 4px 0;background:var(--accent);min-width:2px;transition:width .5s}
+  .bar .track{background:var(--chrome-2);border-radius:0 4px 4px 0}
+  .bar:hover .tip{display:block}
+  .tip{display:none;position:absolute;right:0;top:-26px;background:var(--text);color:#fff;font-size:10.5px;padding:3px 7px;border-radius:6px;white-space:nowrap;z-index:2}
+  .compose{border-top:1px solid var(--line);padding:10px 12px;display:flex;gap:8px}
+  .compose input{flex:1;border:1px solid var(--line-2);border-radius:9px;padding:8px 10px;font:inherit;font-size:12px;background:#fff;outline:none}
+  .compose button{background:var(--ink);color:#fff;border-radius:9px;padding:0 12px;font-size:12px}
+  .toast{position:absolute;bottom:14px;left:50%;transform:translateX(-50%) translateY(10px);background:var(--text);color:#fff;font-size:12px;padding:7px 12px;border-radius:9px;opacity:0;transition:.25s;pointer-events:none;z-index:9;white-space:nowrap}
+  .toast.show{opacity:1;transform:translateX(-50%)}
+
+  @media (max-width:1000px){ .rail{display:none} }
+  @media (max-width:760px){ .ai{width:250px} .scroll{padding:64px 12px 30px} .toggle .lbl{display:none} .hide-sm{display:none} }
+  @media (max-width:600px){ .ai{display:none} }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="top">
+    <div class="crumb">
+      <button class="back" title="Library"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div style="min-width:0"><div class="title">Calculus II — Week 7</div></div>
+      <span class="sub hide-sm">· 3 pages</span>
+    </div>
+    <div class="spacer"></div>
+    <button class="ib" id="undo" title="Undo"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/></svg></button>
+    <button class="toggle on" id="stylusOnly" title="Palm rejection: only the stylus draws; fingers scroll"><span class="sw"></span><span class="lbl">Stylus only</span></button>
+    <div class="livepill"><span class="dot"></span><span>Tutor live</span></div>
+  </div>
+
+  <div class="body">
+    <aside class="rail">
+      <div class="thumb cur" data-go="p1"><i style="top:14%;width:40%"></i><i style="top:26%"></i><i style="top:34%;right:20px"></i><i style="top:46%"></i><span>1</span></div>
+      <div class="thumb" data-go="p2"><i style="top:12%;width:50%;background:#999"></i><i style="top:24%"></i><i style="top:40%"></i><i style="top:56%"></i><span>2 · PDF</span></div>
+      <div class="thumb" data-go="p3"><i style="top:12%;width:30%"></i><i style="top:22%;width:45%"></i><span>3</span></div>
+    </aside>
+
+    <section class="stage" id="stage">
+      <div class="tools" id="tools">
+        <button class="tb on" data-tool="pen" title="Pen"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 3.5l4 4L8 20l-5 1 1-5z"/><path d="M14 6l4 4"/></svg></button>
+        <button class="tb" data-tool="highlighter" title="Highlighter"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l-5 5v3h3l5-5"/><path d="M9 11l6-7 5 5-7 6z"/><path d="M14 21h7"/></svg></button>
+        <button class="tb" data-tool="eraser" title="Eraser"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 21h13"/><path d="M5 15l9-11 6 5-9 11H8z"/><path d="M10 9l5 5"/></svg></button>
+        <button class="tb" data-tool="lasso" title="Lasso"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3 3"><ellipse cx="12" cy="10" rx="8" ry="6"/><path d="M8 15c-1 3 1 5 3 6" stroke-dasharray="0"/></svg></button>
+        <button class="tb" data-tool="shape" title="Shapes"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="8" r="4.5"/><rect x="11" y="11" width="9" height="9" rx="1.5"/></svg></button>
+        <button class="tb" data-tool="image" title="Insert image or PDF"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg></button>
+        <span class="sep"></span>
+        <button class="col on" data-color="#1F2A44" style="background:#1F2A44" title="Ink"></button>
+        <button class="col" data-color="#2D5BD2" style="background:#2D5BD2" title="Blue"></button>
+        <button class="col" data-color="#B8452F" style="background:#B8452F" title="Red"></button>
+        <span class="sep"></span>
+        <button class="wd" data-w="1.6"><b style="width:4px;height:4px"></b></button>
+        <button class="wd on" data-w="2.4"><b style="width:6px;height:6px"></b></button>
+        <button class="wd" data-w="3.6"><b style="width:9px;height:9px"></b></button>
+      </div>
+
+      <div class="scroll" id="scroll">
+        <!-- Page 1: lecture notes -->
+        <div class="page ruled" id="p1">
+          <div class="hw" style="left:14cqw;top:9.5cqw;font-size:6.2cqw;font-weight:600">Integration by parts</div>
+          <svg style="position:absolute;left:13.5cqw;top:16.6cqw;width:52cqw;height:2cqw" viewBox="0 0 520 20" preserveAspectRatio="none"><path d="M2 12 C 120 4, 300 16, 515 7" stroke="#2F6F5E" stroke-width="3" fill="none" stroke-linecap="round"/></svg>
+          <div class="hlband" style="left:13.5cqw;top:21.6cqw;width:47cqw;height:6cqw"></div>
+          <div class="hw" style="left:15cqw;top:21.6cqw;font-size:5.4cqw">∫ u dv = uv − ∫ v du</div>
+          <div class="hw" style="left:14cqw;top:32.8cqw;font-size:4.3cqw;color:#2D5BD2">choose u with LIATE → Log, Inv. trig, Alg, Trig, Exp</div>
+          <div class="hw" style="left:14cqw;top:44cqw;font-size:4.6cqw">e.g.  ∫ x eˣ dx</div>
+          <div class="hw" style="left:20cqw;top:49.6cqw;font-size:4.4cqw">u = x ,  dv = eˣ dx   →   du = dx ,  v = eˣ</div>
+          <div class="hw" style="left:20cqw;top:55.2cqw;font-size:4.4cqw">= x eˣ − ∫ eˣ dx</div>
+          <div class="hw" style="left:20cqw;top:60.8cqw;font-size:4.6cqw;color:#B8452F">= eˣ (x − 1) + C  ✓</div>
+          <div class="sticker" style="left:58cqw;top:74cqw;width:33cqw">
+            <svg viewBox="0 0 200 120" style="width:100%;display:block">
+              <path d="M10 100 H190 M20 110 V10" stroke="#c4c7cf" stroke-width="1.5"/>
+              <path d="M20 98 C 60 96, 100 86, 130 60 S 175 14, 188 10" stroke="#2F6F5E" stroke-width="3" fill="none"/>
+              <path d="M20 98 C 70 97, 120 94, 188 70" stroke="#E0A33A" stroke-width="2.5" fill="none" stroke-dasharray="5 4"/>
+            </svg>
+            <div class="cap">image · xeˣ vs eˣ.png</div>
+          </div>
+          <div class="hw" style="left:14cqw;top:78cqw;font-size:4.2cqw;color:#5C616D">grows faster once x &gt; 1 →</div>
+          <div class="hint" id="hint">✎ Draw anywhere with a pen, finger or mouse. The panel on the right shows what the AI receives.</div>
+          <span class="num">1</span>
+          <canvas class="ink" data-page="1"></canvas>
+        </div>
+
+        <!-- Page 2: embedded PDF -->
+        <div class="page" id="p2">
+          <div class="pdf">
+            <h3>Problem Set 4</h3>
+            <div class="meta">MATH 152 · Techniques of Integration · due Friday</div>
+            <ol>
+              <li>Evaluate ∫ x cos(2x) dx.</li>
+              <li>Evaluate ∫ eˣ sin x dx. <em>Hint: integrate by parts twice.</em></li>
+              <li>Evaluate ∫ x² ln x dx.</li>
+              <li>Show that ∫₀¹ x eˣ dx = 1.</li>
+            </ol>
+          </div>
+          <div class="badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/></svg>PDF · ps4.pdf · p.1</div>
+          <div class="hw" style="left:56cqw;top:23.5cqw;font-size:4.2cqw;color:#B8452F">u = x , dv = cos 2x</div>
+          <div class="hw" style="left:58cqw;top:34cqw;font-size:4.2cqw;color:#B8452F;transform:rotate(-3deg)">loops back! ↺</div>
+          <svg style="position:absolute;left:8cqw;top:43.5cqw;width:8cqw;height:8cqw" viewBox="0 0 80 80"><circle cx="40" cy="40" r="32" stroke="#2D5BD2" stroke-width="4" fill="none" stroke-dasharray="190 20"/></svg>
+          <div class="hw" style="left:56cqw;top:45cqw;font-size:4.2cqw;color:#2D5BD2">→ doing this on p.3</div>
+          <span class="num">2</span>
+          <canvas class="ink" data-page="2"></canvas>
+        </div>
+
+        <!-- Page 3: working page -->
+        <div class="page dots" id="p3">
+          <div class="hw" style="left:8cqw;top:7.5cqw;font-size:5.6cqw;font-weight:600">Q3.   ∫ x² ln x dx</div>
+          <div class="hw" style="left:10cqw;top:16cqw;font-size:4.6cqw">u = ln x       dv = x² dx</div>
+          <div class="hw" style="left:10cqw;top:23cqw;font-size:4.6cqw">du = ¹⁄ₓ dx     v = x³⁄3</div>
+          <span class="num">3</span>
+          <canvas class="ink" data-page="3"></canvas>
+        </div>
+      </div>
+
+      <div class="toast" id="toast"></div>
+      <div class="status">
+        <span>● Synced · rev <b id="rev">412</b></span>
+        <span class="hide-sm" id="inputInfo">Input: —</span>
+        <span class="rej" id="rej">✋ touch rejected</span>
+      </div>
+    </section>
+
+    <aside class="ai">
+      <div class="aih">
+        <div class="who">
+          <div class="av">T</div>
+          <div><b>Calculus tutor</b><small><span class="dot"></span>Viewing live · remote via MCP</small></div>
+        </div>
+        <div class="seg"><button class="on" data-tab="feed">What the AI sees</button><button data-tab="cost">Token cost</button></div>
+      </div>
+      <div class="feed" id="feed">
+        <div class="ev">
+          <div class="h"><span>rev 409 · p2</span><span>2 min ago</span></div>
+          <div class="k"><span class="op">+</span>annotation on PDF · q1</div>
+          <div class="rec">"u = x , dv = cos 2x"  <span style="color:var(--muted)">math · .94</span></div>
+          <div class="chips"><span class="chip good">11 tok</span><span class="chip">anchored to pdf text "Evaluate ∫ x cos(2x) dx"</span></div>
+        </div>
+        <div class="ev msg">
+          <div class="h"><span>Tutor</span><span>1 min ago</span></div>
+          Good pick for u. For Q2 you'll get the original integral back after two rounds — move it to the left side and solve.
+        </div>
+        <div class="ev">
+          <div class="h"><span>rev 412 · p3</span><span>just now</span></div>
+          <div class="k"><span class="op">+</span>3 ink blocks · Q3 setup</div>
+          <div class="rec">"Q3. ∫ x² ln x dx" · "u = ln x, dv = x² dx" · "du = 1/x dx, v = x³/3"</div>
+          <div class="chips"><span class="chip good">34 tok</span><span class="chip">vs ~2.3k for a page screenshot</span></div>
+        </div>
+      </div>
+      <div class="cost" id="cost">
+        <h4>Your live strokes this session</h4>
+        <p>Estimated tokens the agent would spend to follow along, if it looked once per change. Draw on page 3 and watch these update.</p>
+        <div id="bars"></div>
+        <p style="margin-top:14px">The semantic layer needs handwriting recognition, which this mockup doesn't run. The real app runs it on the device or the server. When recognition confidence is low, the agent asks for a small crop instead of the whole page.</p>
+      </div>
+      <div class="compose"><input placeholder="Ask the tutor about this page…"><button>Ask</button></div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(() => {
+  const PW = 1000, PH = 1414;
+  const S = { tool:'pen', color:'#1F2A44', w:2.4, stylusOnly:true, strokes:[], blocks:[], rev:412, lastPen:-1e9,
+              pending:{added:[], erased:0, page:null}, idle:null, nextStroke:1, nextBlock:8, flushes:0,
+              totals:{shot:0, raw:0, compact:0, crop:0, sem:0} };
+  const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+  const canvases = $$('canvas.ink');
+  const scroller = $('#scroll');
+
+  /* ---------- toolbar ---------- */
+  $$('.tb').forEach(b => b.onclick = () => {
+    const t = b.dataset.tool;
+    if (!['pen','highlighter','eraser'].includes(t)) { toast(t === 'image' ? 'Insert image / PDF: not wired up in this mockup' : t[0].toUpperCase()+t.slice(1)+': not wired up in this mockup'); return; }
+    S.tool = t; $$('.tb').forEach(x => x.classList.toggle('on', x === b));
+    document.getElementById('app').className = 'app tool-' + t;
+  });
+  $$('.col').forEach(b => b.onclick = () => { S.color = b.dataset.color; $$('.col').forEach(x => x.classList.toggle('on', x === b)); });
+  $$('.wd').forEach(b => b.onclick = () => { S.w = +b.dataset.w; $$('.wd').forEach(x => x.classList.toggle('on', x === b)); });
+  $('#stylusOnly').onclick = e => { S.stylusOnly = !S.stylusOnly; e.currentTarget.classList.toggle('on', S.stylusOnly);
+    toast(S.stylusOnly ? 'Stylus only: fingers scroll and zoom, only the pen draws' : 'Fingers can draw now (palm heuristics still on)'); };
+  $('#undo').onclick = () => { const s = S.strokes.pop(); if (s) { redraw(s.page); toast('Undone'); } };
+  $$('.thumb').forEach(t => t.onclick = () => { $$('.thumb').forEach(x => x.classList.toggle('cur', x === t)); document.getElementById(t.dataset.go).scrollIntoView({block:'start'}); });
+  $$('.seg button').forEach(b => b.onclick = () => {
+    $$('.seg button').forEach(x => x.classList.toggle('on', x === b));
+    $('#feed').style.display = b.dataset.tab === 'feed' ? 'flex' : 'none';
+    $('#cost').style.display = b.dataset.tab === 'cost' ? 'block' : 'none';
+  });
+  let tt; function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); clearTimeout(tt); tt=setTimeout(()=>t.classList.remove('show'),1800); }
+
+  /* ---------- canvas sizing ---------- */
+  const fit = cv => { const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1;
+    cv.width = Math.max(1, Math.round(r.width*d)); cv.height = Math.max(1, Math.round(r.height*d)); redraw(+cv.dataset.page); };
+  const ro = new ResizeObserver(es => es.forEach(e => fit(e.target)));
+  canvases.forEach(cv => ro.observe(cv));
+  const cvOf = p => canvases.find(c => +c.dataset.page === p);
+
+  /* ---------- rendering ---------- */
+  const mid = (a,b) => ({x:(a.x+b.x)/2, y:(a.y+b.y)/2, p:(a.p+b.p)/2});
+  function drawStroke(ctx, s, k){
+    const P = s.pts; if (!P.length) return;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
+    if (s.tool === 'highlighter') {
+      ctx.save(); ctx.globalAlpha = .38; ctx.globalCompositeOperation = 'multiply'; ctx.lineWidth = 22*k; ctx.lineCap='butt';
+      ctx.beginPath(); ctx.moveTo(P[0].x*k, P[0].y*k);
+      for (let i=1;i<P.length;i++){ const m = mid(P[i-1],P[i]); ctx.quadraticCurveTo(P[i-1].x*k,P[i-1].y*k,m.x*k,m.y*k); }
+      ctx.lineTo(P[P.length-1].x*k, P[P.length-1].y*k); ctx.stroke(); ctx.restore(); return;
+    }
+    if (P.length === 1) { ctx.beginPath(); ctx.arc(P[0].x*k, P[0].y*k, s.w*k*.6, 0, 7); ctx.fill(); return; }
+    for (let i=1;i<P.length;i++){
+      const a=P[i-1], b=P[i], m0 = i>1 ? mid(P[i-2],a) : a, m1 = i===P.length-1 ? b : mid(a,b);
+      ctx.beginPath(); ctx.moveTo(m0.x*k,m0.y*k); ctx.quadraticCurveTo(a.x*k,a.y*k,m1.x*k,m1.y*k);
+      ctx.lineWidth = s.w*k*(.38 + a.p*.95); ctx.stroke();
+    }
+  }
+  function redraw(page){
+    const cv = cvOf(page); if (!cv) return; const ctx = cv.getContext('2d'), k = cv.width/PW;
+    ctx.clearRect(0,0,cv.width,cv.height);
+    const list = S.strokes.filter(s => s.page === page).concat(cur && cur.page === page ? [cur] : []);
+    list.filter(s => s.tool === 'highlighter').forEach(s => drawStroke(ctx,s,k));
+    list.filter(s => s.tool !== 'highlighter').forEach(s => drawStroke(ctx,s,k));
+  }
+  let raf = 0; const schedule = p => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; redraw(p); }); };
+
+  /* ---------- input + palm rejection ---------- */
+  let cur = null; const scrollers = new Map();
+  const rej = $('#rej'); let rejT;
+  function reject(reason){ rej.textContent = '✋ touch rejected · ' + reason; rej.classList.add('show'); clearTimeout(rejT); rejT = setTimeout(()=>rej.classList.remove('show'), 1600); }
+  function toPage(e, cv, prev){
+    const r = cv.getBoundingClientRect();
+    const x = (e.clientX - r.left)/r.width*PW, y = (e.clientY - r.top)/r.height*PH;
+    let p;
+    if (e.pointerType === 'pen' && e.pressure > 0) p = e.pressure;
+    else { // mouse / finger: synthesize pressure from speed so ink still feels alive
+      if (!prev) p = .55; else { const dt = Math.max(1, e.timeStamp - prev.t), v = Math.hypot(x-prev.x, y-prev.y)/dt;
+        p = prev.p*.7 + Math.min(1, Math.max(.3, 1.05 - v*.55))*.3; }
+    }
+    return {x, y, p, t:e.timeStamp};
+  }
+  canvases.forEach(cv => {
+    const page = +cv.dataset.page;
+    cv.addEventListener('pointerdown', e => {
+      $('#inputInfo').textContent = `Input: ${e.pointerType}` + (e.pointerType==='pen' ? ` · pressure ${(e.pressure||0).toFixed(2)}` : '') + (e.width>1 ? ` · contact ${Math.round(e.width)}×${Math.round(e.height)}px` : '');
+      if (e.pointerType === 'touch') {
+        const palm = e.width > 30 || e.height > 30, penRecent = performance.now() - S.lastPen < 600;
+        if (S.stylusOnly || palm || penRecent) {
+          reject(palm ? `palm-sized contact ${Math.round(e.width)}×${Math.round(e.height)}px` : penRecent ? 'pen was just active' : 'stylus-only mode (finger scrolls)');
+          scrollers.set(e.pointerId, {y:e.clientY, top:scroller.scrollTop}); cv.setPointerCapture(e.pointerId); return;
+        }
+      }
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (e.pointerType === 'pen') S.lastPen = performance.now();
+      cv.setPointerCapture(e.pointerId);
+      $('#hint') && $('#hint').remove();
+      if (S.tool === 'eraser') { cur = {erasing:true, page, id:e.pointerId}; erase(page, toPage(e,cv)); return; }
+      cur = {sid:S.nextStroke++, page, tool:S.tool, color:S.tool==='highlighter' ? '#F6D35B' : S.color, w:S.w, pts:[toPage(e,cv)], id:e.pointerId};
+      schedule(page);
+    });
+    cv.addEventListener('pointermove', e => {
+      const sc = scrollers.get(e.pointerId);
+      if (sc) { scroller.style.scrollBehavior='auto'; scroller.scrollTop = sc.top - (e.clientY - sc.y); return; }
+      if (!cur || cur.id !== e.pointerId) return;
+      if (e.pointerType === 'pen') S.lastPen = performance.now();
+      const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      for (const ev of (evs.length ? evs : [e])) {
+        const pt = toPage(ev, cv, cur.erasing ? null : cur.pts[cur.pts.length-1]);
+        if (cur.erasing) erase(page, pt);
+        else { const l = cur.pts[cur.pts.length-1]; if (Math.hypot(pt.x-l.x, pt.y-l.y) > .6) cur.pts.push(pt); }
+      }
+      if (!cur.erasing) schedule(page);
+    });
+    const end = e => {
+      if (scrollers.delete(e.pointerId)) { scroller.style.scrollBehavior=''; return; }
+      if (!cur || cur.id !== e.pointerId) return;
+      if (e.type === 'pointercancel' && !cur.erasing) { cur = null; redraw(page); reject('OS cancelled the contact, stroke retracted'); return; }
+      if (!cur.erasing) { const s = cur; delete s.id; S.strokes.push(s); onStrokeEnd(s); }
+      cur = null; redraw(page);
+    };
+    cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+  });
+  function erase(page, pt){
+    const before = S.strokes.length;
+    S.strokes = S.strokes.filter(s => s.page !== page || !s.pts.some(q => Math.hypot(q.x-pt.x, q.y-pt.y) < 16));
+    const n = before - S.strokes.length;
+    if (n) { S.pending.erased += n; S.pending.page = page; redraw(page); bump(); }
+  }
+
+  /* ---------- AI-facing encoding ---------- */
+  const bbox = pts => pts.reduce((b,p)=>({x0:Math.min(b.x0,p.x),y0:Math.min(b.y0,p.y),x1:Math.max(b.x1,p.x),y1:Math.max(b.y1,p.y)}),{x0:1e9,y0:1e9,x1:-1e9,y1:-1e9});
+  function rdp(P, eps){
+    if (P.length < 3) return P.slice();
+    let dmax=0, idx=0; const a=P[0], b=P[P.length-1], L=Math.hypot(b.x-a.x,b.y-a.y)||1;
+    for (let i=1;i<P.length-1;i++){ const d = Math.abs((b.y-a.y)*P[i].x-(b.x-a.x)*P[i].y+b.x*a.y-b.y*a.x)/L; if (d>dmax){dmax=d;idx=i;} }
+    if (dmax <= eps) return [a,b];
+    return rdp(P.slice(0,idx+1),eps).slice(0,-1).concat(rdp(P.slice(idx),eps));
+  }
+  const sg = n => (n>=0?'+':'') + n;
+  function encode(s){
+    const q = rdp(s.pts.map(p=>({x:Math.round(p.x), y:Math.round(p.y)})), 1.8);
+    let out = (s.tool==='highlighter'?'H':'P') + q[0].x + ',' + q[0].y;
+    for (let i=1;i<q.length;i++) out += sg(q[i].x-q[i-1].x) + sg(q[i].y-q[i-1].y);
+    return {code:out, n:q.length};
+  }
+  const tok = str => Math.ceil(str.length/2.6);       // digit-heavy text tokenizes poorly; conservative
+  const RAW_CHARS_PER_PT = 24;                         // "x.xx,y.yy,p.ppp,tilt,t" per sample
+  const SHOT = Math.round(1109*1568/750);             // full page image ≈ (w·h)/750 tokens
+
+  function onStrokeEnd(s){
+    const bb = bbox(s.pts), now = performance.now();
+    let blk = S.blocks.find(b => b.page===s.page && now-b.last < 4500 &&
+      bb.x0 < b.bb.x1+60 && bb.x1 > b.bb.x0-60 && bb.y0 < b.bb.y1+45 && bb.y1 > b.bb.y0-45);
+    if (!blk) { blk = {id:'b'+S.nextBlock++, page:s.page, bb:{...bb}, strokes:[], last:now, fresh:true}; S.blocks.push(blk); }
+    blk.bb = {x0:Math.min(blk.bb.x0,bb.x0), y0:Math.min(blk.bb.y0,bb.y0), x1:Math.max(blk.bb.x1,bb.x1), y1:Math.max(blk.bb.y1,bb.y1)};
+    blk.strokes.push(s); blk.last = now; s.block = blk;
+    S.pending.added.push(s); S.pending.page = s.page; bump();
+  }
+  // Debounce: emit a change only after the writer pauses, so the agent never sees half a word.
+  function bump(){ clearTimeout(S.idle); S.idle = setTimeout(flush, 900); }
+
+  function flush(){
+    const P = S.pending; if (!P.added.length && !P.erased) return;
+    S.rev++; $('#rev').textContent = S.rev; S.flushes++;
+    const byBlock = new Map(); P.added.forEach(s => { if (!byBlock.has(s.block)) byBlock.set(s.block, []); byBlock.get(s.block).push(s); });
+    let firstBlk = null;
+    byBlock.forEach((strokes, blk) => {
+      firstBlk = firstBlk || blk;
+      const enc = strokes.map(encode), code = enc.map(e=>e.code).join('\n');
+      const rawPts = strokes.reduce((a,s)=>a+s.pts.length,0), simPts = enc.reduce((a,e)=>a+e.n,0);
+      const tCompact = tok(code) + 12, tRaw = Math.ceil(rawPts*RAW_CHARS_PER_PT/2.6);
+      const b = blk.bb, cw = (b.x1-b.x0+40)*1.109, ch = (b.y1-b.y0+40)*1.109, tCrop = Math.max(24, Math.round(cw*ch/750));
+      const T = S.totals; T.shot += SHOT; T.raw += tRaw; T.compact += tCompact; T.crop += tCrop; T.sem += 3 + strokes.length*2;
+      const isNew = blk.fresh; blk.fresh = false;
+      const head = `${isNew?'+':'~'} p${blk.page} ${blk.id} ink bbox=${Math.round(b.x0)},${Math.round(b.y0)},${Math.round(b.x1)},${Math.round(b.y1)} n=${strokes.length}`;
+      addEv(`<div class="h"><span>rev ${S.rev} · p${blk.page}</span><span>${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>
+        <div class="k"><span class="op">${isNew?'+':'~'}</span>${isNew?'new ink block':'block updated'} ${blk.id} · ${strokes.length} stroke${strokes.length>1?'s':''}</div>
+        <div class="rec" style="color:var(--muted)">text: <i>pending (needs a handwriting recognizer)</i></div>
+        <pre>${esc(head + '\n' + code)}</pre>
+        <div class="chips"><span class="chip good">compact ≈ ${tCompact} tok</span><span class="chip">${rawPts}→${simPts} pts</span><span class="chip">raw ≈ ${fmt(tRaw)}</span><span class="chip">screenshot ≈ ${fmt(SHOT)}</span></div>`);
+    });
+    if (P.erased) {
+      addEv(`<div class="h"><span>rev ${S.rev} · p${P.page}</span><span>now</span></div>
+        <div class="k"><span class="op del">−</span>${P.erased} stroke${P.erased>1?'s':''} erased</div>
+        <div class="chips"><span class="chip good">≈ 9 tok</span><span class="chip">signal: student is revising</span></div>`);
+    }
+    renderBars();
+    if (firstBlk && (S.flushes === 1 || S.flushes % 3 === 0)) tutorLooks(firstBlk, P.erased);
+    else if (P.erased && !firstBlk) tutorSay(TUTOR.erase);
+    S.pending = {added:[], erased:0, page:null};
+  }
+  const TUTOR = {
+    first: "There's new work under Q3. I asked for just that region, not the whole page. Next step: uv − ∫ v du gives (x³/3)·ln x − ∫ (x³/3)·(1/x) dx. Can you simplify the integrand?",
+    later: "That's a good simplification: (x³/3)·(1/x) = x²/3. Integrate it and you're nearly done. Check your answer by differentiating it at the end.",
+    other: "I only pulled the region you just changed. Nothing else on the page moved, so I didn't read it again. Should I keep an eye on this section?",
+    erase: "I saw you erase that line. Do you want a hint, or would you like to try it once more on your own?"
+  };
+  let said = 0;
+  function tutorLooks(blk, erased){
+    setTimeout(() => {
+      const crop = cropImg(blk);
+      const b = blk.bb;
+      addEv(`<div class="h"><span>Tutor called a tool</span><span>now</span></div>
+        <div class="k">render_region(page=${blk.page}, bbox=[${Math.round(b.x0)},${Math.round(b.y0)},${Math.round(b.x1)},${Math.round(b.y1)}])</div>
+        <div class="chips"><span class="chip">reason: recognizer confidence low</span><span class="chip good">≈ ${Math.max(24, Math.round((b.x1-b.x0+40)*(b.y1-b.y0+40)*1.23/750))} tok image</span></div>
+        ${crop ? `<img src="${crop}" alt="crop the agent received">` : ''}`, 'tool');
+      setTimeout(() => tutorSay(erased ? TUTOR.erase : blk.page !== 3 ? TUTOR.other : (said++ === 0 ? TUTOR.first : TUTOR.later)), 1100);
+    }, 500);
+  }
+  function tutorSay(text){ addEv(`<div class="h"><span>Tutor · simulated reply</span><span>now</span></div>${text}`, 'msg'); }
+  function cropImg(blk){
+    const cv = cvOf(blk.page); if (!cv) return null; const k = cv.width/PW, pad = 20;
+    const x = Math.max(0,(blk.bb.x0-pad)*k), y = Math.max(0,(blk.bb.y0-pad)*k), w = Math.min(cv.width-x,(blk.bb.x1-blk.bb.x0+2*pad)*k), h = Math.min(cv.height-y,(blk.bb.y1-blk.bb.y0+2*pad)*k);
+    if (w < 2 || h < 2) return null;
+    const o = document.createElement('canvas'); const sc = Math.min(1, 240/w); o.width = w*sc; o.height = h*sc;
+    const c = o.getContext('2d'); c.fillStyle = '#FFFDF8'; c.fillRect(0,0,o.width,o.height); c.drawImage(cv, x, y, w, h, 0, 0, o.width, o.height);
+    return o.toDataURL('image/png');
+  }
+  function addEv(html, cls=''){ const d = document.createElement('div'); d.className = 'ev new ' + cls; d.innerHTML = html; const f = $('#feed'); f.appendChild(d); f.scrollTop = f.scrollHeight; }
+  const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const fmt = n => n >= 1000 ? (n/1000).toFixed(1)+'k' : String(n);
+
+  function renderBars(){
+    const T = S.totals, rows = [
+      ['Full-page screenshot per change', T.shot, 'What "just screenshot it" costs'],
+      ['Raw stroke points', T.raw, 'x, y, pressure, tilt and time for every sample'],
+      ['Region crop per change', T.crop, 'An image of only the changed region'],
+      ['Compact vectors (Q-ink)', T.compact, 'Simplified, quantized, delta-encoded'],
+      ['Semantic text (with recognition)', T.sem, 'Estimated, e.g. "= x³/3 · ln x − ∫ x²/3 dx"'],
+    ];
+    const max = Math.max(1, ...rows.map(r=>r[1]));
+    $('#bars').innerHTML = S.flushes ? rows.map(([l,v,tip]) => `<div class="bar"><div class="tip">${tip}</div><div class="l"><span>${l}</span><b>${fmt(v)} tok</b></div>
+      <div class="track"><div class="t" style="width:${Math.max(.6, v/max*100)}%"></div></div></div>`).join('')
+      : '<p style="color:var(--text)">Nothing yet. Write something on any page.</p>';
+  }
+  renderBars();
+})();
+</script>
+</body>
+</html>

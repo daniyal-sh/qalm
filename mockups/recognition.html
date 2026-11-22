@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qalm Recognition</title>
+<style>
+  :root{--fg:var(--foreground,#1d2028);--mf:var(--muted-foreground,#6b707c);--cd:var(--card,#fff);--bd:var(--border,#e3e3e6);
+        --cb:var(--code-background,#f4f4f5);--ac:var(--chart-1,#2F6F5E);--r:var(--radius,10px);--mono:var(--font-mono,ui-monospace,Consolas,monospace)}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font-sans,system-ui,sans-serif);color:var(--fg);font-size:13px;line-height:1.5}
+  h2{font-size:15px;margin:26px 0 4px;letter-spacing:-.01em} h2:first-child{margin-top:4px}
+  .lede{color:var(--mf);margin:0 0 12px;font-size:12.5px}
+  .box{background:var(--cd);border:1px solid var(--bd);border-radius:var(--r);padding:14px 16px}
+  .g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .ans h3{margin:0 0 4px;font-size:13px} .ans p{margin:0;font-size:12.5px;color:var(--mf)} .ans b.y{color:var(--fg)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;font-weight:600;color:var(--mf);font-size:11px;padding:6px 8px;border-bottom:1px solid var(--bd)}
+  td{padding:7px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  td small{color:var(--mf);display:block;font-size:11px}
+  .tier{display:grid;grid-template-columns:28px 1fr;gap:12px;padding:10px 0;border-top:1px solid var(--bd)}
+  .tier:first-child{border-top:0;padding-top:0}
+  .tn{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-weight:700;font-size:12px;background:color-mix(in srgb,var(--ac) 16%,transparent)}
+  .tier b{font-size:13px} .tier p{margin:2px 0 0;color:var(--mf);font-size:12px}
+  .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .tag{font-size:11px;padding:1px 8px;border-radius:99px;border:1px solid var(--bd);white-space:nowrap}
+  ol{margin:0;padding-left:18px} ol li{margin:0 0 7px;font-size:12.5px} ol li span{color:var(--mf)}
+  .bars{display:grid;grid-template-columns:210px 1fr 60px;gap:8px 10px;align-items:center;font-size:12px}
+  .bars .t{height:12px;background:var(--ac);border-radius:0 4px 4px 0;min-width:3px}
+  .bars .tr{position:relative} .bars .tr:hover .tip{display:block}
+  .bars .v{font-variant-numeric:tabular-nums;font-weight:600;text-align:right}
+  .tip{display:none;position:absolute;left:0;bottom:18px;background:var(--popover,#222);color:var(--popover-foreground,#fff);border:1px solid var(--bd);font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;z-index:3}
+  .note{font-size:11.5px;color:var(--mf);margin-top:10px}
+  pre{margin:8px 0 0;background:var(--cb);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:11.3px;line-height:1.55;overflow-x:auto}
+  @media (max-width:640px){.g2{grid-template-columns:1fr}.bars{grid-template-columns:130px 1fr 52px}.hide-sm{display:none}}
+</style>
+</head>
+<body>
+
+<h2>1 · Short answers</h2>
+<div class="g2">
+  <div class="box ans"><h3>Is ML Kit Digital Ink heavy?</h3><p><b class="y">No.</b> Each language is a model of about 20 MB, downloaded when needed. It runs offline on Android and iOS and supports more than 300 languages. It reads strokes in the order they were written, which helps with cursive. Its gaps: no math, and no Windows or macOS version.</p></div>
+  <div class="box ans"><h3>Are vision models accurate?</h3><p><b class="y">Good, not perfect.</b> Handwriting is still the hardest kind of OCR for them. They also have a known flaw: they "fix" mistakes, silently changing a wrong exponent into the right one. Our input is clean, digitally rendered ink rather than photos, which helps a lot. So use them as one reader among several, never as the only one.</p></div>
+</div>
+
+<h2>2 · The engines, all without paid SDK licences</h2>
+<div class="box" style="padding:6px 8px">
+<table>
+  <tr><th>Engine</th><th>Where it runs</th><th>Reads</th><th class="hide-sm">Math</th><th>Cost to us</th></tr>
+  <tr><td><b>ML Kit Digital Ink</b><small>free Google SDK</small></td><td>iPad, Android</td><td>strokes</td><td class="hide-sm">—</td><td>$0</td></tr>
+  <tr><td><b>Windows Ink recognizer</b><small>built into Windows</small></td><td>Windows</td><td>strokes</td><td class="hide-sm">—</td><td>$0</td></tr>
+  <tr><td><b>Apple Vision text</b><small>built into macOS</small></td><td>Mac</td><td>rendered image</td><td class="hide-sm">—</td><td>$0</td></tr>
+  <tr><td><b>Small open-weights OCR model</b><small>e.g. PaddleOCR-VL, a 2B Qwen3-VL OCR model or Chandra. Pick by benchmark</small></td><td>our GPU</td><td>image</td><td class="hide-sm">✓ LaTeX</td><td>GPU hours</td></tr>
+  <tr><td><b>Hosted small model</b><small>e.g. Claude Haiku 5.5. A paid API, but not a licence</small></td><td>API</td><td>image</td><td class="hide-sm">✓ LaTeX</td><td>per token</td></tr>
+  <tr><td><b>The connected agent</b><small>its own vision, through render_region</small></td><td>the agent's side</td><td>image</td><td class="hide-sm">✓</td><td>$0 to us</td></tr>
+</table>
+</div>
+
+<h2>3 · The pipeline: free first, paid only when it matters</h2>
+<p class="lede">Most ink never leaves tier 1. Tiers 2 and 3 run only on notebooks with AI access turned on.</p>
+<div class="box">
+  <div class="tier"><span class="tn">1</span><div><b>On the device, while you write</b><p>The device's stroke recognizer reads each block within milliseconds. That powers handwriting search, lasso-to-text and the Q-ink text. Only text and confidence scores are synced, a few bytes per block.</p><div class="meta"><span class="tag">free</span><span class="tag">offline</span><span class="tag">every notebook</span></div></div></div>
+  <div class="tier"><span class="tn">2</span><div><b>On the server, only where needed</b><p>The server renders a clean crop of the block from its strokes, with no paper lines, and runs a vision model on it. That happens only when the block looks like math, the confidence is low, or it's a diagram. The result is cached by content hash, so a block is recognized once, however many times agents read it.</p><div class="meta"><span class="tag">AI-enabled notebooks only</span><span class="tag">batched</span><span class="tag">cached forever</span></div></div></div>
+  <div class="tier"><span class="tn">3</span><div><b>The agent looks for itself</b><p>If the two readers still disagree, Q-ink sends both readings marked as low confidence. The agent can then call <code>render_region</code> and read the crop with its own vision model, on the agent owner's bill.</p><div class="meta"><span class="tag">$0 to us</span><span class="tag">frontier accuracy for the hardest blocks</span></div></div></div>
+</div>
+
+<h2>4 · How we get high accuracy</h2>
+<div class="box"><ol>
+  <li><b>Two independent readers.</b> <span>Stroke order from tier 1 and pixels from tier 2. If they agree, confidence is high. If they disagree, both readings go into Q-ink and the block is flagged.</span></li>
+  <li><b>Perfect input images.</b> <span>Crops are rendered from vectors: black ink on white, the right size, with no skew, shadows or ruled lines. That's easier than any photo benchmark.</span></li>
+  <li><b>Literal-transcription guard.</b> <span>Prompt the model for a verbatim transcription, then diff the result against the stroke reader character by character. Any "correction" either reader didn't see is rejected, so the model can't fix your mistakes.</span></li>
+  <li><b>Context.</b> <span>Pass the previous two lines and the notebook's vocabulary (names, terms you've written before) as hints.</span></li>
+  <li><b>Corrections you make.</b> <span>Tap a word to fix it. Each fix becomes a dictionary entry for you and, if you opt in, a test case.</span></li>
+  <li><b>Measure before choosing.</b> <span>An eval set of real Qalm ink, scored by character error rate for text and exact-match plus character error rate for LaTeX. Every candidate model is benchmarked on it, and the winner is the best accuracy per dollar.</span></li>
+</ol></div>
+
+<h2>5 · Server cost per 1,000 handwritten lines</h2>
+<p class="lede">Estimates for tier 2 only, assuming a 600×80 crop of about 64 image tokens, about 200 input tokens per line in total, and 25 output tokens.</p>
+<div class="box">
+  <div class="bars" id="bars"></div>
+  <div class="note">A heavy user writes perhaps 3,000 lines a month. Maybe a third of those are in AI-enabled notebooks and need tier 2, which comes to <b style="color:var(--fg)">about 3 cents per heavy user per month</b> on the cheapest options. GPU figures assume an L4-class GPU at about $0.70 an hour reading about 10 lines a second. That still needs measuring.</div>
+</div>
+
+<h2>6 · What a recognized block looks like in Q-ink</h2>
+<pre>b14 math p2 [110,400,610,470]  \frac{x^3}{3}\ln x - \int \frac{x^2}{3}dx   hw .93 (strokes ✓ vision ✓)
+b15 text p2 [100,500,560,540]  "check by diff?"                           hw .58 (strokes: "check by diff?" · vision: "check by diff!")  → render_region</pre>
+
+<script>
+  const rows = [
+    ['On-device only (tier 1)', 0, 'Runs on the user’s device', '$0'],
+    ['Haiku 5.5, Batch API', 16, '50% off; fine when no agent is watching live', '$0.016'],
+    ['Open model, busy GPU', 20, '~36k lines per GPU-hour at ~$0.70/h', '$0.02'],
+    ['Haiku 5.5, real time', 32, '200×$0.10/M + 25×$0.50/M per line', '$0.032'],
+    ['Open model, GPU 10% busy', 200, 'Idle GPU time is the real cost at low volume', '$0.20'],
+    ['Frontier model, real time', 1300, 'e.g. Opus 5.5: 200×$4/M + 25×$20/M per line', '$1.30'],
+  ];
+  const max = Math.max(...rows.map(r => r[1]));
+  document.getElementById('bars').innerHTML = rows.map(([l, v, tip, s]) =>
+    `<div>${l}</div><div class="tr"><div class="tip">${tip}</div><div class="t" style="width:${v ? Math.max(.4, v / max * 100) : 0}%;${v ? '' : 'min-width:0'}"></div></div><div class="v">${s}</div>`).join('');
+</script>
+</body>
+</html>
