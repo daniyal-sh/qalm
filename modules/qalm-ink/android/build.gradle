@@ -1,0 +1,27 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'app.qalm.ink'
+version = '0.1.0'
+
+android {
+  namespace "app.qalm.ink"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // Front-buffered low-latency rendering (CanvasFrontBufferedRenderer)
+  implementation 'androidx.graphics:graphics-core:1.0.4'
+  // Motion prediction (MotionEventPredictor)
+  implementation 'androidx.input:input-motionprediction:1.0.1'
+  // On-device handwriting recognition, models downloaded on demand
+  implementation 'com.google.mlkit:digital-ink-recognition:19.0.0'
+}

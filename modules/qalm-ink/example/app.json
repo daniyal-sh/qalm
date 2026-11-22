@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "qalm-ink example",
+    "slug": "qalm-ink-example",
+    "version": "0.1.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "android": { "package": "app.qalm.ink.example" },
+    "ios": { "bundleIdentifier": "app.qalm.ink.example", "supportsTablet": true },
+    "web": { "bundler": "metro", "output": "single" },
+    "experiments": { "autolinkingModuleResolution": true }
+  }
+}
