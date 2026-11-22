@@ -13,7 +13,7 @@ Keep it simple. Anything not listed here is out of v1.
 - iPad, Android tablets, Windows and macOS, all at launch. Linux and stylus phones are not a priority.
 - Minimum OS: iPadOS 17, Android 10, Windows 10, macOS 13.
 - Pen extras: hover preview, pen button/squeeze/double-tap to eraser, tilt shading.
-- Shell: React Native (iPad, Android) and Electron (Windows, macOS). The ink surface is native on each platform.
+- Shell: React Native (iPad, Android) and Electron (Windows, macOS). Only the stroke in progress is native. All finished content is drawn by one Skia renderer everywhere.
 
 ## Accounts and backend
 - Sign in with Apple, Google or an email magic link.
@@ -27,4 +27,4 @@ Keep it simple. Anything not listed here is out of v1.
 - Updates go out on a pause (≥ 6 s) or when the student taps Ask, at most one every 20 s.
 - Every changed line is sent as an image plus the on-device guess. There's no server-side model.
 - The agent keeps its own chat history, and updates are self-contained.
-- Recognition on device is free: ML Kit (iPad, Android), Windows Ink (Windows) and Apple Vision (Mac).
+- Recognition on device is free: ML Kit on iPad and Android. Desktop has no recognizer in v1, so agents read the image.

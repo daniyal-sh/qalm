@@ -38,14 +38,14 @@ ask "is L5 right?"
 | ` L#` | one unchanged line above the first change, for context |
 | `+L#` / `~L#` / `-L#` | added / changed / removed line |
 | `[n]` | this line is row *n* of the attached image |
-| `~"…"` | the on-device reader's guess (ML Kit on iPad and Android, Windows Ink on Windows, Apple Vision on Mac) |
+| `~"…"` | the on-device reader's guess (ML Kit on iPad and Android; none from desktop in v1) |
 | `"…"` without `~` | trusted text, already saved by `transcribe`. No image is sent |
 | `ask "…"` | the student tapped Ask, with their question |
 
 The **image** is a single strip of every line marked `[n]`, rendered from the strokes in black on white with row numbers.
 There's one image per update.
 
-**Line IDs** (`L4`) are stable for each page, so comments and `transcribe` can point at them.
+**Line IDs** (`L4`) are short labels that the server assigns and stores (internally each line is keyed by its first stroke's ID). They're stable for each page, so comments and `transcribe` can point at them.
 Drawings that aren't lines are numbered `D1` and also go into the image strip.
 
 ## 3. MCP tools (4)

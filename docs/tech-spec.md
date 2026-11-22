@@ -1,16 +1,25 @@
-# Qalm v1 technical spec
+# Qalm v1 technical spec (rev 2)
 
 Read with `decisions.md` (scope), `qink-live.md` (AI format) and **`brand.md` (Qalm by Apollo: colours, type, mark)**.
 Layouts and flows come from `mockups/editor.html`, `mockups/screens-library.html` and `mockups/screens-ai.html`.
 Their colours and fonts are superseded by `brand.md`.
 This file is the **contract between packages**. If you must change a contract, change it here too.
 
+Changes in rev 2 (from review):
+- One Skia renderer for all finished content.
+- The native view only draws the stroke in progress.
+- One Yjs doc per page.
+- Line keys come from stroke IDs, and the server assigns the short labels.
+- Added PDF rendering, zoom and undo.
+- Sync uses one-time tickets.
+- Palm thresholds are in millimetres.
+
 ## 1. Repo layout (pnpm workspace, `node-linker=hoisted` for Expo)
 
 ```
-packages/core     @qalm/core     TypeScript, no platform deps. Model, geometry, render, export, Q-ink
-modules/qalm-ink  qalm-ink       Expo native module: ink surface + on-device recognition
-                                 ios/ (Swift), android/ (Kotlin), src/ (TS API + web implementation)
+packages/core     @qalm/core     TypeScript, no platform deps. Model, geometry, SVG/PDF export, Q-ink
+modules/qalm-ink  qalm-ink       Expo module: PageCanvas (Skia, all platforms) + InkOverlay (native live stroke)
+                                 + PDF page rendering + on-device recognition. ios/ (Swift), android/ (Kotlin), src/ (TS + web)
 apps/app          @qalm/app      Expo app (iOS, Android, web). All UI screens
 apps/desktop      @qalm/desktop  Electron shell that loads the app's web build
 apps/server       @qalm/server   Cloudflare Worker: auth, sync, assets, MCP
@@ -18,25 +27,27 @@ apps/server       @qalm/server   Cloudflare Worker: auth, sync, assets, MCP
 
 Shared rules: TypeScript strict, ESM, Vitest for tests, no `any` in public APIs.
 Coordinates are page units in **PDF points** (A4 = 595×842, Letter = 612×792, A5 = 420×595).
+IDs are random UUIDs, created by whoever creates the object. A stroke's ID is created by the ink overlay.
 
 ## 2. Data model (`@qalm/core`, Yjs)
 
-There's one `Y.Doc` per notebook (doc id `nb:{notebookId}`) and one per user library (`lib:{userId}`).
+There's one **index doc** per notebook, one **page doc** per page, and one **library doc** per user. Only the pages
+on screen (plus or minus 2) are loaded on the device. Durable Objects hold one doc each, so memory stays small however long a notebook gets.
 
-### Notebook Y.Doc layout
 ```
-meta:    Y.Map  { id, title, cover, paper, paperColor, size:{w,h}, orientation, aiAccess:boolean, createdAt, updatedAt }
-pages:   Y.Array<string>                      page order
-page:{id}: Y.Map {
-           id, size:{w,h}, paper, paperColor,
-           background: {kind:'paper'} | {kind:'pdf', assetId, pageIndex},
-           items: Y.Map<itemId, Y.Map>,       item fields as below; stroke points as Uint8Array
-           order: Y.Array<itemId>,            z-order
-           lines: Y.Map<lineId, Y.Map>,       Line fields
-           nextLine: number, nextDrawing: number }
-assets:  Y.Map<assetId, {id, sha256, mime, name, bytes, pages?}>
-comments:Y.Map<commentId, Comment>
-asks:    Y.Array<{id, pageId, text, at}>      student tapped Ask
+nb:{notebookId}            index doc
+  meta:   Y.Map  { id, title, cover, paper, paperColor, size:{w,h}, orientation, aiAccess, createdAt, updatedAt }
+  pages:  Y.Array<Y.Map>   { id, size:{w,h}, paper, paperColor, background: {kind:'paper'} | {kind:'pdf', assetId, pageIndex} }
+  assets: Y.Map<assetId, {id, sha256, mime, name, bytes, pageCount?}>
+  asks:   Y.Array<{id, pageId, text, at}>
+
+pg:{notebookId}:{pageId}   page doc
+  items:    Y.Map<itemId, Y.Map>   item fields below; stroke points as Uint8Array
+  order:    Y.Array<itemId>        z-order
+  lines:    Y.Map<lineKey, Y.Map>  Line fields
+  comments: Y.Map<commentId, Y.Map>
+
+lib:{userId}               library doc: folders + notebook entries {id,title,cover,folderId,updatedAt,aiAccess,favorite,deletedAt}
 ```
 
 ### Types (exported from `@qalm/core`)
@@ -51,45 +62,50 @@ interface ImageItem { id: string; type: 'image'; assetId: string; x: number; y: 
 interface ShapeItem { id: string; type: 'shape'; kind: 'line'|'arrow'|'rect'|'ellipse'|'triangle'; pts: [number, number][]; color: string; width: number }
 type Item = StrokeItem | TextItem | ImageItem | ShapeItem;
 type BBox = [x0: number, y0: number, x1: number, y1: number];
-interface Line { id: string /*'L1' | 'D1'*/; kind: 'line' | 'drawing'; itemIds: string[]; bbox: BBox; text?: string; textSrc?: 'device'|'agent'|'user'; conf?: number }
-interface Comment { id: string; pageId: string; ref: string /*'L4'|'D1'*/; author: { kind: 'agent'|'user'; name: string }; text: string; createdAt: number; resolved: boolean; replies: { author: {kind:'agent'|'user'; name:string}; text: string; at: number }[] }
+interface Line { key: string /* = id of the line's first item; globally unique */; kind: 'line' | 'drawing'; itemIds: string[]; bbox: BBox; text?: string; textSrc?: 'device'|'agent'|'user'; conf?: number }
+interface Comment { id: string; lineKey: string; author: { kind: 'agent'|'user'; name: string }; text: string; createdAt: number; resolved: boolean; replies: { author: {kind:'agent'|'user'; name:string}; text: string; at: number }[] }
 ```
 Stroke points are stored as a Float32Array of 6-tuples `(x, y, p, tilt, az, t)`, exposed as a `Uint8Array`
 (`encodePoints` / `decodePoints`).
 
-### Notebook API
+### API
 ```ts
-createNotebookDoc(init: { id: string; title: string; cover: string; paper: Paper; paperColor: PaperColor; size: {w:number;h:number} }): Y.Doc
-class Notebook {
-  constructor(doc: Y.Doc)
-  readonly doc: Y.Doc
-  meta(): NotebookMeta; setMeta(patch: Partial<NotebookMeta>): void
-  pages(): PageInfo[]; addPage(opts?: Partial<PageInfo>, index?: number): string; removePage(id: string): void
-  items(pageId: string): Item[]; addItem(pageId: string, item: Item): void
-  updateItem(pageId: string, id: string, patch: Partial<Item>): void; removeItems(pageId: string, ids: string[]): void
-  lines(pageId: string): Line[]                 // maintained automatically by addItem/removeItems/updateItem
-  setLineText(pageId: string, lineId: string, text: string, src: 'device'|'agent'|'user', conf?: number): void
-  comments(pageId?: string): Comment[]; addComment(c: Omit<Comment,'id'|'createdAt'|'resolved'|'replies'>): string
-  replyToComment(id: string, author: Comment['author'], text: string): void; resolveComment(id: string): void
+createNotebookDoc(init: { id; title; cover; paper; paperColor; size }): Y.Doc        // with one first page
+class Notebook {                     // wraps the index doc
+  constructor(doc: Y.Doc); readonly doc: Y.Doc
+  meta(): NotebookMeta; setMeta(patch): void
+  pages(): PageInfo[]; addPage(opts?: Partial<PageInfo>, index?: number): string; removePage(id): void; movePage(id, index): void
   assets(): Asset[]; addAsset(a: Asset): void
-  addAsk(pageId: string, text: string): void
-  observe(cb: () => void): () => void
+  addAsk(pageId, text): void; asks(): Ask[]
+  observe(cb): () => void
 }
-class Library { constructor(doc: Y.Doc) /* folders + notebook entries {id,title,cover,folderId,updatedAt,aiAccess,favorite,deletedAt} */ }
+class Page {                         // wraps one page doc
+  constructor(doc: Y.Doc); readonly doc: Y.Doc
+  items(): Item[]; addItem(item: Item): void; updateItem(id, patch): void; removeItems(ids: string[]): void
+  lines(): Line[]                    // maintained automatically on add/update/remove
+  setLineText(lineKey, text, src: 'device'|'agent'|'user', conf?): void
+  comments(): Comment[]; addComment(c: Omit<Comment,'id'|'createdAt'|'resolved'|'replies'>): string
+  replyToComment(id, author, text): void; resolveComment(id): void
+  observe(cb): () => void
+}
+createUndoManager(page: Page): Y.UndoManager   // tracks only local transactions (origin LOCAL_ORIGIN)
+class Library { constructor(doc: Y.Doc) /* folders and entries; CRUD */ }
+const LOCAL_ORIGIN: unique symbol                // every app mutation uses doc.transact(fn, LOCAL_ORIGIN)
 ```
-Every mutation runs in a single `doc.transact`.
+**Undo and redo** apply per device: each page has a `createUndoManager`, and the app keeps a small cross-page stack of the page IDs
+it edited, so undo goes to the right page. Edits from other devices and agents are never undone.
 
-### Line assignment (stable IDs)
-When a stroke is added, it joins an existing `line` on the same page if its vertical overlap with the line's bbox is
-≥ 50% of the smaller height, **and** the horizontal gap is ≤ 1.5 × the line's height. Otherwise a new line is
-created with the id `L{nextLine++}`. Shape items, and strokes taller than 2.5 × the page's median line height,
-form drawings with the id `D{nextDrawing++}`, merged with overlapping drawings.
-IDs are never reused. A line with no items is deleted. When a line's items change, its `text` is cleared unless
-`textSrc === 'user'`.
+### Line assignment (keys are race-free)
+When a stroke is added, it joins an existing `line` if its vertical overlap with the line's bbox is ≥ 50% of the smaller
+height **and** the horizontal gap is ≤ 1.5 × the line's height. Otherwise it starts a new line whose **key is the stroke's ID**.
+Shape items, and strokes taller than 2.5 × the page's median line height, form `drawing`s with the same keying, merged with
+overlapping drawings (the earliest key wins). Lines with no items are deleted. When a line's items change, its `text` is cleared
+unless `textSrc === 'user'`. Two offline devices may create two separate lines that overlap. That's fine, because keys never collide.
+Short labels (`L7`, `D2`) exist **only in Q-ink**, and the server assigns them (§4).
 
 ### Geometry, rendering and export
-Stroke outlines use **perfect-freehand** (MIT) everywhere JavaScript renders (core and the web ink view) with these exact settings,
-so strokes look identical on every platform. Native views match them visually.
+Stroke outlines use **perfect-freehand** settings everywhere, so live and finished strokes are identical on every platform.
+The native overlays use exact ports of this algorithm (Swift and Kotlin) with the same constants.
 ```ts
 const tiltPressure = (pt: InkPoint) => Math.min(1, pt.p * (1 + 0.6 * (1 - pt.tilt / (Math.PI / 2))));  // tilt shading
 pen:         getStroke(pts.map(q => [q.x, q.y, tiltPressure(q)]), { size: width, thinning: 0.6, smoothing: 0.5, streamline: 0.35, simulatePressure: false, last: true })
@@ -97,97 +113,117 @@ highlighter: getStroke(pts.map(q => [q.x, q.y, 0.5]),             { size: width,
 ```
 Default widths (page units): pen 1.2 / 1.8 / 2.8, highlighter 12.
 ```ts
-strokeOutline(s: StrokeItem): [number, number][]    // closed polygon. Pressure and tilt shading; highlighter = flat
-strokeSvgPath(s: StrokeItem): string
-snapShape(points: InkPoint[], heldMs: number): ShapeItem | null   // only if heldMs >= 500
-hitTestErase(items: Item[], path: {x:number;y:number}[], radius: number): string[]   // stroke eraser
+strokeOutline(s: StrokeItem): [number, number][]; strokeSvgPath(s: StrokeItem): string
+snapShape(points: InkPoint[], heldMs: number): ShapeItem | null          // only if heldMs >= 500
+hitTestErase(items: Item[], path: {x:number;y:number}[], radius: number): string[]
 lassoSelect(items: Item[], polygon: {x:number;y:number}[]): string[]
-renderPageSvg(nb: Notebook, pageId: string, opts?: { paper?: boolean; assetUrl?: (id: string) => string }): string
-renderLinesStripSvg(nb: Notebook, pageId: string, refs: string[]): { svg: string; width: number; height: number }
-  // black on white, rows stacked, row label "[n]" on the left, about a 24px x-height
-exportPdf(nb: Notebook, getAsset: (id: string) => Promise<Uint8Array>): Promise<Uint8Array>   // pdf-lib
-packQalm(nb: Notebook, getAsset): Promise<Uint8Array>; unpackQalm(bytes): Promise<{ doc: Y.Doc; assets: Map<string, Uint8Array> }>  // zip (fflate)
+paperPattern(paper: Paper, color: PaperColor, size): { lines: [x0,y0,x1,y1][]; dots: [x,y][]; stroke: string; bg: string }  // shared by Skia and SVG
+renderPageSvg(info: PageInfo, page: Page, opts?: { paper?: boolean; assetUrl?: (id) => string }): string
+renderLinesStripSvg(page: Page, lineKeys: string[], labels: string[]): { svg: string; width: number; height: number }  // black on white, "[n]" rows
+exportPdf(nb: Notebook, loadPage: (pageId) => Promise<Page>, getAsset: (id) => Promise<Uint8Array>): Promise<Uint8Array>   // pdf-lib
+packQalm(...) / unpackQalm(bytes) -> { index: Y.Doc; pages: Map<pageId, Y.Doc>; assets: Map<id, Uint8Array> }              // zip (fflate)
 ```
 
-### Q-ink (see `qink-live.md` §2 for the text format)
+### Q-ink (text format in `qink-live.md` §2)
 ```ts
-interface QinkSnapshot { rev: number; pages: Record<string /*pageId*/, Record<string /*lineId*/, string /*hash of itemIds+text*/>> }
-encodeQinkUpdate(nb: Notebook, prev: QinkSnapshot | null, opts: { session: string; rev: number; asks?: {pageId:string;text:string}[] })
-  : { text: string; image: { pageId: string; refs: string[] } | null; snapshot: QinkSnapshot }
-encodeQinkRead(nb: Notebook, ref: string /*'outline' | 'p3' | 'p3:L2-9' | 'pdf:p2'*/)
-  : { text: string; image: { pageId: string; refs: string[] } | null }
+interface QinkLabels { [pageId: string]: { nextL: number; nextD: number; byKey: Record<string /*lineKey*/, string /*'L7'*/> } }
+interface QinkSnapshot { [pageId: string]: Record<string /*lineKey*/, string /*hash of itemIds + text*/> }
+assignLabels(labels: QinkLabels, pageId: string, lines: Line[]): void       // mutates; existing labels never change, new keys get the next number
+encodeQinkUpdate(nb: Notebook, pages: Record<string, Page> /*the pages to diff*/, labels: QinkLabels, prev: QinkSnapshot, opts: { session; rev; asks? })
+  : { text: string; image: { pageId: string; lineKeys: string[]; labels: string[] } | null; snapshot: QinkSnapshot }
+encodeQinkRead(nb: Notebook, pages: Record<string, Page>, labels: QinkLabels, ref: string /*'outline' | 'p3' | 'p3:L2-9' | 'pdf:p2'*/)
+  : { text: string; image: { pageId: string; lineKeys: string[]; labels: string[] } | null }
+resolveRef(labels, nb, ref: 'p3:L4'): { pageId: string; lineKey: string }   // for transcribe and comment
 ```
-Pages are referred to by **1-based position** (`p3`) in Q-ink text. Any line whose `text` is missing or whose `textSrc === 'device'`
-goes in the image, with `~"guess"` when device text exists. Lines with `textSrc` agent or user are sent as text only.
+Q-ink refers to pages by **1-based position** (`p3`). A line without text, or with `textSrc === 'device'`, goes into the image, with
+`~"guess"` added when device text exists. Lines with `textSrc` agent or user are sent as text only.
 
-## 3. Ink module (`qalm-ink`, Expo Modules API)
+## 3. Rendering and input (`qalm-ink`)
 
-Native module name `QalmInk`, native view `QalmInkView`. Android package `app.qalm.ink` (Kotlin), iOS Swift
-(`QalmInkModule.swift`, `QalmInkView.swift`). The web implementation is `src/QalmInkView.web.tsx` (canvas + pointer events),
-which is also what Electron uses.
+**One renderer for finished content:** `PageCanvas`, a TypeScript component built on `@shopify/react-native-skia`. It runs on iOS and
+Android (Skia) and on web and Electron (CanvasKit, through react-native-skia's web support). It draws the paper (`paperPattern`), the PDF
+background image, items in z-order (stroke Skia paths built from `strokeOutline`), the selection outline, and comment anchors.
 
-The view renders **one page**. Low-latency rendering of the in-progress stroke happens natively:
-- Android: androidx.ink `InProgressStrokesView` (front-buffered), plus motion prediction.
-- iOS: coalesced and predicted `UITouch`es, rendered with Metal or Core Graphics incrementally at 120 Hz.
-- Web: `getCoalescedEvents`/`getPredictedEvents` and a `desynchronized` canvas.
+**Only the stroke in progress is native:** `InkOverlay` (native view `QalmInkView`) is a transparent view stacked exactly over the
+`PageCanvas`. It takes all input and draws only the current stroke with minimum latency, using the same perfect-freehand port:
+- Android: `androidx.graphics` `CanvasFrontBufferedRenderer` (front-buffered), `androidx.input` `MotionEventPredictor`, `requestUnbufferedDispatch`.
+- iOS: coalesced and predicted `UITouch`es, drawn into a dedicated layer every frame (a Metal or Core Graphics live layer).
+- Web: a canvas overlay with `getCoalescedEvents`, `getPredictedEvents` and a `desynchronized` 2D context.
 
-Committed content is rendered by the view from the `items` prop.
+When the pen lifts, the overlay emits `onStrokeEnd` with a new stroke `id`. It **keeps drawing that stroke until its id appears in
+`committedIds`**, so nothing flickers or pops at hand-off.
 
 ```ts
+// PageCanvas (TS, all platforms)
+interface PageCanvasProps { info: PageInfo; items: Item[]; selection?: string[]; anchors?: { lineKey: string; bbox: BBox; active: boolean }[]; pdfImage?: string /*uri*/; width: number /*px*/ }
+// InkOverlay (native view QalmInkView; web: src/InkOverlay.web.tsx)
 type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'none';
-interface QalmInkViewProps {
-  pageSize: { w: number; h: number };          // page units; the view scales to fit its width
-  items: Item[];                                // committed content (core types), re-rendered when it changes
-  selection?: string[];                         // item ids drawn with a selection outline
+interface InkOverlayProps {
+  pageSize: { w: number; h: number };          // page units; the overlay's laid-out size maps linearly onto the page
   tool: InkTool; color: string; width: number;
   input: { drawWith: 'pen' | 'any'; hand: 'left' | 'right'; palm: 'relaxed' | 'standard' | 'strict' };
-  onStrokeEnd(e: { nativeEvent: { tool: 'pen'|'highlighter'; color: string; width: number; points: InkPoint[]; heldMs: number } }): void;
-  onErase(e: { nativeEvent: { path: {x:number;y:number}[] } }): void;   // eraser drag path, page units
+  committedIds: string[];                       // stroke ids already drawn by PageCanvas
+  onStrokeEnd(e: { nativeEvent: { id: string; tool: 'pen'|'highlighter'; color: string; width: number; points: InkPoint[]; heldMs: number } }): void;
+  onErase(e: { nativeEvent: { path: {x:number;y:number}[] } }): void;
   onLasso(e: { nativeEvent: { polygon: {x:number;y:number}[] } }): void;
   onPenButton?(e: { nativeEvent: { kind: 'double-tap'|'squeeze'|'button' } }): void;
   onRejectedTouch?(e: { nativeEvent: { reason: string } }): void;
 }
 // functions
-QalmInk.recognize(lines: { id: string; strokes: InkPoint[][] }[], lang: 'en-US'): Promise<{ id: string; text: string; score: number }[]>
+QalmInk.recognize(lines: { key: string; strokes: InkPoint[][] }[], lang: 'en-US'): Promise<{ key: string; text: string; score: number }[]>  // ML Kit; web/desktop resolve []
 QalmInk.ensureModel(lang: 'en-US'): Promise<void>
+QalmInk.renderPdfPage(fileUri: string, pageIndex: number, widthPx: number): Promise<string /*cached png file uri*/>
+  // iOS PDFKit, Android android.graphics.pdf.PdfRenderer, web pdf.js (returns an object URL)
 ```
-Recognition uses ML Kit Digital Ink on Android and iOS. On the web, `recognize` resolves `[]`, and the desktop app
-may provide its own recognizer later through the Electron preload. An empty guess is fine because agents read the image.
 
-Palm rejection (every platform, inside the native view):
-1. Pen input always draws. With `drawWith: 'pen'`, touches never draw (they scroll and zoom).
-2. Touches with a large contact size are rejected (`palm` thresholds: relaxed 40, standard 30, strict 22 px major axis).
+**Zoom:** the app's editor handles pinch (react-native-gesture-handler) between 0.75× and 4×. While pinching, it applies a transform.
+When the gesture ends, it lays the page out again at `width = baseWidth × scale`, which re-renders Skia (vector, so crisp) and re-requests the PDF
+background at the nearest width bucket (1×, 2× or 4× the base width). The overlay maps its own size onto the page, so it needs no zoom state.
+
+**Palm rejection** happens inside each overlay, in **millimetres** converted with the screen's density (Android `xdpi`, iOS points ≈ 0.19 mm on iPad,
+web CSS px = 0.2646 mm):
+1. Pen input always draws. With `drawWith: 'pen'`, touches never draw: they're passed through to scroll and zoom.
+2. Touches whose contact major axis is larger than the threshold are rejected: relaxed 9 mm, standard 7 mm, strict 5 mm.
 3. Touches within 600 ms of pen activity, or below or beside the pen on the `hand` side, are rejected.
 4. An OS cancel (`ACTION_CANCEL` / `FLAG_CANCELED` / `touchesCancelled`) retracts the in-progress stroke.
 
-Hover (where supported) shows a brush-size preview. The pen button, squeeze or double-tap fires `onPenButton`, and the
-app switches to the eraser.
+Hover (where supported) shows a brush-size preview. The pen button, squeeze or double-tap fires `onPenButton`, and the app switches to the eraser.
+
+**Recognition** uses ML Kit Digital Ink on iPad and Android. On desktop there's **no recognizer in v1**: `recognize` resolves `[]`, and agents read the image.
 
 ## 4. Server (`apps/server`, Cloudflare Workers)
 
-- **Durable Object `DocRoom`**, one per doc id. It speaks the Yjs sync and awareness protocol over a hibernating WebSocket at
-  `GET /sync/{docId}?token=`. It persists updates in DO storage and compacts them into a snapshot every 200 updates.
-  It tracks `lastClientUpdateAt` for wake rules.
-- **R2** `ASSETS`: `PUT /assets/{sha256}` and `GET /assets/{sha256}` (authenticated; content-addressed).
-- **D1** tables: `users`, `sessions`, `magic_links`, `notebooks(id, owner_id, title, ai_access)`, plus OAuth and MCP grants
-  (`grants(client_id, user_id, notebook_ids|folder_ids, can_comment, can_transcribe, expires_at)`).
-- **Auth**: `POST /auth/email/start`, `GET /auth/email/verify`, `POST /auth/apple`, `POST /auth/google`.
-  These return `{accessToken (JWT, 1h), refreshToken}`, and `POST /auth/refresh` renews them. In dev, emails are logged.
-- **MCP**: Streamable HTTP at `/mcp` with OAuth 2.1 and dynamic client registration (`@cloudflare/workers-oauth-provider`).
-  The consent page is served by the worker, matching mockup screen 5. There are 4 tools: `wait`, `read`, `transcribe` and `comment`,
-  as in `qink-live.md`. Images are returned as MCP image content: a PNG made from `renderLinesStripSvg`
-  with `@resvg/resvg-wasm`.
-- **Wake rules**: `wait(s)` resolves when (pen idle ≥ 6 s **and** changes since the last delivery **and** ≥ 20 s since the last wake)
-  **or** a new `asks` entry arrives. The per-agent `QinkSnapshot` is stored in the DO.
+- **Durable Objects:** there's one `DocRoom` per doc ID (`nb:`, `pg:`, `lib:`). It speaks the Yjs sync and awareness protocol over a hibernating WebSocket,
+  persists updates in DO storage, and compacts them into a snapshot every 200 updates. A page `DocRoom` notifies its notebook's `DocRoom` on each
+  client update (`lastClientUpdateAt`, `changedPage`).
+- **Sync auth:** `POST /sync/ticket {docId}` with `Authorization: Bearer <accessToken>` returns a single-use ticket that expires in 30 s. Then
+  `GET /sync/{docId}?ticket=…` upgrades. Access tokens never appear in URLs.
+- **R2** `ASSETS`: `PUT /assets/{sha256}` and `GET /assets/{sha256}` (Bearer auth; content-addressed).
+- **D1** tables: `users`, `sessions`, `magic_links`, `notebooks(id, owner_id, title, ai_access)`, `sync_tickets`, OAuth tables, and
+  `grants(client_id, user_id, notebook_ids|folder_ids, can_comment, can_transcribe, expires_at)`.
+- **Auth:** `POST /auth/email/start`, `GET /auth/email/verify`, `POST /auth/apple`, `POST /auth/google`. These return `{accessToken (JWT, 1h), refreshToken}`,
+  and `POST /auth/refresh` renews them. In dev, emails are logged to the console.
+- **MCP:** Streamable HTTP at `/mcp` with OAuth 2.1 and dynamic client registration (`@cloudflare/workers-oauth-provider`). The consent page is
+  served by the worker (mockup screen 5). There are 4 tools: `wait`, `read`, `transcribe` and `comment`, as in `qink-live.md`. Images are returned as MCP image
+  content: a PNG made from `renderLinesStripSvg` with `@resvg/resvg-wasm`.
+- **Q-ink labels and snapshots** live in the notebook `DocRoom`'s storage (`QinkLabels`, plus a `QinkSnapshot` per agent session).
+  Only that object assigns labels, so they're stable and unique.
+- **Wake rules:** `wait(s)` resolves when (pen idle ≥ 6 s **and** changes since the last delivery **and** ≥ 20 s since the last wake) **or** a new `asks` entry arrives.
+  Only the changed pages are loaded.
 
 ## 5. App (`apps/app`, Expo, New Architecture, expo-router)
 
-Screens: Library, New notebook sheet, Editor (pages list of `QalmInkView`, floating toolbar, comments panel,
-Ask button), Settings (Account, Pen and palm rejection, AI access with connected agents, pending requests and an activity log),
-and Sign-in. The client sync uses the `y-websocket` provider to `/sync/{docId}`, with IndexedDB persistence on the web and
-MMKV or file persistence on native. Debounced on-device recognition runs 1 s after a line changes, then calls `setLineText(…, 'device', score)`.
+- **Screens:**
+  - Library
+  - New notebook sheet
+  - Editor: a virtualized vertical list of pages, each a `PageCanvas` with an `InkOverlay`, plus the floating toolbar, comments panel, Ask button, pinch zoom, and undo/redo
+  - Settings: Account, Pen and palm rejection, and AI access (connected agents, pending requests, activity log)
+  - Sign-in
+- **Sync:** the client uses the `y-websocket` provider (with tickets) for each loaded doc, with IndexedDB persistence on web and file persistence on native.
+- **Recognition:** debounced on-device recognition runs 1 s after a line changes, then calls `setLineText(key, …, 'device', score)`.
 
 ## 6. Desktop (`apps/desktop`, Electron)
 
-It loads the app's web export (`expo export -p web`) from disk, has a native window frame, and provides `window.qalmDesktop`
-in the preload (file open/save dialogs for PDF import and export). It's packaged with electron-builder for Windows and macOS.
+- **Content:** loads the app's web export (`expo export -p web`) from disk.
+- **Window and files:** a native window frame, and `window.qalmDesktop` in the preload for file open/save dialogs (PDF import and export).
+- **Packaging:** electron-builder for Windows and macOS.
