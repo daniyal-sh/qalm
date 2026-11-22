@@ -88,6 +88,14 @@ IDs are never reused. A line with no items is deleted. When a line's items chang
 `textSrc === 'user'`.
 
 ### Geometry, rendering and export
+Stroke outlines use **perfect-freehand** (MIT) everywhere JavaScript renders (core and the web ink view) with these exact settings,
+so strokes look identical on every platform. Native views match them visually.
+```ts
+const tiltPressure = (pt: InkPoint) => Math.min(1, pt.p * (1 + 0.6 * (1 - pt.tilt / (Math.PI / 2))));  // tilt shading
+pen:         getStroke(pts.map(q => [q.x, q.y, tiltPressure(q)]), { size: width, thinning: 0.6, smoothing: 0.5, streamline: 0.35, simulatePressure: false, last: true })
+highlighter: getStroke(pts.map(q => [q.x, q.y, 0.5]),             { size: width, thinning: 0,   smoothing: 0.5, streamline: 0.5,  simulatePressure: false, last: true })  // drawn at 0.45 alpha, multiply
+```
+Default widths (page units): pen 1.2 / 1.8 / 2.8, highlighter 12.
 ```ts
 strokeOutline(s: StrokeItem): [number, number][]    // closed polygon. Pressure and tilt shading; highlighter = flat
 strokeSvgPath(s: StrokeItem): string
