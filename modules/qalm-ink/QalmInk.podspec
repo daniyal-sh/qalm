@@ -16,8 +16,8 @@ Pod::Spec.new do |s|
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
-  # ML Kit Digital Ink Recognition pod goes here (added by the iOS implementation), e.g.
-  # s.dependency 'GoogleMLKit/DigitalInkRecognition', '<version>'
+  s.dependency 'GoogleMLKit/DigitalInkRecognition', '>= 7.0.0'   # pin to the version pod install resolves
+  s.frameworks = 'UIKit', 'QuartzCore', 'PDFKit'
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',

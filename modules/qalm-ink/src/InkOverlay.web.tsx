@@ -59,6 +59,7 @@ function outlinePath(tool: 'pen' | 'highlighter', width: number, pts: InkPoint[]
   const path = new Path2D();
   traceOutline(liveOutline(tool, width, pts), {
     moveTo: (x, y) => path.moveTo(x, y),
+    lineTo: (x, y) => path.lineTo(x, y),
     quadTo: (cx, cy, x, y) => path.quadraticCurveTo(cx, cy, x, y),
     close: () => path.closePath(),
   });

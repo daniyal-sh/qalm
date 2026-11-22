@@ -6,19 +6,24 @@ export interface PathSink {
 }
 
 /**
- * Turns a perfect-freehand outline polygon into a closed, smoothed path: quadratic curves through
- * the midpoints, with each outline point as the control point. Every renderer (PageCanvas, the web
- * overlay, the Android overlay) builds stroke paths this way, filled with the non-zero rule.
+ * Turns a perfect-freehand outline polygon into a closed, smoothed path. This is exactly the construction of
+ * `outlineToSvgPath` in @qalm/core and `Freehand.path` on iOS (perfect-freehand's getSvgPathFromStroke):
+ * M p0, Q p1 mid(p1,p2), then Q p[i] mid(p[i],p[i+1]) for i = 2..n-2, close. Fewer than 4 points draws the polygon.
+ * Every renderer (PageCanvas, the web overlay, the Android overlay) must build stroke paths this way, filled non-zero.
  */
-export function traceOutline(outline: readonly (readonly number[])[], sink: PathSink): void {
+export interface LineSink extends PathSink { lineTo(x: number, y: number): unknown }
+export function traceOutline(outline: readonly (readonly number[])[], sink: LineSink): void {
   const n = outline.length;
   if (n === 0) return;
-  const first = outline[0]!;
-  const last = outline[n - 1]!;
-  sink.moveTo((last[0]! + first[0]!) / 2, (last[1]! + first[1]!) / 2);
-  for (let i = 0; i < n; i++) {
-    const a = outline[i]!;
-    const b = outline[(i + 1) % n]!;
+  const p = (i: number) => outline[i]!;
+  sink.moveTo(p(0)[0]!, p(0)[1]!);
+  if (n < 4) {
+    for (let i = 1; i < n; i++) sink.lineTo(p(i)[0]!, p(i)[1]!);
+    sink.close();
+    return;
+  }
+  for (let i = 1; i < n - 1; i++) {
+    const a = p(i), b = p(i + 1);
     sink.quadTo(a[0]!, a[1]!, (a[0]! + b[0]!) / 2, (a[1]! + b[1]!) / 2);
   }
   sink.close();
