@@ -264,6 +264,18 @@ listed in `apps/server/.dev.vars.example`.
 - **Stop only your own processes.** Never kill `workerd`, `java` or `node` machine-wide; the owner runs other projects
   on this machine.
 
+**Staging on Cloudflare** (owner's account, workers.dev subdomain `apollolearn`):
+- Web app: `https://qalm-web-staging.apollolearn.workers.dev` (Worker `qalm-web-staging`, static assets from
+  `apps/app/wrangler.jsonc`, SPA fallback).
+- API + MCP: `https://qalm-api-staging.apollolearn.workers.dev` (`/mcp` for agents; Worker `qalm-api-staging`, env
+  `staging` in `apps/server/wrangler.jsonc`): D1 `qalm-staging`, R2 `qalm-assets-staging`, KV `qalm-oauth-staging`.
+- Secrets: `JWT_SECRET` (random), `RESEND_API_KEY` (owner sets it: `npx wrangler secret put RESEND_API_KEY --env
+  staging` in `apps/server`). Email is sent as `qalm <qalm@apollolearn.app>` via the owner's Resend domain.
+- Deploy: `pnpm --filter @qalm/server migrate:staging`, `pnpm --filter @qalm/server deploy:staging`, then
+  `EXPO_PUBLIC_QALM_SERVER_URL=https://qalm-api-staging.apollolearn.workers.dev pnpm --filter @qalm/app deploy:staging`.
+- `apollolearn.app` DNS is on Vercel, so custom domains (e.g. `qalm.apollolearn.app`) need either moving its DNS to
+  Cloudflare or hosting the web app on Vercel. Decide before production.
+
 ## 8. Suggested next steps
 
 1. **Mac:** build iOS (`expo run:ios`; the podspec now depends only on `ExpoModulesCore`, no ML Kit pod) and test on an iPad

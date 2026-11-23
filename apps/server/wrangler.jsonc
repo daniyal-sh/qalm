@@ -24,5 +24,35 @@
     // App sign-in links in emails open the web app's verify route, which POSTs the token back (see .dev.vars.example).
     "MAGIC_LINK_URL": "https://qalm.app/auth/email/verify"
   },
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+
+  // Staging on workers.dev (deploy: pnpm --filter @qalm/server deploy:staging). Bindings aren't inherited, so
+  // they're repeated here with the staging resources.
+  "env": {
+    "staging": {
+      "name": "qalm-api-staging",
+      "workers_dev": true,
+      "durable_objects": {
+        "bindings": [{ "name": "DOC_ROOM", "class_name": "DocRoom" }]
+      },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DocRoom"] }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "qalm-staging",
+          "database_id": "d500d939-6223-4ec1-845e-d04201b654ab",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "qalm-assets-staging" }],
+      "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "42a58f320e4e442790c98aa0e1d1e241" }],
+      "vars": {
+        "PUBLIC_URL": "https://qalm-api-staging.apollolearn.workers.dev",
+        "MAGIC_LINK_URL": "https://qalm-web-staging.apollolearn.workers.dev/auth/email/verify",
+        "EMAIL_PROVIDER": "resend",
+        "EMAIL_FROM": "qalm <qalm@apollolearn.app>"
+      },
+      "observability": { "enabled": true }
+    }
+  }
 }
