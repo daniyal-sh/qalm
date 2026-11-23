@@ -3,27 +3,30 @@ import type { Item, ShapeItem, StrokeItem } from '@qalm/core';
 export type InkItem = StrokeItem | ShapeItem;
 
 /**
- * A slice of the z-order: up to `chunk` consecutive ink items (one recorded picture), or one item drawn on its own (text,
- * images, and ink being dragged by a live selection edit).
+ * A slice of the z-order: up to `chunk` consecutive ink items (one recorded picture; `live` when they belong to a
+ * selection being dragged, drawn inside its live transform), or one text box or image.
  */
-export type Run = { kind: 'ink'; key: string; items: InkItem[] } | { kind: 'item'; item: Item };
+export type Run = { kind: 'ink'; key: string; items: InkItem[]; live: boolean } | { kind: 'item'; item: Exclude<Item, InkItem> };
 
 /** Ink items per recorded picture: adding a stroke re-records only the last chunk, not the whole page. */
 export const INK_CHUNK = 256;
 
 /**
  * Splits items (in z-order) into runs: consecutive strokes and shapes are grouped in chunks of at most `chunk`, so z-order
- * against text and images stays exact. A chunk's key is its first item's id. Items in `alone` (a selection being moved,
- * scaled or turned) are runs of their own, so only they follow the live transform.
+ * against text and images stays exact. A chunk's key is its first item's id. Ink in `live` (a selection being moved,
+ * scaled or turned) goes in chunks of its own, so dragging thousands of strokes moves a few pictures, not thousands of nodes.
  */
-export function inkRuns(items: readonly Item[], chunk = INK_CHUNK, alone?: ReadonlySet<string> | null): Run[] {
+export function inkRuns(items: readonly Item[], chunk = INK_CHUNK, live?: ReadonlySet<string> | null): Run[] {
   const out: Run[] = [];
   let cur: InkItem[] | null = null;
+  let curLive = false;
   for (const it of items) {
-    if ((it.type === 'stroke' || it.type === 'shape') && !alone?.has(it.id)) {
-      if (!cur || cur.length >= chunk) {
+    if (it.type === 'stroke' || it.type === 'shape') {
+      const isLive = !!live?.has(it.id);
+      if (!cur || cur.length >= chunk || isLive !== curLive) {
         cur = [];
-        out.push({ kind: 'ink', key: it.id, items: cur });
+        curLive = isLive;
+        out.push({ kind: 'ink', key: it.id, items: cur, live: isLive });
       }
       cur.push(it);
     } else {

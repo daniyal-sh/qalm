@@ -172,19 +172,17 @@ interface Ink {
   complete: boolean;
   /** Ink items still without a path (newest first), built in the background. */
   pending: InkItem[];
-  /** Paths of ink drawn on its own (a selection being dragged). */
-  alonePaths: Map<string, SkPath>;
 }
 
-/** `alone`: ids drawn individually instead of in a picture (a live selection edit moves them with a transform). */
-function useInk(items: Item[], bounds: SkRect, alone: ReadonlySet<string> | null): Ink {
+/** `live`: ids of a selection being dragged; their ink is recorded in chunks of its own, drawn inside the live transform. */
+function useInk(items: Item[], bounds: SkRect, live: ReadonlySet<string> | null): Ink {
   const cache = React.useRef<InkCache>({ paths: new Map(), pictures: new Map() });
   const [pass, setPass] = React.useState(0);
   const result = React.useMemo((): Ink => {
     const t0 = now();
     const prev = cache.current;
     const next: InkCache = { paths: new Map(), pictures: new Map() };
-    const runs = inkRuns(items, INK_CHUNK, alone);
+    const runs = inkRuns(items, INK_CHUNK, live);
     const pathOf = (it: InkItem): SkPath => {
       const key = inkGeometryKey(it);
       const hit = next.paths.get(it.id) ?? prev.paths.get(it.id);
@@ -196,15 +194,10 @@ function useInk(items: Item[], bounds: SkRect, alone: ReadonlySet<string> | null
     let complete = true;
     const pending: InkItem[] = [];
     let built = 0;
-    const alonePaths = new Map<string, SkPath>();
     // Newest chunks first: the stroke just written is in the last one.
     for (let r = runs.length - 1; r >= 0; r--) {
       const run = runs[r]!;
-      if (run.kind !== 'ink') {
-        const it = run.item;
-        if (it.type === 'stroke' || it.type === 'shape') alonePaths.set(it.id, pathOf(it));
-        continue;
-      }
+      if (run.kind !== 'ink') continue;
       const old = prev.pictures.get(run.key);
       if (old && sameItems(old.items, run.items)) {
         for (const it of run.items) if (prev.paths.has(it.id)) next.paths.set(it.id, prev.paths.get(it.id)!);
@@ -256,9 +249,9 @@ function useInk(items: Item[], bounds: SkRect, alone: ReadonlySet<string> | null
       if (run.kind === 'item') drawnIds.push(run.item.id);
       else if (current.has(run.key)) for (const it of run.items) drawnIds.push(it.id);
     }
-    return { runs, pictures: new Map([...next.pictures].map(([k, v]) => [k, v.picture])), drawnIds, complete, pending, alonePaths };
+    return { runs, pictures: new Map([...next.pictures].map(([k, v]) => [k, v.picture])), drawnIds, complete, pending };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, pass, alone]);
+  }, [items, pass, live]);
   React.useEffect(() => {
     if (result.complete) return;
     // Build the remaining paths in 8 ms slices without re-rendering (each Skia redraw of a heavy page is costly), and
@@ -315,14 +308,6 @@ function DrawnProbe({ ink, onDrawn }: { ink: Ink; onDrawn?: (ids: string[], comp
     cb.current?.(ink.drawnIds, ink.complete);
   }, [ink]);
   return null;
-}
-
-/** One stroke or shape drawn on its own (while a selection edit moves it). */
-function InkNode({ item, path }: { item: InkItem; path: SkPath }) {
-  if (item.type === 'shape') return <Path path={path} color={inkPaint('pen', item.color).rgb} style="stroke" strokeWidth={item.width} strokeCap="round" strokeJoin="round" />;
-  const paint = inkPaint(item.tool, item.color);
-  if (item.tool === 'highlighter') return <Path path={path} color={paint.rgb} opacity={paint.alpha} blendMode="multiply" />;
-  return <Path path={path} color={paint.rgb} />;
 }
 
 function TextNode({ item, fonts }: { item: TextItem; fonts: SkTypefaceFontProvider }) {
@@ -408,14 +393,18 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items, selectio
         {ink.runs.map((run) => {
           if (run.kind === 'ink') {
             const picture = ink.pictures.get(run.key);
-            return picture ? <Picture key={run.key} picture={picture} /> : null;
+            if (!picture) return null;
+            return run.live ? (
+              <Group key={run.key} transform={liveMatrix}>
+                <Picture picture={picture} />
+              </Group>
+            ) : (
+              <Picture key={run.key} picture={picture} />
+            );
           }
           const it = run.item;
           let node: React.ReactElement | null = null;
-          if (it.type === 'stroke' || it.type === 'shape') {
-            const path = ink.alonePaths.get(it.id);
-            node = path ? <InkNode key={it.id} item={it} path={path} /> : null;
-          } else if (it.type === 'text') node = fonts ? <TextNode key={it.id} item={it} fonts={fonts} /> : null;
+          if (it.type === 'text') node = fonts ? <TextNode key={it.id} item={it} fonts={fonts} /> : null;
           else {
             const uri = assetUri?.(it.assetId);
             node = uri ? <ImageNode key={it.id} item={it} uri={uri} /> : null;

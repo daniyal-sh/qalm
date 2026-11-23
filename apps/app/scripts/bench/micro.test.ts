@@ -4,7 +4,7 @@ import { describe, test } from 'vitest';
 import * as Y from 'yjs';
 
 import { A4, buildMixedIndex, fillPage, MIXED } from '../../src/bench/gen';
-import { makeStroke } from '../../src/editor/items';
+import { makeStroke, transformPatch } from '../../src/editor/items';
 import { currentPageIndex, layoutPages, mountedRange } from '../../src/editor/view';
 
 function bench(name: string, fn: () => void): void {
@@ -55,6 +55,18 @@ describe('page with 5000 strokes', () => {
   });
 });
 const update = Y.encodeStateAsUpdate(heavy);
+
+describe('selection commit', () => {
+  bench('move 3000 strokes (one transaction)', () => {
+    const d = new Y.Doc();
+    fillPage(d, 3000, A4, 5);
+    const pg = new Page(d);
+    const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 5, dy: 3 };
+    pg.doc.transact(() => {
+      for (const it of pg.items()) pg.updateItem(it.id, transformPatch(it, sim));
+    });
+  });
+});
 
 describe('300-page layout', () => {
   bench('build 300-page index + pages()', () => {

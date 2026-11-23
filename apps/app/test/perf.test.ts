@@ -142,6 +142,12 @@ describe('ink chunks', () => {
     expect(runs.map((r) => (r.kind === 'ink' ? r.key : r.item.id))).toEqual(['a', 'c', 't', 'd']);
   });
 
+  it('puts ink being dragged in live chunks of its own, keeping z-order', () => {
+    const s = (id: string): Item => ({ id, type: 'stroke', tool: 'pen', color: '#000', width: 1, points: [], bbox: [0, 0, 1, 1], createdAt: 0 });
+    const runs = inkRuns([s('a'), s('b'), s('c'), s('d'), s('e')], 256, new Set(['b', 'c', 'e']));
+    expect(runs.map((r) => (r.kind === 'ink' ? `${r.live ? 'L' : ''}${r.items.map((i) => i.id).join('')}` : ''))).toEqual(['a', 'Lbc', 'd', 'Le']);
+  });
+
   it('re-records only the last chunk when a stroke is added to a 3000-stroke page', () => {
     const doc = new Y.Doc();
     fillPage(doc, 3000, A4, 3);
