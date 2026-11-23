@@ -10,7 +10,6 @@ import { radius, shadow2 } from '../theme/tokens';
 import { confirm } from '../ui/confirm';
 import { Avatar, Button } from '../ui/controls';
 import { Text } from '../ui/Text';
-import { unreadIn, type SeenThreads } from './ai.logic';
 
 const POLL_MS = 8000;
 const NATIVE_DRIVER = Platform.OS !== 'web';
@@ -198,7 +197,7 @@ export function MarginCard({
   top,
   width,
   active,
-  seen,
+  unread,
   thinking,
   onPress,
 }: {
@@ -206,7 +205,8 @@ export function MarginCard({
   top: number;
   width: number;
   active: boolean;
-  seen: SeenThreads;
+  /** It has agent entries the student hasn't read. */
+  unread: boolean;
   thinking: boolean;
   onPress(): void;
 }) {
@@ -214,7 +214,6 @@ export function MarginCard({
   const last = comment.replies[comment.replies.length - 1];
   const latest = last ?? { author: comment.author, text: comment.text };
   const agent = latest.author.kind === 'agent';
-  const unread = unreadIn(comment, seen) > 0;
   const replies = comment.replies.length;
   return (
     <AppearIn style={{ position: 'absolute', top, left: 0, width }}>
