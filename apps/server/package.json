@@ -9,7 +9,9 @@
     "build": "wrangler deploy --dry-run --outdir dist",
     "migrate:local": "wrangler d1 migrations apply qalm --local",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "deploy:staging": "wrangler deploy --env staging",
+    "migrate:staging": "wrangler d1 migrations apply qalm-staging --remote --env staging"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.4",
