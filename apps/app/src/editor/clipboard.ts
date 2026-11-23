@@ -1,13 +1,17 @@
 import type { Asset, Item } from '@qalm/core';
 import * as React from 'react';
 
+import { newId } from '../lib/id';
 import { cloneItems } from './items';
+import { writeClipMarker } from './systemPaste';
 
 /** What Copy / Cut put on the in-app clipboard: the items, the assets their images need, and where they came from. */
 export interface Clip {
   items: Item[];
   assets: Asset[];
   pageId: string;
+  /** Marks the system clipboard as holding this clip (web and Electron: see `writeClipMarker`). */
+  id?: string;
   /** Pastes so far onto the page they came from (each one lands a little further down and right). */
   pastes: number;
 }
@@ -16,6 +20,8 @@ export interface Clip {
 export const PASTE_STEP = 16;
 
 let clip: Clip | null = null;
+/** When this run's Copy set the clip; 0 for one restored at startup (the system clipboard may have changed since). */
+let clipAt = 0;
 const subs = new Set<() => void>();
 
 /** Where the clipboard is kept between runs (the app's kv store: per device). */
@@ -34,7 +40,7 @@ function savedClip(v: unknown): Clip | null {
   const c = v as Partial<Clip> | null | undefined;
   if (!c || !Array.isArray(c.items) || !c.items.length || !Array.isArray(c.assets) || typeof c.pageId !== 'string') return null;
   if (!c.items.every((it) => it && typeof it === 'object' && typeof it.id === 'string' && typeof it.type === 'string')) return null;
-  return { items: c.items, assets: c.assets, pageId: c.pageId, pastes: Number.isFinite(c.pastes) ? c.pastes! : 0 };
+  return { items: c.items, assets: c.assets, pageId: c.pageId, id: typeof c.id === 'string' ? c.id : undefined, pastes: Number.isFinite(c.pastes) ? c.pastes! : 0 };
 }
 
 /**
@@ -52,13 +58,21 @@ export async function persistClip(s: ClipStore): Promise<void> {
 
 /** App-wide, so it works across pages and notebooks (and, with `persistClip`, across restarts). */
 export function setClip(items: Item[], assets: Asset[], pageId: string): void {
-  clip = { items: items.map((it) => ({ ...it })), assets, pageId, pastes: 0 };
+  clip = { items: items.map((it) => ({ ...it })), assets, pageId, id: newId(), pastes: 0 };
+  clipAt = Date.now();
+  // Text boxes go out as plain text too, so they paste into other apps.
+  writeClipMarker(clip.id!, items.flatMap((it) => (it.type === 'text' && it.text ? [it.text] : [])).join('\n\n'));
   save();
   subs.forEach((f) => f());
 }
 
 export function getClip(): Clip | null {
   return clip;
+}
+
+/** When the clip was set (see `clipAt`), or null when there is none. */
+export function clipSetAt(): number | null {
+  return clip ? clipAt : null;
 }
 
 export function useClip(): Clip | null {
