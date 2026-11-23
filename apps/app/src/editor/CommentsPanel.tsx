@@ -1,3 +1,4 @@
+import { anchorInkRemoved } from '@qalm/core';
 import * as React from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -17,7 +18,9 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
   const [reply, setReply] = React.useState<string | null>(null);
   const agent = cm.author.kind === 'agent';
   const quote = lineQuote(data.lines, cm.lineKey);
-  const hasLine = !!cm.anchor || data.lines.some((l) => l.key === cm.lineKey);
+  const inkRemoved = anchorInkRemoved(cm, data.items);
+  const onSelection = !!cm.anchor || !!cm.anchorIds?.length;
+  const hasLine = onSelection || data.lines.some((l) => l.key === cm.lineKey);
   return (
     <Pressable
       accessibilityRole="button"
@@ -43,7 +46,7 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
         </View>
       </View>
       <Text variant="meta" tone="muted" numberOfLines={2} style={{ fontStyle: 'italic' }}>
-        {quote ? `“${quote}”` : cm.anchor ? 'On a selection' : hasLine ? 'Handwritten line' : 'The line was erased'}
+        {inkRemoved ? 'Ink removed' : quote ? `“${quote}”` : onSelection ? 'On a selection' : hasLine ? 'Handwritten line' : 'The line was erased'}
       </Text>
       <Text>{cm.text}</Text>
       {cm.replies.map((r, i) => (

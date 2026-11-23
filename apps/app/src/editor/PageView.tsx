@@ -1,7 +1,7 @@
-import { hitTestErase, lassoSelect, LOCAL_ORIGIN, Page, snapShape, type Item, type PageInfo, type TextItem } from '@qalm/core';
+import { boxSelect, textHeight, hitTestErase, hitTestPoint, isIdentity, lassoSelect, LOCAL_ORIGIN, Page, snapShape, type Item, type PageInfo, type TextItem } from '@qalm/core';
 import { InkOverlay, PageCanvas, QalmInk, type InkOverlayProps } from 'qalm-ink';
 import * as React from 'react';
-import { PanResponder, PixelRatio, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { PixelRatio, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { newId } from '../lib/id';
 import { docIds } from '../sync/docs';
@@ -9,11 +9,18 @@ import { useDoc, useSession, useVersion } from '../state/session';
 import { smoothingLevel } from '../theme/ThemeProvider';
 import { font } from '../theme/tokens';
 import { useEditor } from './context';
-import { DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, hitText, itemBBox, makeStroke, transformItem, transformPatch, unionBBox } from './items';
+import { DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, hitText, makeStroke, pointsBBox, transformPatch } from './items';
+import { isAdditive } from './modifiers';
+import { SelectionFrame, type LiveEdit } from './SelectionFrame';
 import { RecognitionScheduler } from './recognition';
 import { commentAnchors, pdfBucketWidth } from './view';
 
 const ACCENT = '#4338ca';
+/** A lasso that moved less than this (px) is a tap. */
+const TAP_SLOP_PX = 6;
+/** A tap selects the nearest item within this many px. */
+const TAP_TOLERANCE_PX = 10;
+const DOUBLE_TAP_MS = 450;
 
 /** Resolves asset ids to loadable uris (PDF file for the background, image files for image items). */
 function useAssetUris(ids: string[]): Map<string, string> {
@@ -120,68 +127,84 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
   // Comments and lines for the comments panel.
   React.useEffect(() => {
     if (!page) return;
-    ed.reportPage(info.id, { page, index, lines, comments });
+    ed.reportPage(info.id, { page, index, lines, comments, items });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, lines, comments, index]);
+  }, [page, lines, comments, items, index]);
   React.useEffect(() => () => ed.reportPage(info.id, null), [info.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pdf = usePdfBackground(info, width, zoom);
   const imageIds = React.useMemo(() => items.filter((i) => i.type === 'image').map((i) => (i as { assetId: string }).assetId), [items]);
   const imageUris = useAssetUris(imageIds);
 
-  // Selection moving.
+  // Selection: the frame and its live edit (drawn by PageCanvas with a transform until it is committed).
   const sel = ed.selection?.pageId === info.id ? ed.selection.ids : null;
-  const [drag, setDrag] = React.useState<{ dx: number; dy: number } | null>(null);
+  const [live, setLive] = React.useState<LiveEdit | null>(null);
   const selSet = React.useMemo(() => new Set(sel ?? []), [sel]);
+  const selItems = React.useMemo(() => (sel ? items.filter((it) => selSet.has(it.id)) : []), [items, sel, selSet]);
   const editing = ed.editingText?.pageId === info.id ? ed.editingText.itemId : null;
   const shown = React.useMemo(() => {
     let out: Item[] = items;
-    if (drag && sel) out = out.map((it) => (selSet.has(it.id) ? transformItem(it, { dx: drag.dx, dy: drag.dy, s: 1, ox: 0, oy: 0 }) : it));
+    if (live?.kind === 'text') out = out.map((it) => (it.id === live.id ? ({ ...it, ...live.patch } as Item) : it));
     if (editing) out = out.filter((it) => it.id !== editing);
     return out;
-  }, [items, drag, sel, selSet, editing]);
-  const selBox = React.useMemo(() => (sel ? unionBBox(shown.filter((i) => selSet.has(i.id)).map(itemBBox)) : null), [shown, sel, selSet]);
+  }, [items, live, editing]);
+  const liveCanvas = React.useMemo(() => (live?.kind === 'sim' && sel ? { ids: sel, transform: live.sim } : undefined), [live, sel]);
 
   const drawn = React.useMemo(createDrawnIds, []);
   const rootRef = React.useRef<React.ComponentRef<typeof View>>(null);
-  const pageRef = React.useRef(page);
-  pageRef.current = page;
-  const selRef = React.useRef(sel);
-  selRef.current = sel;
-  const scaleRef = React.useRef(scale);
-  scaleRef.current = scale;
-  const pan = React.useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderMove: (_e, g) => setDrag({ dx: g.dx / scaleRef.current, dy: g.dy / scaleRef.current }),
-        onPanResponderRelease: (_e, g) => {
-          setDrag(null);
-          const p = pageRef.current;
-          const ids = selRef.current;
-          const dx = g.dx / scaleRef.current;
-          const dy = g.dy / scaleRef.current;
-          if (!p || !ids || (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5)) return;
-          p.doc.transact(() => {
-            for (const id of ids) {
-              const it = p.item(id);
-              if (it) p.updateItem(id, transformPatch(it, { dx, dy, s: 1, ox: 0, oy: 0 }));
-            }
-          }, LOCAL_ORIGIN);
-        },
-        onPanResponderTerminate: () => setDrag(null),
-      }),
-    [],
-  );
+  const lastTap = React.useRef<{ id: string; at: number } | null>(null);
+
+  /** Commits a selection edit as one undo step (line assignment re-runs for moved ink). */
+  const commit = (edit: LiveEdit) => {
+    if (!page || !sel) return;
+    if (edit.kind === 'sim' && isIdentity(edit.sim)) return;
+    ed.touchPage(info.id);
+    page.doc.transact(() => {
+      if (edit.kind === 'text') page.updateItem(edit.id, edit.patch as Partial<TextItem>);
+      else
+        for (const id of sel) {
+          const it = page.item(id);
+          if (it) page.updateItem(id, transformPatch(it, edit.sim));
+        }
+    }, LOCAL_ORIGIN);
+  };
+
+  /** A tap at a page point while the lasso tool is on: select what's there (Shift/Ctrl/Cmd: add or remove it). */
+  const tapSelect = (x: number, y: number, insideFrame: boolean) => {
+    if (!page) return;
+    const all = page.items();
+    const hit = hitTestPoint(all, { x, y }, TAP_TOLERANCE_PX / scale);
+    const add = isAdditive();
+    const cur = ed.selection?.pageId === info.id ? ed.selection.ids : [];
+    const now = Date.now();
+    const again = hit && lastTap.current?.id === hit && now - lastTap.current.at < DOUBLE_TAP_MS;
+    lastTap.current = hit ? { id: hit, at: now } : null;
+    const it = hit ? all.find((i) => i.id === hit) : undefined;
+    if (it?.type === 'text' && again && !add) {
+      // Double-tap a text box: edit it in place.
+      ed.setSelection(null);
+      ed.setEditingText({ pageId: info.id, itemId: it.id });
+      return;
+    }
+    if (!hit) {
+      if (!insideFrame && !add) ed.setSelection(null);
+      return;
+    }
+    if (add) {
+      const next = cur.includes(hit) ? cur.filter((id) => id !== hit) : [...cur, hit];
+      ed.setSelection(next.length ? { pageId: info.id, ids: next } : null);
+    } else if (!(insideFrame && cur.includes(hit))) ed.setSelection({ pageId: info.id, ids: [hit] });
+  };
+
+  const toPage = (wx: number, wy: number, fn: (x: number, y: number) => void) =>
+    rootRef.current?.measureInWindow((x, y) => fn((wx - x) / scale, (wy - y) / scale));
 
   if (!page) return <View style={{ width, height, backgroundColor: '#ffffff' }} />;
 
   const t = ed.tools;
   const inkTool = t.tool === 'text' ? 'none' : t.tool;
   const nightInk = info.paperColor === 'night' && t.penColor === '#27272a' ? '#e4e4e7' : t.penColor;
-  const anchors = commentAnchors(lines, comments, ed.activeCommentId);
+  const anchors = commentAnchors(lines, comments, ed.activeCommentId, items);
 
   const tapText = (x: number, y: number) => {
     const hit = hitText(items, x, y);
@@ -211,7 +234,7 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
         info={info}
         items={shown}
         width={width}
-        selection={sel ?? undefined}
+        live={liveCanvas}
         anchors={anchors}
         pdfImage={pdf}
         assetUri={(id) => imageUris.get(id)}
@@ -237,9 +260,18 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
           const ids = hitTestErase(page.items(), e.path, t.eraserRadius);
           if (ids.length) ed.undo.merging('erase', () => page.removeItems(ids));
         }}
+        lassoMode={t.lassoMode}
         onLasso={({ nativeEvent: e }) => {
-          const ids = lassoSelect(page.items(), e.polygon);
-          ed.setSelection(ids.length ? { pageId: info.id, ids } : null);
+          const pts = e.polygon;
+          const last = pts[pts.length - 1];
+          if (!last) return;
+          const [x0, y0, x1, y1] = pointsBBox(pts);
+          if (Math.max(x1 - x0, y1 - y0) * scale < TAP_SLOP_PX) return tapSelect(last.x, last.y, false);
+          const all = page.items();
+          const ids = t.lassoMode === 'rect' ? boxSelect(all, pts[0]!, last) : lassoSelect(all, pts);
+          const cur = isAdditive() && ed.selection?.pageId === info.id ? ed.selection.ids : [];
+          const next = [...new Set([...cur, ...ids])];
+          ed.setSelection(next.length ? { pageId: info.id, ids: next } : null);
         }}
         onPenButton={() => ed.onPenButton()}
       />
@@ -254,22 +286,18 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
           }}
         />
       ) : null}
-      {selBox && t.tool === 'lasso' ? (
-        <View
-          {...pan.panHandlers}
-          accessibilityLabel="Move selection"
-          style={{
-            position: 'absolute',
-            left: (selBox[0] - 6) * scale,
-            top: (selBox[1] - 6) * scale,
-            width: (selBox[2] - selBox[0] + 12) * scale,
-            height: (selBox[3] - selBox[1] + 12) * scale,
-            ...(Platform.OS === 'web' ? ({ cursor: 'move' } as object) : null),
-          }}
+      {selItems.length && t.tool === 'lasso' ? (
+        <SelectionFrame
+          items={selItems}
+          scale={scale}
+          live={live}
+          onLive={setLive}
+          onCommit={commit}
+          onTap={(wx, wy) => toPage(wx, wy, (x, y) => tapSelect(x, y, true))}
         />
       ) : null}
       {anchors.map((a) => {
-        const c = comments.find((x) => x.id === a.lineKey) ?? comments.find((x) => x.lineKey === a.lineKey && !x.anchor && !x.resolved) ?? comments.find((x) => x.lineKey === a.lineKey);
+        const c = comments.find((x) => x.id === a.lineKey) ?? comments.find((x) => x.lineKey === a.lineKey && !x.anchor && !x.anchorIds?.length && !x.resolved) ?? comments.find((x) => x.lineKey === a.lineKey);
         return c ? (
           <Pressable
             key={a.lineKey}
@@ -312,10 +340,14 @@ function TextEditor({ page, itemId, scale, onDone }: { page: Page; itemId: strin
           top: item.y * scale - 4,
           width: item.w * scale + 8,
           minHeight: item.fontSize * 1.3 * scale + 8,
+          // Grow with the text (a multiline input on web doesn't): the same wrapping estimate as the selection frame.
+          height: textHeight({ text: text || ' ', w: item.w, fontSize: item.fontSize }) * scale + 8 + item.fontSize * 0.3 * scale,
           fontSize: item.fontSize * scale,
           lineHeight: item.fontSize * 1.3 * scale,
           color: item.color,
         },
+        // A turned text box is edited turned, about its top-left corner (the box sits 4 px out from it).
+        item.rot ? { transform: [{ rotate: `${item.rot}rad` }], transformOrigin: '4px 4px' } : null,
         Platform.OS === 'web' && ({ outlineStyle: 'none' } as object),
       ]}
     />

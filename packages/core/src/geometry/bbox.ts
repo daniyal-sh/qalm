@@ -1,4 +1,5 @@
-import type { BBox, Item } from '../types';
+import { wrapText } from '../render/text';
+import type { BBox, ImageItem, Item, TextItem } from '../types';
 
 export function unionBBox(a: BBox | null, b: BBox): BBox {
   if (!a) return [b[0], b[1], b[2], b[3]];
@@ -23,18 +24,45 @@ export function pointsBBox(pts: readonly { x: number; y: number }[], pad = 0): B
 
 /** Line height of typed text boxes, as a multiple of the font size. */
 export const TEXT_LINE_HEIGHT = 1.3;
+/** Average glyph advance of Figtree, as a multiple of the font size (estimates wrapping without a font). */
+export const TEXT_CHAR_WIDTH = 0.55;
+
+/** Rows a text box wraps into at its width (estimated). */
+export function textRows(item: Pick<TextItem, 'text' | 'w' | 'fontSize'>): number {
+  return Math.max(1, wrapText(item.text, item.w, (s) => s.length * item.fontSize * TEXT_CHAR_WIDTH).length);
+}
+
+/** Height of a text box (estimated wrapping). */
+export function textHeight(item: Pick<TextItem, 'text' | 'w' | 'fontSize'>): number {
+  return textRows(item) * item.fontSize * TEXT_LINE_HEIGHT;
+}
+
+/** The 4 corners (top-left, top-right, bottom-right, bottom-left) of a text box or image, turned by `rot` about (x, y). */
+export function boxCorners(item: TextItem | ImageItem): [number, number][] {
+  const h = item.type === 'text' ? textHeight(item) : item.h;
+  const r = item.rot ?? 0;
+  const c = Math.cos(r), s = Math.sin(r);
+  return ([[0, 0], [item.w, 0], [item.w, h], [0, h]] as const).map(([u, v]) => [item.x + u * c - v * s, item.y + u * s + v * c]);
+}
 
 export function itemBBox(item: Item): BBox {
   switch (item.type) {
     case 'stroke':
       return item.bbox;
-    case 'shape':
+    case 'shape': {
+      if (item.kind === 'ellipse' && item.pts.length >= 4) {
+        // Exact extent of a rotated ellipse: centre ± (|u|, |v|) per axis.
+        const [p0, p1, p2, p3] = item.pts as [number, number][];
+        const cx = (p0![0] + p2![0]) / 2, cy = (p0![1] + p2![1]) / 2;
+        const ux = (p1![0] - p0![0]) / 2, uy = (p1![1] - p0![1]) / 2, vx = (p3![0] - p0![0]) / 2, vy = (p3![1] - p0![1]) / 2;
+        const ex = Math.hypot(ux, vx) + item.width / 2, ey = Math.hypot(uy, vy) + item.width / 2;
+        return [cx - ex, cy - ey, cx + ex, cy + ey];
+      }
       return pointsBBox(item.pts.map(([x, y]) => ({ x, y })), item.width / 2);
-    case 'image':
-      return [item.x, item.y, item.x + item.w, item.y + item.h];
-    case 'text': {
-      const rows = Math.max(1, item.text.split('\n').length);
-      return [item.x, item.y, item.x + item.w, item.y + rows * item.fontSize * TEXT_LINE_HEIGHT];
     }
+    case 'image':
+    case 'text':
+      if (!item.rot) return [item.x, item.y, item.x + item.w, item.y + (item.type === 'text' ? textHeight(item) : item.h)];
+      return pointsBBox(boxCorners(item).map(([x, y]) => ({ x, y })));
   }
 }

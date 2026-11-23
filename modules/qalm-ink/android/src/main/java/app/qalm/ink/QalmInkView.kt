@@ -40,6 +40,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   var strokeWidth = 1.8
   var penStyle = "fountain"
   var smoothing = 0
+  var lassoMode = "free" // free | rect
   var drawWith = "pen"
   var hand = "right"
   var palm = "standard"
@@ -325,7 +326,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
         layer.drawFrame(null)
       }
       "lasso" -> {
-        if (l.points.size >= 3) onLasso(mapOf("polygon" to l.points.map { mapOf("x" to it.x, "y" to it.y) }))
+        if (l.points.isNotEmpty()) onLasso(mapOf("polygon" to l.points.map { mapOf("x" to it.x, "y" to it.y) }))
         layer.drawFrame(null)
       }
       else -> {
@@ -409,8 +410,17 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
       )
       "lasso" -> Frame(
         lasso = Path().apply {
-          l.points.forEachIndexed { i, p -> if (i == 0) moveTo(p.x.toFloat(), p.y.toFloat()) else lineTo(p.x.toFloat(), p.y.toFloat()) }
-          close()
+          val a = l.points.firstOrNull()
+          val b = l.points.lastOrNull()
+          if (lassoMode == "rect" && a != null && b != null) {
+            addRect(
+              min(a.x, b.x).toFloat(), min(a.y, b.y).toFloat(), max(a.x, b.x).toFloat(), max(a.y, b.y).toFloat(),
+              Path.Direction.CW,
+            )
+          } else {
+            l.points.forEachIndexed { i, p -> if (i == 0) moveTo(p.x.toFloat(), p.y.toFloat()) else lineTo(p.x.toFloat(), p.y.toFloat()) }
+            close()
+          }
         },
       )
       else -> l.points.lastOrNull()?.let { Frame(cursor = doubleArrayOf(it.x, it.y, l.width / 2), cursorColor = ERASER_CURSOR) } ?: Frame()

@@ -34,12 +34,13 @@ export interface StrokeItem {
   style?: PenStyle;
   smoothing?: Smoothing;
 }
-export interface TextItem { id: string; type: 'text'; x: number; y: number; w: number; text: string; fontSize: number; color: string }
-export interface ImageItem { id: string; type: 'image'; assetId: string; x: number; y: number; w: number; h: number }
+/** `rot` (radians, clockwise on the page) turns a text box or image about its top-left corner `(x, y)`; missing = 0. */
+export interface TextItem { id: string; type: 'text'; x: number; y: number; w: number; text: string; fontSize: number; color: string; rot?: number }
+export interface ImageItem { id: string; type: 'image'; assetId: string; x: number; y: number; w: number; h: number; rot?: number }
 export type ShapeKind = 'line' | 'arrow' | 'rect' | 'ellipse' | 'triangle';
 /**
  * `pts` per kind: line `[a, b]`; arrow `[tail, tip]`; rect 4 corners; triangle 3 corners;
- * ellipse `[[x0, y0], [x1, y1]]` (axis-aligned bounding box).
+ * ellipse `[[x0, y0], [x1, y1]]` (axis-aligned box, older shapes) or the 4 corners of its rotated box.
  */
 export interface ShapeItem { id: string; type: 'shape'; kind: ShapeKind; pts: [number, number][]; color: string; width: number }
 export type Item = StrokeItem | TextItem | ImageItem | ShapeItem;
@@ -67,6 +68,11 @@ export interface Comment {
   replies: { author: Author; text: string; at: number }[];
   /** Page-space box of the selection a thread is about (a student's comment or Ask on a selection). */
   anchor?: BBox;
+  /**
+   * The selected item ids a thread is about. The pin box and the agent's line labels are derived from these items
+   * live (`threadBox`), so the thread follows its ink; `anchor` stays as the fallback for threads made before this.
+   */
+  anchorIds?: string[];
   /** The thread was started by an Ask: its question reaches agents as the `ask`, not as a `note`. */
   ask?: boolean;
 }

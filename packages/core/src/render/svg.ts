@@ -14,6 +14,11 @@ export function shapeSvgPath(s: Pick<ShapeItem, 'kind' | 'pts'>): string {
     .join(' ');
 }
 
+/** ` transform="rotate(…)"` for a turned text box or image (about its top-left corner). */
+function turn(item: { x: number; y: number; rot?: number }): string {
+  return item.rot ? ` transform="rotate(${n((item.rot * 180) / Math.PI)} ${n(item.x)} ${n(item.y)})"` : '';
+}
+
 /** SVG markup of one item, in page units. `ink` overrides every colour (used by the line strip). */
 export function itemSvg(item: Item, opts: { assetUrl?: (id: string) => string; ink?: string } = {}): string {
   switch (item.type) {
@@ -32,11 +37,11 @@ export function itemSvg(item: Item, opts: { assetUrl?: (id: string) => string; i
       const rows = wrapText(item.text, item.w, (s) => s.length * item.fontSize * 0.55);
       const lh = item.fontSize * TEXT_LINE_HEIGHT;
       const spans = rows.map((r, i) => `<tspan x="${n(item.x)}" y="${n(item.y + item.fontSize + i * lh)}">${escapeXml(r)}</tspan>`).join('');
-      return `<text font-family="Figtree, sans-serif" font-size="${n(item.fontSize)}" fill="${escapeXml(opts.ink ?? item.color)}">${spans}</text>`;
+      return `<text font-family="Figtree, sans-serif" font-size="${n(item.fontSize)}" fill="${escapeXml(opts.ink ?? item.color)}"${turn(item)}>${spans}</text>`;
     }
     case 'image': {
       if (!opts.assetUrl) return '';
-      return `<image href="${escapeXml(opts.assetUrl(item.assetId))}" x="${n(item.x)}" y="${n(item.y)}" width="${n(item.w)}" height="${n(item.h)}" preserveAspectRatio="none"/>`;
+      return `<image href="${escapeXml(opts.assetUrl(item.assetId))}" x="${n(item.x)}" y="${n(item.y)}" width="${n(item.w)}" height="${n(item.h)}" preserveAspectRatio="none"${turn(item)}/>`;
     }
   }
 }

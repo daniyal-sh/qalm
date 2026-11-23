@@ -124,6 +124,19 @@ export class Page {
     });
   }
 
+  /** Moves items to the top (`front`) or bottom (`back`) of the z-order, keeping their order among themselves. */
+  reorder(ids: string[], to: 'front' | 'back'): void {
+    this.tx(() => {
+      const move = new Set(ids.filter((id) => this.itemMap.has(id)));
+      if (!move.size) return;
+      const moved = this.orderedIds().filter((id) => move.has(id));
+      const arr = this.order.toArray();
+      for (let i = arr.length - 1; i >= 0; i--) if (move.has(arr[i]!)) this.order.delete(i, 1);
+      if (to === 'front') this.order.push(moved);
+      else this.order.insert(0, moved);
+    });
+  }
+
   removeItems(ids: string[]): void {
     this.tx(() => {
       const gone = new Set(ids);
@@ -192,6 +205,8 @@ export class Page {
       };
       const anchor = m.get('anchor');
       if (Array.isArray(anchor) && anchor.length === 4) c.anchor = anchor as BBox;
+      const anchorIds = m.get('anchorIds');
+      if (Array.isArray(anchorIds) && anchorIds.length) c.anchorIds = anchorIds.filter((x): x is string => typeof x === 'string');
       if (m.get('ask') === true) c.ask = true;
       out.push(c);
     });
@@ -215,6 +230,7 @@ export class Page {
       m.set('resolved', false);
       m.set('replies', new Y.Array());
       if (c.anchor) m.set('anchor', [...c.anchor]);
+      if (c.anchorIds?.length) m.set('anchorIds', [...c.anchorIds]);
       if (c.ask) m.set('ask', true);
     });
     return id;

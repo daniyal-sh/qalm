@@ -37,6 +37,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private var strokeWidth = 1.8
   private var penStyle = "fountain"
   private var smoothing = 0
+  private var lassoRect = false
   private var drawWithPen = true
   private var rightHanded = true
   private var palmThresholdMm = 7.0
@@ -172,6 +173,10 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
 
   func setSmoothing(_ value: Int) {
     smoothing = (0...3).contains(value) ? value : 0
+  }
+
+  func setLassoMode(_ mode: String) {
+    lassoRect = mode == "rect"
   }
 
   func setInput(drawWith: String, hand: String, palm: String) {
@@ -474,7 +479,10 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
       liveLayer.path = pts.isEmpty ? nil : Freehand.path(from: outline(pts, a), sx: sx, sy: sy)
     case .lasso:
       let path = CGMutablePath()
-      if let first = pts.first {
+      if lassoRect, let first = pts.first, let last = pts.last {
+        path.addRect(CGRect(x: CGFloat(min(first.x, last.x)) * sx, y: CGFloat(min(first.y, last.y)) * sy,
+                            width: CGFloat(abs(last.x - first.x)) * sx, height: CGFloat(abs(last.y - first.y)) * sy))
+      } else if let first = pts.first {
         path.move(to: CGPoint(x: CGFloat(first.x) * sx, y: CGFloat(first.y) * sy))
         for p in pts.dropFirst() { path.addLine(to: CGPoint(x: CGFloat(p.x) * sx, y: CGFloat(p.y) * sy)) }
         if pts.count > 2 { path.closeSubpath() }

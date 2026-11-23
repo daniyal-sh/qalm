@@ -158,7 +158,11 @@ export function InkOverlay(props: InkOverlayProps) {
         ctx.globalAlpha = 1;
       } else if (live?.kind === 'lasso' && live.points.length > 1) {
         ctx.beginPath();
-        live.points.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        if (propsRef.current.lassoMode === 'rect') {
+          const a = live.points[0]!;
+          const b = live.points[live.points.length - 1]!;
+          ctx.rect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+        } else live.points.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
         ctx.closePath();
         ctx.lineWidth = (1.5 * dpr) / k;
         ctx.setLineDash([(6 * dpr) / k, (4 * dpr) / k]);
@@ -302,7 +306,7 @@ export function InkOverlay(props: InkOverlayProps) {
       if (live.kind === 'erase') {
         emitErase(live, true);
       } else if (live.kind === 'lasso') {
-        if (live.points.length >= 3) P.onLasso({ nativeEvent: { polygon: live.points.map(({ x, y }) => ({ x, y })) } });
+        if (live.points.length >= 1) P.onLasso({ nativeEvent: { polygon: live.points.map(({ x, y }) => ({ x, y })) } });
       } else if (live.points.length > 0) {
         const id = uuid();
         const last = live.points[live.points.length - 1]!;

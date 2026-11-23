@@ -20,6 +20,30 @@ export {
 } from './geometry/stroke';
 export { snapShape } from './geometry/shape';
 export { hitTestErase, lassoSelect } from './geometry/hit';
+export { itemBBox, unionBBox, textHeight, boxCorners, TEXT_LINE_HEIGHT } from './geometry/bbox';
+export { shapePolylines, ellipseAxes } from './geometry/shape';
+export {
+  IDENTITY,
+  moveBy,
+  applySim,
+  simMatrix,
+  isIdentity,
+  transformItem,
+  transformPatch,
+  visualBBox,
+  selectionFrame,
+  frameCorners,
+  frameBBox,
+  mapFrame,
+  resizeSim,
+  rotateSim,
+  textWidthPatch,
+  itemDistance,
+  hitTestPoint,
+  boxSelect,
+  type Sim,
+  type Frame,
+} from './geometry/transform';
 export { paperPattern, type PaperPattern } from './geometry/paper';
 export { renderPageSvg } from './render/svg';
 export { renderLinesStripSvg } from './render/strip';
@@ -41,3 +65,4 @@ export {
   type QinkSeen,
   type QinkAsk,
 } from './qink';
+export { threadBox, anchorInkRemoved, anchorLines } from './anchor';

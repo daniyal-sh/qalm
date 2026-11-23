@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { emptyThreads, encodeQinkUpdate, labelList, renderLinesStripSvg, resolveThread, threadLabel } from '../src';
+import { anchorInkRemoved, emptyThreads, encodeQinkUpdate, labelList, LOCAL_ORIGIN, renderLinesStripSvg, resolveThread, threadBox, threadLabel } from '../src';
 import type { QinkLabels, TextItem } from '../src';
 import { newNotebook, newPage, stroke } from './helpers';
 
@@ -90,5 +90,37 @@ describe('Q-ink threads', () => {
     const strip = renderLinesStripSvg(page, u.image!.lineKeys, u.image!.labels);
     expect(strip.svg).toContain('clip-path="url(#crop1)"');
     expect(strip.svg).toContain('>note</tspan>');
+  });
+
+  it('a thread on a selection follows its ink: live box and line labels, unanchored once the ink is gone', () => {
+    const { nb, pid, page, labels, threads, u0 } = setup();
+    page.addItem(stroke('w', 160, 100, 200, 120)); // joins L1
+    const u1 = encodeQinkUpdate(nb, { [pid]: page }, labels, u0.snapshot, { session: 's', rev: 2, threads, seen: u0.seen });
+    const id = page.addComment({ lineKey: 'k1', author: you, text: 'this word', anchor: [160, 100, 200, 120], anchorIds: ['w'] });
+    expect(page.comments()[0]!.anchorIds).toEqual(['w']);
+    // Move the word down onto L4's row before the agent hears about the thread.
+    const w = page.item('w')!;
+    if (w.type !== 'stroke') throw new Error('stroke');
+    page.doc.transact(() => page.updateItem('w', { points: w.points.map((q) => ({ ...q, y: q.y + 120 })), bbox: [160, 220, 200, 240] }), LOCAL_ORIGIN);
+    const c = page.comments()[0]!;
+    expect(threadBox(c, page.items(), page.lines())).toEqual([160, 220, 200, 240]);
+    const u2 = encodeQinkUpdate(nb, { [pid]: page }, labels, u1.snapshot, { session: 's', rev: 3, threads, seen: u1.seen });
+    expect(u2.text.split(/\n/).at(-1)).toBe('note C1 p1:L4 "this word"');
+    // Delete the ink: no box, and a new thread on it names only the page.
+    page.removeItems(['w']);
+    expect(threadBox(page.comments()[0]!, page.items(), page.lines())).toBeNull();
+    expect(anchorInkRemoved(page.comments()[0]!, page.items())).toBe(true);
+    page.addComment({ lineKey: 'k1', author: you, text: 'gone?', anchor: [160, 220, 200, 240], anchorIds: ['w'] });
+    const u3 = encodeQinkUpdate(nb, { [pid]: page }, labels, u2.snapshot, { session: 's', rev: 4, threads, seen: u2.seen });
+    expect(u3.text.split(/\n/).at(-1)).toBe('note C2 p1 "gone?"');
+    expect(id).toBeTruthy();
+  });
+
+  it('older selection threads (box only) keep their stored box', () => {
+    const { page } = setup();
+    page.addComment({ lineKey: '', author: you, text: 'x', anchor: [1, 2, 3, 4] });
+    const c = page.comments()[0]!;
+    expect(threadBox(c, page.items(), page.lines())).toEqual([1, 2, 3, 4]);
+    expect(anchorInkRemoved(c, page.items())).toBe(false);
   });
 });

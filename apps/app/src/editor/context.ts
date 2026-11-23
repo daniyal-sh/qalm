@@ -1,4 +1,4 @@
-import { createUndoManager, type Comment, type Line, type Notebook, type Page, type PenStyle } from '@qalm/core';
+import { createUndoManager, type Comment, type Item, type Line, type Notebook, type Page, type PenStyle } from '@qalm/core';
 import * as React from 'react';
 import type * as Y from 'yjs';
 
@@ -16,6 +16,8 @@ export interface ToolState {
   eraserRadius: number;
   /** Hold the pen still at the end of a stroke to snap it to a shape. */
   snapShapes: boolean;
+  /** Lasso: draw a loop around things, or drag a rectangle over them. Tapping selects either way. */
+  lassoMode: 'free' | 'rect';
 }
 
 export interface Selection {
@@ -28,6 +30,8 @@ export interface PageData {
   index: number;
   lines: Line[];
   comments: Comment[];
+  /** The page's items, so threads on a selection can follow their ink. */
+  items: Item[];
 }
 
 export interface EditorCtx {

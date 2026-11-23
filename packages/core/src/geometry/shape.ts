@@ -31,7 +31,22 @@ function maxDev(pts: P[], a: P, b: P): number {
   return m;
 }
 
-/** Edges or outline of a shape as polylines (ellipse sampled with 48 segments). */
+/**
+ * An ellipse's centre and half-axis vectors. `pts` is either its axis-aligned box `[[x0, y0], [x1, y1]]` (older
+ * shapes) or the 4 corners of its (possibly rotated) box, in order, which is what moving and rotating produce.
+ */
+export function ellipseAxes(pts: readonly P[]): { c: P; u: P; v: P } {
+  if (pts.length >= 4) {
+    const p0 = pts[0]!, p1 = pts[1]!, p3 = pts[3]!;
+    const c: P = [(pts[0]![0] + pts[2]![0]) / 2, (pts[0]![1] + pts[2]![1]) / 2];
+    return { c, u: [(p1[0] - p0[0]) / 2, (p1[1] - p0[1]) / 2], v: [(p3[0] - p0[0]) / 2, (p3[1] - p0[1]) / 2] };
+  }
+  const a: P = pts[0] ?? [0, 0];
+  const b: P = pts[1] ?? a;
+  return { c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], u: [Math.abs(b[0] - a[0]) / 2, 0], v: [0, Math.abs(b[1] - a[1]) / 2] };
+}
+
+/** Edges or outline of a shape as polylines (ellipse sampled with 64 segments). */
 export function shapePolylines(s: Pick<ShapeItem, 'kind' | 'pts'>): P[][] {
   const pts = s.pts;
   switch (s.kind) {
@@ -45,15 +60,19 @@ export function shapePolylines(s: Pick<ShapeItem, 'kind' | 'pts'>): P[][] {
       return [[tail, tip], [barb(Math.PI / 7), tip, barb(-Math.PI / 7)]];
     }
     case 'rect':
+      if (pts.length === 2) {
+        const [a, b] = [pts[0]!, pts[1]!];
+        return [[a, [b[0], a[1]], b, [a[0], b[1]], a]];
+      }
+      return [[...pts, pts[0]!]];
     case 'triangle':
       return [[...pts, pts[0]!]];
     case 'ellipse': {
-      const [a, b] = [pts[0]!, pts[1]!];
-      const cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2, rx = Math.abs(b[0] - a[0]) / 2, ry = Math.abs(b[1] - a[1]) / 2;
+      const { c, u, v } = ellipseAxes(pts);
       const out: P[] = [];
-      for (let i = 0; i <= 48; i++) {
-        const t = (i / 48) * Math.PI * 2;
-        out.push([cx + rx * Math.cos(t), cy + ry * Math.sin(t)]);
+      for (let i = 0; i <= 64; i++) {
+        const t = (i / 64) * Math.PI * 2;
+        out.push([c[0] + u[0] * Math.cos(t) + v[0] * Math.sin(t), c[1] + u[1] * Math.cos(t) + v[1] * Math.sin(t)]);
       }
       return [out];
     }

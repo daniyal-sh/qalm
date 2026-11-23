@@ -145,8 +145,8 @@ describe('comments panel rows', () => {
     const done = p1.addComment({ lineKey: 'k', author: { kind: 'agent', name: 'Claude' }, text: 'old' });
     p1.resolveComment(done);
     const pages = new Map([
-      ['p2', { page: p2, index: 1, lines: [], comments: p2.comments() }],
-      ['p1', { page: p1, index: 0, lines: [], comments: p1.comments() }],
+      ['p2', { page: p2, index: 1, lines: [], comments: p2.comments(), items: [] }],
+      ['p1', { page: p1, index: 0, lines: [], comments: p1.comments(), items: [] }],
     ]);
     expect(commentRows(pages, 'open').map((r) => r.comment.text)).toEqual(['mine', 'agent']);
     expect(commentRows(pages, 'ai').map((r) => r.comment.id)).toEqual([a]);

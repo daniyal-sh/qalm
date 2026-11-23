@@ -60,13 +60,16 @@ type PenStyle = 'fountain' | 'ball' | 'brush';
 type Smoothing = 0 | 1 | 2 | 3;              // 0 = none
 interface StrokeItem { id: string; type: 'stroke'; tool: Tool; color: string; width: number; points: InkPoint[]; bbox: BBox; createdAt: number;
   style?: PenStyle; smoothing?: Smoothing }  // pen strokes only; missing = 'fountain' / 0, the look of strokes made before these existed
-interface TextItem  { id: string; type: 'text'; x: number; y: number; w: number; text: string; fontSize: number; color: string }
-interface ImageItem { id: string; type: 'image'; assetId: string; x: number; y: number; w: number; h: number }
+interface TextItem  { id: string; type: 'text'; x: number; y: number; w: number; text: string; fontSize: number; color: string; rot?: number }
+interface ImageItem { id: string; type: 'image'; assetId: string; x: number; y: number; w: number; h: number; rot?: number }
+// rot: radians, clockwise on the page, about the top-left corner (x, y); missing = 0
 interface ShapeItem { id: string; type: 'shape'; kind: 'line'|'arrow'|'rect'|'ellipse'|'triangle'; pts: [number, number][]; color: string; width: number }
+// pts: line [a, b]; arrow [tail, tip]; rect and triangle their corners; ellipse [[x0,y0],[x1,y1]] (upright box, older
+// shapes) or the 4 corners of its turned box. Moving or rotating a 2-point rect or ellipse stores 4 corners.
 type Item = StrokeItem | TextItem | ImageItem | ShapeItem;
 type BBox = [x0: number, y0: number, x1: number, y1: number];
 interface Line { key: string /* = id of the line's first item; globally unique */; kind: 'line' | 'drawing'; itemIds: string[]; bbox: BBox; text?: string; textSrc?: 'device'|'agent'|'user'; conf?: number }
-interface Comment { id: string; lineKey: string /* '' if a selection has no ink line */; author: { kind: 'agent'|'user'; name: string }; text: string; createdAt: number; resolved: boolean; replies: { author: {kind:'agent'|'user'; name:string}; text: string; at: number }[]; anchor?: BBox /* selection box */; ask?: boolean /* started by an Ask */ }
+interface Comment { id: string; lineKey: string /* '' if a selection has no ink line */; author: { kind: 'agent'|'user'; name: string }; text: string; createdAt: number; resolved: boolean; replies: { author: {kind:'agent'|'user'; name:string}; text: string; at: number }[]; anchor?: BBox /* selection box */; anchorIds?: string[] /* the selected items: box and labels are derived from them live */; ask?: boolean /* started by an Ask */ }
 interface Ask { id: string; pageId: string; text: string; at: number; sel?: { itemIds: string[]; bbox: BBox }; commentId?: string }
 ```
 Stroke points are stored as a Float32Array of 6-tuples `(x, y, p, tilt, az, t)`, exposed as a `Uint8Array`
@@ -86,6 +89,7 @@ class Notebook {                     // wraps the index doc
 class Page {                         // wraps one page doc
   constructor(doc: Y.Doc); readonly doc: Y.Doc
   items(): Item[]; addItem(item: Item): void; updateItem(id, patch): void; removeItems(ids: string[]): void
+  reorder(ids: string[], to: 'front' | 'back'): void   // z-order; keeps their order among themselves
   lines(): Line[]                    // maintained automatically on add/update/remove
   setLineText(lineKey, text, src: 'device'|'agent'|'user', conf?): void
   comments(): Comment[]; addComment(c: Omit<Comment,'id'|'createdAt'|'resolved'|'replies'>): string
@@ -134,7 +138,18 @@ Default widths (page units): pen 1.2 / 1.8 / 2.8, highlighter 12.
 strokeOutline(s: StrokeItem): [number, number][]; strokeSvgPath(s: StrokeItem): string
 snapShape(points: InkPoint[], heldMs: number): ShapeItem | null          // only if heldMs >= 500
 hitTestErase(items: Item[], path: {x:number;y:number}[], radius: number): string[]
-lassoSelect(items: Item[], polygon: {x:number;y:number}[]): string[]
+lassoSelect(items: Item[], polygon: {x:number;y:number}[]): string[]   // most of the ink inside, or a box's centre
+// Selection (geometry/transform.ts). Sim = { s, r, ox, oy, dx, dy }: p' = o + s·R(r)·(p − o) + d
+transformItem(item, sim): Item; transformPatch(item, sim): Partial<Item>   // widths and font sizes scale; text/images turn (rot)
+visualBBox(item): BBox                  // itemBBox plus room for brush ink (0.4 × width) and arrow heads
+selectionFrame(items): Frame | null     // { cx, cy, w, h, rot }: upright around everything, or turned with one turned text box / image
+resizeSim(frame, corner, pointer): Sim  // uniform, about the opposite corner
+rotateSim(frame, start, pointer): Sim   // about the centre, snapping to 45° within 4°
+textWidthPatch(text, 'left'|'right', pointer): { x, y, w }   // a text box's edges change its width only (reflow)
+hitTestPoint(items, p, tol): string | null   // tap: nearest ink within tol, topmost on a tie; inside a box or closed shape counts
+boxSelect(items, a, b): string[]        // the lasso rule over a dragged rectangle
+threadBox(comment, items, lines): BBox | null   // where a thread sits, live; null once its line or anchored ink is gone
+anchorInkRemoved(comment, items): boolean
 paperPattern(paper: Paper, color: PaperColor, size): { lines: [x0,y0,x1,y1][]; dots: [x,y][]; stroke: string; bg: string }  // shared by Skia and SVG
 renderPageSvg(info: PageInfo, page: Page, opts?: { paper?: boolean; assetUrl?: (id) => string }): string
 renderLinesStripSvg(page: Page, lineKeys: (string | BBox)[], labels: string[]): { svg: string; width: number; height: number }  // black on white, "[n]" rows; a BBox is a crop row
@@ -182,18 +197,20 @@ drawn ids.
 
 ```ts
 // PageCanvas (TS, all platforms)
-interface PageCanvasProps { info: PageInfo; items: Item[]; selection?: string[]; anchors?: { lineKey: string; bbox: BBox; active: boolean }[]; pdfImage?: string /*uri*/; width: number /*px*/; onDrawn?(ids: string[]): void /*item ids, once Skia has them*/ }
+interface PageCanvasProps { info: PageInfo; items: Item[]; selection?: string[]; anchors?: { lineKey: string; bbox: BBox; active: boolean }[]; pdfImage?: string /*uri*/; width: number /*px*/; onDrawn?(ids: string[]): void /*item ids, once Skia has them*/;
+  live?: { ids: string[]; transform: Sim } /* a selection being dragged: drawn transformed, paths not rebuilt */ }
 // InkOverlay (native view QalmInkView; web: src/InkOverlay.web.tsx)
 type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'none';
 interface InkOverlayProps {
   pageSize: { w: number; h: number };          // page units; the overlay's laid-out size maps linearly onto the page
   tool: InkTool; color: string; width: number;
   penStyle?: 'fountain' | 'ball' | 'brush'; smoothing?: 0 | 1 | 2 | 3;   // pen only; defaults 'fountain' / 0
+  lassoMode?: 'free' | 'rect';                 // lasso: a loop, or a rectangle from the first point to the last
   input: { drawWith: 'pen' | 'any'; hand: 'left' | 'right'; palm: 'relaxed' | 'standard' | 'strict' };
   committedIds: string[];                       // stroke ids already drawn by PageCanvas (from its onDrawn)
   onStrokeEnd(e: { nativeEvent: { id: string; tool: 'pen'|'highlighter'; color: string; width: number; points: InkPoint[]; heldMs: number; style; smoothing } }): void;
   onErase(e: { nativeEvent: { path: {x:number;y:number}[] } }): void;
-  onLasso(e: { nativeEvent: { polygon: {x:number;y:number}[] } }): void;
+  onLasso(e: { nativeEvent: { polygon: {x:number;y:number}[] } }): void;   // every lasso gesture, taps too (1+ points)
   onPenButton?(e: { nativeEvent: { kind: 'double-tap'|'squeeze'|'button' } }): void;
   onRejectedTouch?(e: { nativeEvent: { reason: string } }): void;
 }
@@ -297,3 +314,18 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
 - **Content:** loads the app's web export (`expo export -p web`) from disk.
 - **Window and files:** a native window frame, and `window.qalmDesktop` in the preload for file open/save dialogs (PDF import and export).
 - **Packaging:** electron-builder for Windows and macOS.
+
+## 7. Selecting and editing (app)
+
+The lasso tool selects by **tapping** an item (`hitTestPoint`, 10 px), by a **freeform loop** or by a **rectangle**
+(`lassoMode`, a toggle in the lasso's toolbar options). A lasso that moved less than 6 px is a tap; tapping empty paper
+deselects. On desktop, Shift, Ctrl or Cmd adds to (or, on a tap, toggles in) the selection. Pen-only mode: fingers still
+scroll and zoom; with "pen and finger", a finger tap selects too. The selection shows a frame (`selectionFrame`) with
+handles: drag inside to move, corners to resize uniformly, the round handle to rotate; a single text box has edge handles
+that change its width. A double-tap on a text box (or a tap with the text tool) edits it in place. While dragging,
+`PageCanvas` draws the selection with `live`; on release the edit is one `LOCAL_ORIGIN` transaction (one undo step), and
+`updateItem` re-runs line assignment for moved ink. The selection bar recolours, duplicates, copies, cuts, pastes (an
+in-app clipboard that works across pages and notebooks, copying image assets into the target notebook), brings to
+front / sends to back, comments, asks and deletes; Ctrl/Cmd + C / X / V / D / A and Delete work on desktop. A thread
+started from a selection stores its item ids (`anchorIds`), so its pin, margin card and Q-ink labels follow the ink; once
+that ink is all deleted, the thread shows only in the panel ("Ink removed").

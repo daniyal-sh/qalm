@@ -71,6 +71,10 @@ public class QalmInkModule: Module {
         view.setSmoothing(level ?? 0)
       }
 
+      Prop("lassoMode") { (view: QalmInkView, mode: String?) in
+        view.setLassoMode(mode ?? "free")
+      }
+
       Prop("input") { (view: QalmInkView, input: [String: Any]) in
         view.setInput(
           drawWith: input["drawWith"] as? String ?? "pen",
