@@ -11,8 +11,9 @@ likes to work. Read it first, then `docs/decisions.md`, `docs/tech-spec.md`, `do
   - Ink should be smooth and beautiful, with strong palm rejection.
 - Platforms, all at launch: **iPad, Android tablets, Windows and macOS.** Linux and stylus phones are not a priority.
 - **AI-friendly through MCP only.** A remote agent, such as a tutor LLM on another machine, follows a live writing
-  session token-efficiently. It can **read**, **comment** next to a line, and save its reading of a line
-  (**transcribe**). It can **never edit ink**.
+  session token-efficiently. It gets **regions** (crops of the ink that changed, with the ink around it) and reads the
+  handwriting itself. It can **read**, **comment** on ink, and save its reading of some ink (**transcribe**). It can
+  **never edit ink**.
 - Branding: **"qalm" is always lowercase**, in UI, window titles, installers, emails and docs. The byline is
   "by Apollo". It belongs to the Apollo family alongside Board (`daniyal-sh/apollo`, private, and `daniyal-sh/board`).
   The UI follows Apollo Study Space: see `docs/brand.md`.
@@ -51,7 +52,7 @@ likes to work. Read it first, then `docs/decisions.md`, `docs/tech-spec.md`, `do
 | Minimum OS | iPadOS 17, Android 10, Windows 10, macOS 13 |
 | Accounts | Apple, Google and email magic link. Cloud sync from day one. Free in beta with capped storage, no payments |
 | Backend | Cloudflare: Workers, Durable Objects, R2, D1. Encrypted at rest (Cloudflare default), no E2E |
-| AI | MCP only. Updates go out on a pen pause (≥ 6 s) or the **Ask** button, at most one per 20 s (Ask exempt). Every changed line is sent as an image strip plus the on-device guess. `transcribe` saves a reading. The agent keeps its own chat history; updates are self-contained |
+| AI | MCP only. Updates go out on a pen pause (≥ 6 s) or the **Ask** button, at most one per 20 s (Ask exempt). What changed is sent as **regions** (Q-ink v1.0): new ink black, context grey, erased red, on a 0–1000 grid. No lines (they split maths apart). `transcribe` saves a reading of strokes. The agent keeps its own chat history; updates are self-contained |
 | Server AI | **None.** The image crop goes to the user's agent, which reads it |
 
 **Cost estimates** (GPT-6 Luna: $0.10/M in, $0.01/M cached, $0.50/M out), one hour of maths tutoring:
@@ -75,7 +76,6 @@ modules/qalm-ink   qalm-ink    Expo native module:
                                  (iOS: coalesced and predicted UITouch; Android: front-buffered renderer and
                                  MotionEventPredictor; web: desynchronized canvas and getCoalescedEvents)
                                - QalmInk.renderPdfPage (PDFKit, PdfRenderer, pdf.js). No recognition: ML Kit was removed
-                                 (recognize/ensureModel are deprecated JS no-ops until the app drops its callers)
 apps/app           @qalm/app   Expo SDK 58, expo-router, New Architecture, RN 0.88, React 19.3
 apps/desktop       @qalm/desktop  Electron shell loading the app's web export over a privileged app://qalm protocol
 apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Object (Yjs sync), R2 assets, D1, MCP + OAuth
@@ -83,10 +83,15 @@ apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Objec
 
 - **Data model:**
   - **Docs:** one Yjs doc per user library (`lib:{userId}`), per notebook index (`nb:{id}`) and per page (`pg:{nb}:{page}`).
-  - **Origins:** every local mutation uses `LOCAL_ORIGIN`. Recognition writes use their own origin and stay out of undo.
+  - **Origins:** every local mutation uses `LOCAL_ORIGIN`. The one-time migration from lines uses `MIGRATION_ORIGIN`
+    and stays out of undo.
   - **Undo:** per device, via `Y.UndoManager` (`createUndoManager`).
-- **Line keys:** a line's key is its **first item's id**, which is race-free. The short labels (`L7`, `D2`) exist only
-  in Q-ink, and the server's notebook DocRoom assigns them and never reuses them.
+- **No lines (regions, rev 3):** the model has no line grouping. Agents get regions computed when an update goes out
+  (`packages/core/src/geometry/regions.ts`, `qink.ts`): changed strokes clustered (gap < 2 units; unit = ruling, else
+  2.5 × median stroke height), plus context (≤ ½ unit, then along the row < 1½ units). Region labels (`R7`) are
+  notebook-wide, never reused, stored by the notebook DocRoom with their strokes and box. **Readings** are of strokes
+  (`readings` map: agent or student, stale flag); **comments** anchor to stroke ids (`anchorIds`) with a box fallback.
+  Old pages are migrated once on load (`migratePage`).
 - **Stroke geometry:** perfect-freehand 1.2.3 with pinned settings, ported to Swift and Kotlin.
   - **Same path everywhere:** M p0, then `Q p[i] mid(p[i],p[i+1])`, then close; fewer than 4 points uses lines.
   - **Parity test:** a JVM test checks the Kotlin port against a fixture from core (`pnpm --filter qalm-ink gen:fixture`).
@@ -107,7 +112,7 @@ apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Objec
   - **Access:** every doc is checked against its owner. Assets in R2 are content-addressed (sha256), readable only by
     their uploader, and capped per user (1 GiB by default).
   - **Agents:** MCP at `/mcp` (Streamable HTTP, OAuth 2.1 with dynamic client registration, via
-    `@cloudflare/workers-oauth-provider`) exposes 4 tools: `wait`, `read`, `transcribe`, `comment`. Image strips are
+    `@cloudflare/workers-oauth-provider`) exposes 4 tools: `wait`, `read`, `transcribe`, `comment`. Region images are
     rendered to PNG with resvg-wasm.
 
 ## 5. Status: what exists and what's verified
@@ -116,9 +121,9 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
 
 | Package | Tests | Other verification |
 |---|---|---|
-| core | 173 | Includes equivalence tests of the batched line assignment against the old per-item code |
-| server | 30 | `wrangler dev` smoke test; `wrangler deploy --dry-run` (bundle ~1.1 MB gzipped) |
-| app | 124 | Every round-2 PR checked in headless Chrome, offline and signed in against `wrangler dev` with a scripted MCP agent |
+| core | 137 | Regions (clustering, context, the owner's page, first look, erased, labels, refs), readings stale rules, migration |
+| server | 33 | `wrangler dev` smoke test; `wrangler deploy --dry-run` (bundle ~1.1 MB gzipped) |
+| app | 128 | Every round-2 PR checked in headless Chrome, offline and signed in against `wrangler dev` with a scripted MCP agent |
 | qalm-ink | JVM freehand parity test (31 style × smoothing cases) | Android `assembleDebug` (x86_64); drawing on an emulator and on web |
 | desktop | 3 unit | Packaged `qalm.exe` end-to-end test (Playwright): library, open notebook, draw, reload route, PDF export via the native save dialog, deep link, no console errors |
 
@@ -158,7 +163,7 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
     shape snapping.
   - **PDFs:** PDF backgrounds.
   - **AI:** the comments panel (docked at ≥ 1100 px, floating below that, closed when the window narrows), Ask, and
-    recognition.
+    Reading (what an agent read in the selected ink, with a "stale" badge; editable).
 - **Settings:**
   - Account and pen/palm settings with a test area.
   - AI access: connect URL, pending requests, per-agent comment and transcribe switches, a notebook picker and an
@@ -197,8 +202,8 @@ D1 migrations: `0001_init`, `0002_user_assets`, `0003_notebook_deleted`, `0004_a
 - **No real stylus testing anywhere.** Pressure, tilt, hover, the pen button, `FLAG_CANCELED` and front-buffered latency
   are untested. The Android emulator only injects finger input.
 - `renderPdfPage` on Android hasn't been run on a device. (ML Kit is gone, so there's no model download to test.)
-- **Shim to delete:** `modules/qalm-ink/src/QalmInk.ts` keeps `QalmInk.recognize`/`ensureModel` as no-ops so `apps/app`
-  compiles; delete it (and the `RecognizeLine`/`RecognizeResult` exports) once the app no longer calls them.
+- **Regions are tuned on synthetic handwriting.** The clustering and context constants (2 / ½ / 1½ units) and the image
+  scale (64 px per unit) need checking on real pages and with a real MCP client (image token counts per provider).
 - **Sign-in:** Apple and Google are untested end to end, and they **don't work in the desktop app** (no redirect back
   into the app; this needs a web redirect page). Real Resend email delivery is untested.
 - **Agents:** no real MCP client has connected yet, and image-token costs per provider haven't been measured.
@@ -305,3 +310,8 @@ listed in `apps/server/.dev.vars.example`.
    - **Environment:** T3 restarts and API rate limits interrupted agents repeatedly; agents now push early as draft
      PRs. Use a random free Chrome debug port in browser checks (two agents once shared 9333).
    - **Mockup:** `mockups/ai-integration.html` explains the AI integration end to end.
+9. **Regions (PRs #29, #31):** after a live test where line grouping split maths apart (a superscript ² on its own
+   line, each ∫ a separate drawing, two expressions on one rule split) and the agent "corrected" correct work, the owner
+   removed lines and on-device recognition (ML Kit, #28): agents get cropped stroke changes (regions) with context and
+   coordinates, read handwriting with their own vision, save readings of strokes (stale when the ink changes), and
+   comment on strokes. Q-ink Live v1.0 (`docs/qink-live.md`), tech spec rev 3.
