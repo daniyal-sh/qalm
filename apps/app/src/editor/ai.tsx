@@ -1,7 +1,7 @@
 /** Live agent presence in the editor: the "following along" pill and its popover, and comment cards in the page margin. */
 import type { Comment, Notebook } from '@qalm/core';
 import * as React from 'react';
-import { Animated, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { getPresence, presenceCan, presenceNames, type Presence } from '../api/ai';
 import type { TokenManager } from '../auth/tokens';
@@ -13,6 +13,7 @@ import { Text } from '../ui/Text';
 import { unreadIn, type SeenThreads } from './ai.logic';
 
 const POLL_MS = 8000;
+const NATIVE_DRIVER = Platform.OS !== 'web';
 
 /** Polls GET /ai/presence while the editor is open, signed in, and AI access is on. */
 export function usePresence(tm: TokenManager | null, notebookId: string, enabled: boolean): Presence['agents'] {
@@ -52,8 +53,8 @@ function Dot({ color, on }: { color: string; on: boolean }) {
     }
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(v, { toValue: 0.25, duration: 600, useNativeDriver: true }),
-        Animated.timing(v, { toValue: 1, duration: 600, useNativeDriver: true }),
+        Animated.timing(v, { toValue: 0.25, duration: 600, useNativeDriver: NATIVE_DRIVER }),
+        Animated.timing(v, { toValue: 1, duration: 600, useNativeDriver: NATIVE_DRIVER }),
       ]),
     );
     loop.start();
@@ -154,7 +155,7 @@ export function PresencePill({
 function AppearIn({ children, style }: { children: React.ReactNode; style: object }) {
   const v = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
-    Animated.timing(v, { toValue: 1, duration: 260, useNativeDriver: true }).start();
+    Animated.timing(v, { toValue: 1, duration: 260, useNativeDriver: NATIVE_DRIVER }).start();
   }, [v]);
   return <Animated.View style={[style, { opacity: v, transform: [{ translateX: v.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }] }]}>{children}</Animated.View>;
 }

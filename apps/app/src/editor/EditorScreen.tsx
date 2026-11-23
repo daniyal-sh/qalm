@@ -191,7 +191,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   // Comment cards sit in the margin beside the page when there's room; otherwise pins on the page and the panel.
   const gutter = (contentW - Math.max(0, ...slots.map((x) => x.width))) / 2;
   const wideMargin = gutter >= 200;
-  const marginW = Math.min(260, gutter - 28);
+  const marginW = Math.min(240, gutter - 40);
   const current = currentPageIndex(slots, scrollY, viewport.h);
   const currentPageId = pages[current]?.id ?? null;
 
