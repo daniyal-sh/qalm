@@ -1,4 +1,3 @@
-import type { Comment } from '@qalm/core';
 import * as React from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -8,29 +7,9 @@ import { radius } from '../theme/tokens';
 import { Avatar, Button, IconButton, Segmented, TextField } from '../ui/controls';
 import { EmptyState } from '../ui/layout';
 import { Text } from '../ui/Text';
+import { commentRows, type CommentFilter, type CommentRow } from './CommentsPanel.logic';
 import type { PageData } from './context';
 import { lineQuote } from './view';
-
-export type CommentFilter = 'open' | 'ai' | 'resolved';
-
-export interface CommentRow {
-  pageId: string;
-  data: PageData;
-  comment: Comment;
-}
-
-/** Open / AI / resolved comments, page order then newest first. */
-export function commentRows(pages: Map<string, PageData>, filter: CommentFilter): CommentRow[] {
-  const out: CommentRow[] = [];
-  for (const [pageId, data] of pages) {
-    for (const comment of data.comments) {
-      if (filter === 'resolved' ? !comment.resolved : comment.resolved) continue;
-      if (filter === 'ai' && comment.author.kind !== 'agent') continue;
-      out.push({ pageId, data, comment });
-    }
-  }
-  return out.sort((a, b) => a.data.index - b.data.index || b.comment.createdAt - a.comment.createdAt);
-}
 
 function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: boolean; onSelect(): void; onJump(): void }) {
   const { c } = useTheme();
