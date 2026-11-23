@@ -1,7 +1,6 @@
-import { paperPattern, shapePolylines, type Item, type PageInfo } from '@qalm/core';
+import { inkPaint, paperPattern, shapePolylines, type Item, type PageInfo } from '@qalm/core';
 import { BlendMode, ImageFormat, PaintStyle, Skia, StrokeCap, StrokeJoin, type SkImage, type SkPaint } from '@shopify/react-native-skia';
 
-import { HIGHLIGHTER_ALPHA } from './freehand';
 
 export interface ThumbnailInput {
   info: PageInfo;
@@ -74,9 +73,11 @@ export async function renderThumbnail({ info, items, background, width }: Thumbn
           q.setStrokeWidth(Math.max(it.width * (it.type === 'stroke' && it.tool === 'pen' ? 0.8 : 1), 0.7 / scale));
           q.setStrokeCap(StrokeCap.Round);
           q.setStrokeJoin(StrokeJoin.Round);
-          q.setColor(Skia.Color(it.color));
+          // Colour and alpha as every renderer paints ink (a #rrggbbaa highlighter carries its own alpha).
+          const ink = inkPaint(it.type === 'stroke' ? it.tool : 'pen', it.color);
+          q.setColor(Skia.Color(ink.rgb));
           if (it.type === 'stroke' && it.tool === 'highlighter') {
-            q.setAlphaf(HIGHLIGHTER_ALPHA);
+            q.setAlphaf(ink.alpha);
             q.setBlendMode(BlendMode.Multiply);
           }
         });
@@ -105,7 +106,7 @@ export async function renderThumbnail({ info, items, background, width }: Thumbn
     } else if (it.type === 'text') {
       turn(it.x, it.y, it.rot);
       const lines = Math.max(1, it.text.split('\n').length);
-      const grey = paint((q) => q.setColor(Skia.Color(it.color)));
+      const grey = paint((q) => q.setColor(Skia.Color(inkPaint('pen', it.color).rgb)));
       grey.setAlphaf(0.35);
       for (let l = 0; l < lines; l++) canvas.drawRect(Skia.XYWHRect(it.x, it.y + l * it.fontSize * 1.3 + it.fontSize * 0.25, it.w * 0.9, it.fontSize * 0.6), grey);
       canvas.restore();
