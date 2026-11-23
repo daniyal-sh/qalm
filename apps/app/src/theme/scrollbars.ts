@@ -3,8 +3,6 @@
  * the scrolling area (so a page scroller's bar never reads as a divider between the page and a panel). Native keeps the
  * platform's own overlay indicators (`indicatorStyle` follows the theme).
  */
-import { Platform } from 'react-native';
-
 import type { Colors } from './tokens';
 
 /** The thumb colour while its scroller is hovered (solid, on brand: a step above `line`). */
@@ -36,7 +34,8 @@ const STYLE_ID = 'qalm-scrollbars';
 
 /** Installs (or updates) the stylesheet on web; a no-op on native. */
 export function applyWebScrollbars(scheme: 'light' | 'dark', c: Pick<Colors, 'muted'>): void {
-  if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+  // Native has no DOM (and keeps its own indicators).
+  if (typeof document === 'undefined' || !document.head) return;
   let el = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
   if (!el) {
     el = document.createElement('style');
