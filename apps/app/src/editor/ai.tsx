@@ -5,6 +5,7 @@ import { Animated, Modal, Platform, Pressable, StyleSheet, View } from 'react-na
 
 import { getPresence, presenceCan, presenceNames, type Presence } from '../api/ai';
 import type { TokenManager } from '../auth/tokens';
+import { Appear } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
 import { radius, shadow2 } from '../theme/tokens';
 import { confirm } from '../ui/confirm';
@@ -137,7 +138,7 @@ export function PresencePill({
       </Pressable>
       <Modal visible={!!anchor} transparent animationType="none" onRequestClose={() => setAnchor(null)} supportedOrientations={['portrait', 'landscape']}>
         <Pressable accessibilityLabel="Close" style={StyleSheet.absoluteFill} onPress={() => setAnchor(null)} />
-        <View style={[styles.pop, shadow2, { left: Math.max(8, (anchor?.x ?? 0) - 40), top: anchor?.y ?? 0, backgroundColor: c.surface, borderColor: c.line }]}>
+        <Appear from="top" distance={4} scale duration={120} style={[styles.pop, shadow2, { left: Math.max(8, (anchor?.x ?? 0) - 40), top: anchor?.y ?? 0, backgroundColor: c.surface, borderColor: c.line }]}>
           <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
             <Avatar name={agents[0]?.name ?? 'AI'} kind="agent" size={32} />
             <View style={{ flex: 1 }}>
@@ -174,7 +175,7 @@ export function PresencePill({
               }}
             />
           </View>
-        </View>
+        </Appear>
       </Modal>
     </>
   );
