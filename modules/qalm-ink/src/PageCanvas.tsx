@@ -26,6 +26,7 @@ import {
 import * as React from 'react';
 
 import figtree from '../assets/fonts/Figtree-Regular.ttf';
+import notoMath from '../assets/fonts/NotoSansMath-Subset.ttf';
 import { disposeLater } from './dispose';
 import { provideTextFonts, textParagraph } from './textMetrics';
 import { INK_CHUNK, inkGeometryKey, inkRuns, sameItems, type InkItem, type Run } from './inkRuns';
@@ -333,7 +334,8 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items, selectio
   const { w: pageW, h: pageH } = info.size;
   const scale = width / pageW;
   const height = Math.round(pageH * scale);
-  const fonts = useFonts({ Figtree: [figtree] });
+  // Figtree, falling back to Noto Sans Math (maths symbols and Greek): see `TEXT_FONTS`.
+  const fonts = useFonts({ Figtree: [figtree], NotoSansMath: [notoMath] });
   // Text boxes' heights (frames, hit boxes) are measured with this font once it has loaded.
   if (fonts) provideTextFonts(fonts);
   const pdf = usePageImage(pdfImage);

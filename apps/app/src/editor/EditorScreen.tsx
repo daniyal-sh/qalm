@@ -1,4 +1,4 @@
-import { createNotebookUndoManager, Notebook, Page, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem } from '@qalm/core';
+import { createNotebookUndoManager, inkOnPaper, Notebook, Page, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem, type Item } from '@qalm/core';
 import { router } from 'expo-router';
 import { QalmInk, renderThumbnail } from 'qalm-ink';
 import * as React from 'react';
@@ -24,7 +24,8 @@ import { CommentsPanel } from './CommentsPanel';
 import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence } from './ai';
 import { markAllSeen, marginCards, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditingText, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
-import { getClip, pasteItems, setClip, useClip } from './clipboard';
+import { clipSetAt, getClip, pasteItems, setClip, useClip } from './clipboard';
+import { pastedImage, pastedText, pasteSource, readPaste, systemChangedAt, viewCentre, watchSystemClipboard } from './systemPaste';
 import { cloneItems, recolorPatch, selectionBBox, selectionSwatch } from './items';
 import { trackModifiers } from './modifiers';
 import { SelectionThumb } from './SelectionThumb';
@@ -355,6 +356,39 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       setTool('lasso');
       setSelection({ pageId: target.pageId, ids: copies.map((x) => x.id) });
     },
+    /** Web / Electron paste event: qalm's own clip, or an image or text from another app (at the view's centre). */
+    pasteFrom: (dt: DataTransfer | null): boolean => {
+      const sys = readPaste(dt);
+      const src = pasteSource(sys, clipSetAt(), systemChangedAt());
+      if (src === 'qalm') {
+        selRef.current.paste();
+        return true;
+      }
+      const info = pages[current];
+      const slot = slots[current];
+      const page = info ? pageData.get(info.id)?.page : undefined;
+      if (!src || !notebook || !info || !slot || !page) return false;
+      const at = viewCentre(slot, scrollYRef.current, viewportRef.current.h, info.size);
+      const place = (item: Item) => {
+        page.addItem(item);
+        touchPage(info.id);
+        setTool('lasso');
+        setSelection({ pageId: info.id, ids: [item.id] });
+      };
+      if (src === 'text') place(pastedText(sys.text, at, info.size, inkOnPaper(tools.penColor, info.paperColor), newId()));
+      else {
+        const blob = sys.image!;
+        void run('Adding image…', async () => {
+          const asset = await s.assets.put(new Uint8Array(await blob.arrayBuffer()), blob.type || 'image/png', 'Pasted image');
+          notebook.addAsset(asset);
+          const bmp = await createImageBitmap(blob);
+          const px = { w: bmp.width, h: bmp.height };
+          bmp.close();
+          place(pastedImage(asset.id, px, at, info.size, newId()));
+        });
+      }
+      return true;
+    },
     duplicate: () => {
       if (!selection || !selectionPage) return;
       const copies = cloneItems(selectedItems(), 16, 16, newId);
@@ -417,9 +451,6 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         if (k === 'c') a.copy();
         else if (k === 'x') a.cut();
         else a.duplicate();
-      } else if (mod && k === 'v' && getClip()) {
-        ev.preventDefault();
-        a.paste();
       } else if (mod && k === 'a') {
         ev.preventDefault();
         a.selectAll();
@@ -447,6 +478,22 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [undo, selection, selectionPage, setTool]);
+
+  // Ctrl/Cmd+V comes as the browser's paste event, which carries the system clipboard (no permission prompt).
+  React.useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const stopWatching = watchSystemClipboard();
+    const onPaste = (ev: ClipboardEvent) => {
+      const target = ev.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (selRef.current.pasteFrom(ev.clipboardData)) ev.preventDefault();
+    };
+    document.addEventListener('paste', onPaste);
+    return () => {
+      stopWatching();
+      document.removeEventListener('paste', onPaste);
+    };
+  }, []);
 
   // ---- actions ----
   const [menu, setMenu] = React.useState<MenuState>(null);
