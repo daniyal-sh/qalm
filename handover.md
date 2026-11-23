@@ -115,11 +115,33 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
 
 | Package | Tests | Other verification |
 |---|---|---|
-| core | 34 | |
-| server | 24 | `wrangler dev` smoke test; `wrangler deploy --dry-run` |
-| app | 53 | Main flows checked in headless Chrome, offline and against the local server |
-| qalm-ink | JVM freehand parity test | Android `assembleDebug` (x86_64); drawing on an emulator and on web |
-| desktop | 3 unit | Packaged `qalm.exe` end-to-end test (Playwright). Last run passed: library, open notebook, draw, reload route, PDF export via the native save dialog, deep link, no console errors |
+| core | 173 | Includes equivalence tests of the batched line assignment against the old per-item code |
+| server | 30 | `wrangler dev` smoke test; `wrangler deploy --dry-run` (bundle ~1.1 MB gzipped) |
+| app | 124 | Every round-2 PR checked in headless Chrome, offline and signed in against `wrangler dev` with a scripted MCP agent |
+| qalm-ink | JVM freehand parity test (31 style × smoothing cases) | Android `assembleDebug` (x86_64); drawing on an emulator and on web |
+| desktop | 3 unit | Packaged `qalm.exe` end-to-end test (Playwright): library, open notebook, draw, reload route, PDF export via the native save dialog, deep link, no console errors |
+
+**Round 2 (PRs #1–#24, all merged; audit issue #14 covers the findings):**
+- **Ink:** no blank frame when a stroke ends (PageCanvas reports what it drew; #5); pen styles fountain/ball/brush and
+  stroke smoothing low/medium/high, stored per stroke, identical in core/web/Kotlin/Swift (#6); default ink follows the
+  paper colour (#24).
+- **Editing:** lasso tap-select, box select, handles to move/resize/rotate, inline text editing, clipboard incl. paste
+  from other apps on web/desktop, Ctrl/Cmd shortcuts (#8, #20); hold-to-snap shapes at 350 ms incl. rotated rects and
+  ellipses, diamond, pentagon, hexagon, star, double arrow (#11); custom colours: picker + synced swatches per tool,
+  per-colour highlighter opacity (#12); maths symbols in text boxes via a Noto Sans Math subset (#20).
+- **Performance:** chunked Skia pictures, page windowing, nearest-first page loading, PDF render queue and LRU, page-doc
+  LRU that keeps undo (#9); batched/incremental line assignment (3000-stroke move 2.4 s → ~45 ms; #13). Benchmark
+  harness in the repo (300-page notebook).
+- **Pages:** page navigator (thumbnails, reorder, duplicate, delete, bookmarks, Ctrl+G; #10); Paper… and Cover… (#24).
+- **AI** (protocol in `docs/qink-live.md` v0.4): threads both ways (`note`, `re`, `comment` with `thread`/`resolve`),
+  Ask about a selection with a crop row (#1, #7); presence pill with Pause sharing / Stop, "Thinking…", margin comment
+  cards that follow their ink (#7, #8); robust malformed Asks and open-threads-only for a new agent, `read("C5")` (#15);
+  Readings: view and edit a line's text, agent names on transcriptions (#22); notebook-wide thread index for the panel,
+  badge and toasts (#23); accessible comments panel and real read state (#21).
+- **Correctness/polish:** no ghost notebooks, Asks never dropped, Add page scrolls, undo after page delete (#16);
+  night-paper ink, no empty text boxes, measured text height (#17); PDF export with Figtree + Symbol, WebP/GIF
+  conversion, clipboard across restarts, dev-server reload (#18); in-app confirm dialogs and toolbar/library/settings
+  polish (#19); hermetic server tests (#4).
 
 **What the app has:**
 - **Sign-in:**
@@ -181,8 +203,16 @@ D1 migrations: `0001_init`, `0002_user_assets`, `0003_notebook_deleted`, `0004_a
 - **Not deployed.** The Cloudflare resource ids in `apps/server/wrangler.jsonc` are placeholders.
   `MAGIC_LINK_URL` assumes the web app lives at `https://qalm.app/auth/email/verify`; for local dev use
   `http://localhost:8081/auth/email/verify`.
+- **Round 2, untested on devices:** pen styles/smoothing feel, the 50 ms native ink hand-off, tap-vs-scroll and handle
+  dragging with touch/stylus, swatch drag in the toolbar, the new dialogs/sheets and the maths fallback font on
+  iOS/Android, thumbnails and chunked pictures on a real GPU. Swatch sync and the thread index were only tested with
+  two in-process docs, not two signed-in devices.
 - **Smaller gaps:**
-  - Users can reply to agent comments but can't start their own.
+  - Paste from other apps is web/desktop only; native Paste uses qalm's own clipboard.
+  - Selecting a far comment thread scrolls to the top of its page, not its line.
+  - Emptying an existing text box and reloading (without the page unmounting) keeps the empty box.
+  - Arcs aren't recognised as shapes; there's no snap preview while holding.
+  - Fractions like ⅔ have no glyph on the page; PDF export uses Symbol, so symbol-heavy lines may wrap differently.
   - Pinch zoom on tablets works only with "pen only"; with "pen and finger" use the ± buttons.
   - The live highlighter uses plain alpha; finished highlights use multiply.
   - The Android overlay sits on top of the window (`setZOrderOnTop`), so UI placed over the page would be hidden.
@@ -262,3 +292,13 @@ listed in `apps/server/.dev.vars.example`.
 6. **Final review** by a fresh agent found 11 issues; two agents fixed them in parallel.
 7. **Rename to lowercase "qalm" everywhere** and **no menu bar** on Windows (owner request, after testing the packaged
    desktop app).
+8. **Round 2** (owner: "audit qalm in detail… polished UX like GoodNotes… make a lot of PRs"):
+   - **Owner decisions:** keep the MCP general (no tutor mode); hold-to-snap shapes; lasso + tap-to-select; colour
+     picker + synced swatches; page navigator and pen styles; a new agent gets open threads only; build Readings and
+     Paper/Cover rather than dropping the promises.
+   - **Process:** agents opened PRs; the lead verified each (all package checks on the merged result) and merged.
+     PRs #1–#24 merged; #2/#3 were replaced by #7 after a stacked-merge mistake. A full audit (issue #14, 35 findings)
+     drove the fix PRs.
+   - **Environment:** T3 restarts and API rate limits interrupted agents repeatedly; agents now push early as draft
+     PRs. Use a random free Chrome debug port in browser checks (two agents once shared 9333).
+   - **Mockup:** `mockups/ai-integration.html` explains the AI integration end to end.

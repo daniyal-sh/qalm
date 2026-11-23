@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qalm AI integration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #f3f3f5; --surface: #ffffff; --surface-2: #f8f8fa; --ink: #27272a; --muted: #6b6b73; --faint: #9a9aa3;
+    --line: #e4e4e8; --line-strong: #d4d4da;
+    --accent: #4338ca; --accent-ink: #3730a3; --accent-soft: #eef0fb;
+    --ai: #1d4ed8; --ai-soft: #ebf0fc; --ai-line: #bfcdf4;
+    --teal: #0f766e; --teal-soft: #e6f3f1;
+    --warn: #b45309; --warn-soft: #fdf3e6; --good: #15803d; --good-soft: #e9f6ee; --bad: #b91c1c;
+    --paper: #ffffff; --rule: #e7e9ef; --pen: #27272a; --hl: rgba(250, 204, 21, .45);
+    --r8: 8px; --r12: 12px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161618; --surface: #1e1e21; --surface-2: #25252a; --ink: #ececef; --muted: #a3a3ad; --faint: #75757f;
+      --line: #2f2f35; --line-strong: #3b3b43;
+      --accent: #7c74f0; --accent-ink: #a5a0f7; --accent-soft: #27254a;
+      --ai: #60a5fa; --ai-soft: #1b2a40; --ai-line: #2f4b72;
+      --teal: #2dd4bf; --teal-soft: #15302d;
+      --warn: #fbbf24; --warn-soft: #362a14; --good: #4ade80; --good-soft: #15301f; --bad: #f87171;
+      --paper: #ffffff; --rule: #e7e9ef; --pen: #27272a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161618; --surface: #1e1e21; --surface-2: #25252a; --ink: #ececef; --muted: #a3a3ad; --faint: #75757f;
+    --line: #2f2f35; --line-strong: #3b3b43;
+    --accent: #7c74f0; --accent-ink: #a5a0f7; --accent-soft: #27254a;
+    --ai: #60a5fa; --ai-soft: #1b2a40; --ai-line: #2f4b72;
+    --teal: #2dd4bf; --teal-soft: #15302d;
+    --warn: #fbbf24; --warn-soft: #362a14; --good: #4ade80; --good-soft: #15301f; --bad: #f87171;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 15px/1.55 Figtree, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  code, .mono { font-family: "Geist Mono", ui-monospace, monospace; font-size: .86em; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px 80px; }
+
+  /* top bar */
+  .top { position: sticky; top: 0; z-index: 10; background: var(--surface); border-bottom: 1px solid var(--line); }
+  .top .wrap { display: flex; align-items: center; gap: 14px; padding-bottom: 0; height: 56px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
+  .brand b { font-weight: 600; letter-spacing: -.02em; font-size: 17px; line-height: 1; }
+  .brand small { display: block; color: var(--muted); font-size: 10px; font-weight: 500; }
+  .nav { display: flex; gap: 2px; margin-left: auto; overflow-x: auto; scrollbar-width: none; }
+  .nav a { color: var(--muted); text-decoration: none; font-weight: 500; font-size: 13px; padding: 8px 10px; border-radius: var(--r8); white-space: nowrap; }
+  .nav a:hover { background: var(--surface-2); color: var(--ink); }
+  .theme { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: var(--r8); height: 34px; padding: 0 10px; font: inherit; font-size: 13px; cursor: pointer; }
+
+  /* hero */
+  .hero { padding: 48px 0 28px; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--ai); font-weight: 600; font-size: 13px; background: var(--ai-soft); border: 1px solid var(--ai-line); padding: 4px 10px; border-radius: 999px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; }
+  h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.08; letter-spacing: -.03em; margin: 16px 0 12px; font-weight: 700; }
+  .lead { font-size: 18px; color: var(--muted); max-width: 760px; margin: 0; }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500; }
+  .pill svg { flex: none; }
+
+  section { margin-top: 56px; scroll-margin-top: 72px; }
+  h2 { font-size: 26px; letter-spacing: -.02em; margin: 0 0 6px; font-weight: 700; }
+  .sub { color: var(--muted); margin: 0 0 22px; max-width: 760px; }
+  h3 { font-size: 16px; margin: 0 0 6px; font-weight: 600; letter-spacing: -.01em; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r12); padding: 20px; }
+  .grid { display: grid; gap: 16px; }
+  .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 860px) { .g2, .g3 { grid-template-columns: minmax(0, 1fr); } }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--surface-2); vertical-align: middle; }
+  .tag.ai { color: var(--ai); background: var(--ai-soft); border-color: var(--ai-line); }
+  .tag.soon { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+  .tag.live { color: var(--good); background: var(--good-soft); border-color: transparent; }
+
+  /* architecture */
+  .arch { overflow-x: auto; }
+  .arch svg { display: block; width: 100%; min-width: 760px; height: auto; }
+  .arch text { font-family: Figtree, system-ui, sans-serif; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; font-size: 13px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 14px; height: 4px; border-radius: 2px; display: inline-block; }
+
+  /* steps */
+  .steps { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .steps { grid-template-columns: minmax(0, 1fr); } }
+  .steplist { display: flex; flex-direction: column; gap: 6px; }
+  .step { display: flex; gap: 12px; align-items: flex-start; text-align: left; width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r12); padding: 12px 14px; cursor: pointer; font: inherit; color: inherit; min-height: 44px; }
+  .step:hover { border-color: var(--line-strong); }
+  .step[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .step .n { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 600; font-size: 13px; background: var(--surface-2); border: 1px solid var(--line); }
+  .step[aria-selected="true"] .n { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .step b { display: block; font-weight: 600; font-size: 14px; }
+  .step small { color: var(--muted); font-size: 12px; }
+  .stage { min-height: 520px; }
+  .panel[hidden] { display: none; }
+  .who { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+
+  /* device mockups */
+  .device { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 16px; overflow: hidden; }
+  .bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .bar .title b { display: block; font-size: 14px; font-weight: 600; line-height: 1.2; }
+  .bar .title small { color: var(--muted); font-size: 11px; }
+  .ib { width: 32px; height: 32px; border-radius: var(--r8); display: grid; place-items: center; color: var(--muted); border: 1px solid transparent; flex: none; }
+  .ib.on { background: var(--accent); color: #fff; }
+  .spacer { flex: 1; }
+  .presence { display: inline-flex; align-items: center; gap: 7px; color: var(--ai); background: var(--ai-soft); border: 1px solid var(--ai-line); border-radius: 999px; padding: 5px 11px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .presence .dot { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .presence .dot, .thinking .dots i { animation: none; } }
+  .askbtn { display: inline-flex; align-items: center; gap: 6px; background: var(--ai); color: #fff; border-radius: var(--r8); padding: 7px 12px; font-size: 13px; font-weight: 600; }
+  .canvas { position: relative; background: var(--surface-2); padding: 16px; display: flex; gap: 14px; }
+  .paper { position: relative; flex: 1; min-width: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 4px; aspect-ratio: 595 / 520; background-image: repeating-linear-gradient(to bottom, transparent 0 39px, var(--rule) 39px 40px); background-position: 0 30px; }
+  .paper svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .margin { width: 230px; flex: none; display: flex; flex-direction: column; gap: 10px; }
+  @media (max-width: 700px) { .margin { width: 170px; } }
+  .mcard { background: var(--surface); border: 1px solid var(--ai-line); border-left: 3px solid var(--ai); border-radius: var(--r8); padding: 10px 11px; font-size: 12.5px; color: var(--ink); }
+  .mcard .h { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; color: var(--ai); margin-bottom: 4px; }
+  .mcard .h .lbl { margin-left: auto; color: var(--faint); font-family: "Geist Mono", monospace; font-weight: 500; font-size: 11px; }
+  .mcard.me { border-color: var(--line); border-left-color: var(--accent); }
+  .mcard.me .h { color: var(--accent); }
+  .reply { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .thinking { display: inline-flex; align-items: center; gap: 6px; color: var(--ai); font-weight: 600; font-size: 12px; }
+  .thinking .dots i { display: inline-block; width: 4px; height: 4px; border-radius: 50%; background: currentColor; margin-right: 2px; animation: pulse 1.2s infinite; }
+  .thinking .dots i:nth-child(2) { animation-delay: .2s; } .thinking .dots i:nth-child(3) { animation-delay: .4s; }
+  .popover { position: absolute; right: 12px; top: 54px; width: 270px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r12); padding: 14px; z-index: 2; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+  .popover h4 { margin: 0 0 2px; font-size: 14px; }
+  .popover ul { margin: 10px 0; padding: 0; list-style: none; font-size: 13px; }
+  .popover li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+  .check { color: var(--good); font-weight: 700; }
+  .cross { color: var(--faint); font-weight: 700; }
+  .btnrow { display: flex; gap: 8px; }
+  .btn { flex: 1; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); border-radius: var(--r8); padding: 8px 10px; font: inherit; font-size: 13px; font-weight: 600; text-align: center; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.ai { background: var(--ai); color: #fff; border-color: var(--ai); }
+  .btn.danger { color: var(--bad); }
+  .selbar { position: absolute; left: 50%; transform: translateX(-50%); bottom: 14px; display: flex; gap: 4px; align-items: center; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r12); padding: 5px; box-shadow: 0 6px 18px rgba(0,0,0,.12); white-space: nowrap; }
+  .selbar span { font-size: 12px; padding: 6px 8px; border-radius: var(--r8); color: var(--muted); font-weight: 500; }
+  .selbar span.ai { color: #fff; background: var(--ai); }
+  .sheet { position: absolute; inset: auto 12px 12px 12px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; padding: 14px; box-shadow: 0 -6px 24px rgba(0,0,0,.14); z-index: 3; }
+  .sheet .crop { border: 1px solid var(--line); border-radius: var(--r8); background: #fff; height: 74px; display: block; width: 100%; }
+  .field { border: 1px solid var(--accent); border-radius: var(--r8); padding: 9px 11px; font-size: 13px; margin: 10px 0; color: var(--ink); background: var(--surface); }
+
+  /* settings / consent */
+  .rows { border: 1px solid var(--line); border-radius: var(--r12); overflow: hidden; background: var(--surface); }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); font-size: 13.5px; }
+  .row:first-child { border-top: 0; }
+  .row .t b { display: block; font-weight: 600; font-size: 13.5px; }
+  .row .t small { color: var(--muted); font-size: 12px; }
+  .toggle { margin-left: auto; width: 38px; height: 22px; border-radius: 999px; background: var(--line-strong); position: relative; flex: none; }
+  .toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; }
+  .toggle.on { background: var(--accent); }
+  .toggle.on::after { left: 19px; }
+  .urlbox { display: flex; gap: 8px; align-items: center; font-family: "Geist Mono", monospace; font-size: 12.5px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r8); padding: 8px 10px; }
+  .urlbox span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; font-size: 12px; margin: 2px 4px 2px 0; background: var(--surface-2); }
+  .chip.sel { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+
+  /* what the agent sees */
+  .code { background: #1c1c20; color: #e6e6ea; border-radius: var(--r12); padding: 16px 18px; font-family: "Geist Mono", monospace; font-size: 13px; line-height: 1.7; overflow-x: auto; white-space: pre; border: 1px solid #2c2c32; }
+  .code .c { color: #8b8b95; } .code .k { color: #a5b4fc; } .code .g { color: #86efac; } .code .r { color: #fca5a5; } .code .s { color: #fde68a; } .code .b { color: #93c5fd; }
+  .strip { background: #fff; border: 1px solid var(--line); border-radius: var(--r12); padding: 6px; }
+  .strip svg { display: block; width: 100%; height: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-top: 0; }
+  td code { white-space: nowrap; }
+  .tablewrap { overflow-x: auto; }
+
+  /* guard rails */
+  .rail { display: flex; gap: 12px; }
+  .rail .ic { flex: none; width: 34px; height: 34px; border-radius: var(--r8); display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+  .rail.ai .ic { background: var(--ai-soft); color: var(--ai); }
+  .rail.good .ic { background: var(--good-soft); color: var(--good); }
+  .rail p { margin: 0; color: var(--muted); font-size: 13.5px; }
+
+  /* cost */
+  .bars { display: flex; flex-direction: column; gap: 14px; }
+  .bars .lab { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+  .track { height: 14px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .fill { height: 100%; border-radius: 999px; }
+  .note { font-size: 12.5px; color: var(--muted); margin-top: 12px; }
+  footer { margin-top: 64px; color: var(--faint); font-size: 12.5px; border-top: 1px solid var(--line); padding-top: 18px; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="qalm">
+      <svg width="30" height="30" viewBox="0 0 120 120" aria-hidden="true">
+        <path d="M18 66 C 8 52, 40 36, 72 34 C 98 32, 114 38, 112 46" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round"/>
+        <path d="M60 86 C54 73 45 61 44 48 C43 37 50 28 60 19 C70 28 77 37 76 48 C75 61 66 73 60 86Z" fill="var(--ink)"/>
+        <path d="M60 80 L60 57" stroke="var(--surface)" stroke-width="3"/>
+        <circle cx="60" cy="50" r="4.5" fill="var(--surface)"/>
+        <path d="M112 46 C 110 60, 80 74, 48 76 C 26 77, 14 72, 18 66" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round"/>
+        <circle cx="107.3" cy="39.3" r="7.5" fill="var(--ai)"/>
+      </svg>
+      <span><b>qalm</b><small>by Apollo</small></span>
+    </a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#picture">Big picture</a>
+      <a href="#flow">How it flows</a>
+      <a href="#app">In the app</a>
+      <a href="#agent">What the agent sees</a>
+      <a href="#tools">Tools</a>
+      <a href="#control">You're in control</a>
+      <a href="#cost">Cost</a>
+    </nav>
+    <button class="theme" id="theme" type="button" aria-label="Toggle light or dark">Theme</button>
+  </div>
+</header>
+
+<main class="wrap" id="top">
+
+  <div class="hero">
+    <span class="eyebrow"><span class="dot"></span> AI in qalm</span>
+    <h1>Your own AI, following your handwriting live.</h1>
+    <p class="lead">qalm has no AI of its own. You connect an agent you already use, such as Claude, ChatGPT or any MCP client, and it runs wherever it runs. While you write, it receives compact updates: a small picture of each changed line plus your device's guess at the text. It answers with comments next to your lines. It can read and comment, but it can never touch your ink.</p>
+    <div class="pills">
+      <span class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg> MCP only, no server-side AI</span>
+      <span class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Read and comment, never edit ink</span>
+      <span class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> About 10× cheaper than screenshots</span>
+      <span class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8Z"/><path d="M6 1v3M10 1v3M14 1v3"/></svg> Off by default, per notebook</span>
+    </div>
+  </div>
+
+  <!-- 1. BIG PICTURE -->
+  <section id="picture">
+    <h2>The big picture</h2>
+    <p class="sub">There are three parts: your device, qalm's server, and your agent. The server syncs your notes and translates ink into something an agent can read cheaply. Any thinking happens in your agent, not in qalm.</p>
+    <div class="card arch">
+      <svg viewBox="0 0 1060 400" role="img" aria-label="Architecture: device, qalm server, agent">
+        <defs>
+          <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--accent)"/></marker>
+          <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--ai)"/></marker>
+        </defs>
+        <!-- device -->
+        <rect x="10" y="30" width="300" height="340" rx="14" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+        <text x="30" y="62" font-size="15" font-weight="700" fill="var(--ink)">Your device</text>
+        <text x="30" y="82" font-size="12" fill="var(--muted)">iPad · Android tablet · Windows · Mac</text>
+        <rect x="30" y="100" width="260" height="56" rx="10" fill="var(--surface)" stroke="var(--line)"/>
+        <text x="46" y="124" font-size="13" font-weight="600" fill="var(--ink)">You write</text>
+        <text x="46" y="143" font-size="12" fill="var(--muted)">ink, shapes, text, PDFs, comments</text>
+        <rect x="30" y="166" width="260" height="56" rx="10" fill="var(--surface)" stroke="var(--line)"/>
+        <text x="46" y="190" font-size="13" font-weight="600" fill="var(--ink)">On-device reading (ML Kit)</text>
+        <text x="46" y="209" font-size="12" fill="var(--muted)">a quick text guess per line, free</text>
+        <rect x="30" y="232" width="260" height="56" rx="10" fill="var(--surface)" stroke="var(--line)"/>
+        <text x="46" y="256" font-size="13" font-weight="600" fill="var(--ink)">Controls</text>
+        <text x="46" y="275" font-size="12" fill="var(--muted)">AI access · Ask · pause · stop</text>
+        <rect x="30" y="298" width="260" height="56" rx="10" fill="var(--ai-soft)" stroke="var(--ai-line)"/>
+        <text x="46" y="322" font-size="13" font-weight="600" fill="var(--ai)">Agent comments appear</text>
+        <text x="46" y="341" font-size="12" fill="var(--muted)">in the margin, live</text>
+
+        <!-- server -->
+        <rect x="380" y="30" width="300" height="340" rx="14" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+        <text x="400" y="62" font-size="15" font-weight="700" fill="var(--ink)">qalm server</text>
+        <text x="400" y="82" font-size="12" fill="var(--muted)">Cloudflare · no AI model here</text>
+        <rect x="400" y="100" width="260" height="46" rx="10" fill="var(--surface)" stroke="var(--line)"/>
+        <text x="416" y="128" font-size="13" font-weight="600" fill="var(--ink)">Sync (your notebooks, encrypted)</text>
+        <rect x="400" y="154" width="260" height="46" rx="10" fill="var(--surface)" stroke="var(--line)"/>
+        <text x="416" y="182" font-size="13" font-weight="600" fill="var(--ink)">Q-ink encoder: what changed?</text>
+        <rect x="400" y="208" width="260" height="46" rx="10" fill="var(--surface)" stroke="var(--line)"/>
+        <text x="416" y="236" font-size="13" font-weight="600" fill="var(--ink)">Image strip: changed lines → PNG</text>
+        <rect x="400" y="262" width="260" height="46" rx="10" fill="var(--surface)" stroke="var(--line)"/>
+        <text x="416" y="290" font-size="13" font-weight="600" fill="var(--ink)">Access checks on every call</text>
+        <rect x="400" y="316" width="260" height="40" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="416" y="341" font-size="13" font-weight="600" fill="var(--accent-ink)">MCP endpoint  /mcp  (OAuth)</text>
+
+        <!-- agent -->
+        <rect x="750" y="30" width="300" height="340" rx="14" fill="var(--ai-soft)" stroke="var(--ai-line)"/>
+        <text x="770" y="62" font-size="15" font-weight="700" fill="var(--ai)">Your AI agent</text>
+        <text x="770" y="82" font-size="12" fill="var(--muted)">Claude, ChatGPT, any MCP client, anywhere</text>
+        <rect x="770" y="100" width="260" height="56" rx="10" fill="var(--surface)" stroke="var(--ai-line)"/>
+        <text x="786" y="124" font-size="13" font-weight="600" fill="var(--ink)">Its own model and memory</text>
+        <text x="786" y="143" font-size="12" fill="var(--muted)">keeps its own chat history</text>
+        <rect x="770" y="166" width="260" height="56" rx="10" fill="var(--surface)" stroke="var(--ai-line)"/>
+        <text x="786" y="190" font-size="13" font-weight="600" fill="var(--ink)">Calls 4 tools</text>
+        <text x="786" y="209" font-size="12" fill="var(--muted)" font-family="Geist Mono, monospace">wait · read · transcribe · comment</text>
+        <rect x="770" y="232" width="260" height="56" rx="10" fill="var(--surface)" stroke="var(--ai-line)"/>
+        <text x="786" y="256" font-size="13" font-weight="600" fill="var(--ink)">Reads image + guess</text>
+        <text x="786" y="275" font-size="12" fill="var(--muted)">decides what to say, if anything</text>
+        <rect x="770" y="298" width="260" height="56" rx="10" fill="var(--surface)" stroke="var(--ai-line)"/>
+        <text x="786" y="322" font-size="13" font-weight="600" fill="var(--ink)">Can't edit ink</text>
+        <text x="786" y="341" font-size="12" fill="var(--muted)">there's no tool or path for it</text>
+
+        <!-- arrows -->
+        <path d="M312 150 C 345 150, 350 130, 378 130" fill="none" stroke="var(--accent)" stroke-width="2.5" marker-end="url(#a1)"/>
+        <text x="318" y="118" font-size="11.5" fill="var(--accent-ink)" font-weight="600">ink syncs</text>
+        <path d="M378 330 C 350 330, 345 326, 312 326" fill="none" stroke="var(--ai)" stroke-width="2.5" marker-end="url(#a2)"/>
+        <text x="318" y="356" font-size="11.5" fill="var(--ai)" font-weight="600">comments sync back</text>
+        <path d="M682 320 C 715 320, 722 200, 748 200" fill="none" stroke="var(--accent)" stroke-width="2.5" marker-end="url(#a1)"/>
+        <text x="688" y="262" font-size="11.5" fill="var(--accent-ink)" font-weight="600">updates</text>
+        <path d="M748 260 C 720 260, 716 345, 684 345" fill="none" stroke="var(--ai)" stroke-width="2.5" marker-end="url(#a2)"/>
+        <text x="690" y="388" font-size="11.5" fill="var(--ai)" font-weight="600">comment / transcribe</text>
+      </svg>
+      <div class="legend">
+        <span><i class="sw" style="background:var(--accent)"></i> your writing travelling out</span>
+        <span><i class="sw" style="background:var(--ai)"></i> the agent's words coming back</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. FLOW -->
+  <section id="flow">
+    <h2>How it flows, step by step</h2>
+    <p class="sub">Click through a real session: connecting an agent once, then a maths problem with a question and an answer.</p>
+    <div class="steps">
+      <div class="steplist" role="tablist" aria-label="Steps">
+        <button class="step" role="tab" aria-selected="true" data-step="0"><span class="n">1</span><span><b>Connect your agent</b><small>once, with the qalm MCP link</small></span></button>
+        <button class="step" role="tab" aria-selected="false" data-step="1"><span class="n">2</span><span><b>Approve what it can see</b><small>pick notebooks and switches</small></span></button>
+        <button class="step" role="tab" aria-selected="false" data-step="2"><span class="n">3</span><span><b>Turn on AI access</b><small>per notebook, off by default</small></span></button>
+        <button class="step" role="tab" aria-selected="false" data-step="3"><span class="n">4</span><span><b>Write; pause; it's sent</b><small>after 6 s of pen rest</small></span></button>
+        <button class="step" role="tab" aria-selected="false" data-step="4"><span class="n">5</span><span><b>The agent comments</b><small>a card next to your line</small></span></button>
+        <button class="step" role="tab" aria-selected="false" data-step="5"><span class="n">6</span><span><b>Reply in the thread</b><small>it hears you at once</small></span></button>
+        <button class="step" role="tab" aria-selected="false" data-step="6"><span class="n">7</span><span><b>Ask about a selection</b><small>lasso, then Ask</small></span></button>
+        <button class="step" role="tab" aria-selected="false" data-step="7"><span class="n">8</span><span><b>Pause or stop anytime</b><small>from the pill</small></span></button>
+      </div>
+
+      <div class="stage">
+        <!-- step 1 -->
+        <div class="panel card" data-panel="0">
+          <div class="who"><span class="tag">You, in your AI app</span></div>
+          <h3>Add qalm as a connector in your agent</h3>
+          <p class="muted small">In Claude, ChatGPT or another MCP client, add a custom connector with qalm's link. Your agent then opens qalm's sign-in in a browser window: you sign in with your email (a 6-digit code or link) and approve. No passwords or API keys change hands; it's standard OAuth.</p>
+          <div class="grid g2" style="margin-top:14px">
+            <div class="rows">
+              <div class="row"><div class="t"><b>Connector URL</b><small>copy it from qalm → Settings → AI access</small></div></div>
+              <div class="row"><div class="urlbox" style="width:100%"><span>https://api.qalm.app/mcp</span><span class="tag">Copy</span></div></div>
+            </div>
+            <div class="rows">
+              <div class="row"><div class="t"><b>Sign in to qalm</b><small>in the window your agent opened</small></div></div>
+              <div class="row"><div class="t" style="width:100%"><small>Code sent to you@example.com</small><div class="field" style="margin:6px 0 0;font-family:'Geist Mono',monospace;letter-spacing:.3em">4 8 1 · 2 9 7</div></div></div>
+            </div>
+          </div>
+          <p class="note">Sign-in links only work on the device that asked for them, and a plain visit to the link never signs anyone in. That stops someone tricking you into approving their agent.</p>
+        </div>
+
+        <!-- step 2 -->
+        <div class="panel card" data-panel="1" hidden>
+          <div class="who"><span class="tag">You, on qalm's approval page</span></div>
+          <h3>"Claude wants to connect to your notes"</h3>
+          <p class="muted small">You choose exactly which notebooks or folders this agent may see, and whether it may comment and save readings. Reading is always on, because that's the point. You can change all of this later in Settings.</p>
+          <div class="rows" style="margin-top:14px">
+            <div class="row"><div class="t"><b>Notebooks and folders</b><small>only these are visible to Claude</small>
+              <div style="margin-top:6px"><span class="chip sel">✓ Calculus II</span><span class="chip sel">✓ Folder: Physics</span><span class="chip">Journal</span><span class="chip">Recipes · AI access off</span></div></div></div>
+            <div class="row"><div class="t"><b>Leave comments</b><small>pins notes next to your lines</small></div><span class="toggle on"></span></div>
+            <div class="row"><div class="t"><b>Save transcriptions</b><small>stores its reading of a line; you can edit it</small></div><span class="toggle on"></span></div>
+            <div class="row"><div class="btnrow" style="width:100%"><span class="btn">Deny</span><span class="btn primary">Allow</span></div></div>
+          </div>
+          <p class="note">Notebooks with AI access off are marked, and they stay hidden from the agent until you switch AI access on, even if granted here. Trashed notebooks never show.</p>
+        </div>
+
+        <!-- step 3 -->
+        <div class="panel card" data-panel="2" hidden>
+          <div class="who"><span class="tag">You, in qalm</span></div>
+          <h3>Turn on AI access for this notebook</h3>
+          <p class="muted small">Every notebook starts with AI access <b>off</b>. Turn it on in the new-notebook sheet, the notebook's menu, or the Ask sheet. The server checks it on every single agent call, so switching it off hides the notebook immediately, even mid-session.</p>
+          <div class="rows" style="margin-top:14px;max-width:520px">
+            <div class="row"><div class="t"><b>AI access</b><small>Let connected agents read and comment on this notebook</small></div><span class="toggle on"></span></div>
+          </div>
+          <div class="grid g2" style="margin-top:14px">
+            <div class="card" style="padding:14px"><span class="tag live">On</span><p class="small muted" style="margin:6px 0 0">Granted agents see live updates and can comment (if allowed).</p></div>
+            <div class="card" style="padding:14px"><span class="tag">Off</span><p class="small muted" style="margin:6px 0 0">Invisible to every agent. Pending waits end with "AI access is off".</p></div>
+          </div>
+        </div>
+
+        <!-- step 4 -->
+        <div class="panel" data-panel="3" hidden>
+          <div class="who"><span class="tag">You write</span><span class="tag ai">Agent is waiting (wait)</span></div>
+          <div class="device">
+            <div class="bar">
+              <span class="ib"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></span>
+              <span class="title"><b>Calculus II</b><small>Page 3 of 12</small></span>
+              <span class="presence"><span class="dot"></span> Claude is following along</span>
+              <span class="spacer"></span>
+              <span class="askbtn">? Ask</span>
+            </div>
+            <div class="canvas">
+              <div class="paper"><svg viewBox="0 0 595 520" aria-hidden="true">
+                <g fill="none" stroke="var(--pen)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M40 58 q6-14 14 0 q6 14 14 0 M84 46 v24 M92 58 h18 M118 50 q10-8 14 4 q-2 12-14 14 q14 0 16 8"/>
+                  <path d="M160 64 c6-30 16-30 14 2 M182 60 q8-10 12 0 t12 0 M216 56 q6 8 14-2 M240 66 c4-20 10-20 10 0 M262 50 v20 q4-8 12-6"/>
+                  <path d="M40 140 h16 M64 128 q8-10 14 2 q-2 10-14 12 h16 M98 132 q8 12 16 0 M124 146 l6-20 l8 20 M148 132 h14 M170 128 q6 18 14 0 M194 140 q6-12 14 0 q-4 8-10 4 M218 126 v20 M228 132 q8 10 16 0 M256 140 q8-14 16 0 q-6 8-12 2"/>
+                  <path d="M40 220 h16 M64 210 q8-10 14 2 q-2 10-14 12 h16 M98 214 q8 12 16 0 M128 214 h12 M148 206 q8 14 16 0 M174 220 q6-12 14 0 M200 206 v20 M212 214 q8 10 16 0 M240 220 q8-14 16 0"/>
+                </g>
+              </svg></div>
+              <div class="margin">
+                <div class="mcard"><div class="h">Sending in 6 s… <span class="lbl">p3</span></div><span class="muted">qalm sends after your pen rests for 6 seconds, at most once every 20 s. Writing then erasing in between never gets sent.</span></div>
+              </div>
+            </div>
+          </div>
+          <p class="note">The agent's <code>wait</code> call is open the whole time. When you pause, it returns with only what changed: three new lines, each as a small picture plus your device's text guess.</p>
+        </div>
+
+        <!-- step 5 -->
+        <div class="panel" data-panel="4" hidden>
+          <div class="who"><span class="tag ai">Agent calls comment</span><span class="tag">It appears in your margin</span></div>
+          <div class="device">
+            <div class="bar">
+              <span class="title"><b>Calculus II</b><small>Page 3 of 12</small></span>
+              <span class="presence"><span class="dot"></span> Claude is following along</span>
+              <span class="spacer"></span>
+              <span class="ib on" title="Comments"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+              <span class="askbtn">? Ask</span>
+            </div>
+            <div class="canvas">
+              <div class="paper"><svg viewBox="0 0 595 520" aria-hidden="true">
+                <rect x="34" y="194" width="250" height="40" rx="6" fill="var(--ai-soft)" stroke="var(--ai-line)"/>
+                <g fill="none" stroke="var(--pen)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M40 58 q6-14 14 0 q6 14 14 0 M84 46 v24 M92 58 h18 M118 50 q10-8 14 4 q-2 12-14 14 q14 0 16 8"/>
+                  <path d="M40 140 h16 M64 128 q8-10 14 2 q-2 10-14 12 h16 M98 132 q8 12 16 0 M124 146 l6-20 l8 20 M148 132 h14 M170 128 q6 18 14 0 M194 140 q6-12 14 0 q-4 8-10 4 M218 126 v20 M228 132 q8 10 16 0 M256 140 q8-14 16 0 q-6 8-12 2"/>
+                  <path d="M40 220 h16 M64 210 q8-10 14 2 q-2 10-14 12 h16 M98 214 q8 12 16 0 M128 214 h12 M148 206 q8 14 16 0 M174 220 q6-12 14 0 M200 206 v20 M212 214 q8 10 16 0 M240 220 q8-14 16 0"/>
+                </g>
+                <circle cx="300" cy="202" r="7" fill="var(--ai)"/><circle cx="300" cy="202" r="2.6" fill="#fff"/>
+              </svg></div>
+              <div class="margin">
+                <div class="mcard" style="margin-top:34%"><div class="h">Claude <span class="lbl">C1 · L5</span></div>Close! Check the sign of the second term: ∫ x²/3 dx = x³/9, and it's subtracted.</div>
+              </div>
+            </div>
+          </div>
+          <p class="note">Comments animate into the margin beside their line, with a pin on the page and an unread badge on the Comments button. Agents only ever add comments (and readings, if you allowed it). Your ink is untouched.</p>
+        </div>
+
+        <!-- step 6 -->
+        <div class="panel" data-panel="5" hidden>
+          <div class="who"><span class="tag">You reply</span><span class="tag ai">Sent to the agent at once (re C1)</span></div>
+          <div class="device">
+            <div class="bar">
+              <span class="title"><b>Calculus II</b><small>Page 3 of 12</small></span>
+              <span class="presence"><span class="dot"></span> Claude is following along</span>
+              <span class="spacer"></span><span class="askbtn">? Ask</span>
+            </div>
+            <div class="canvas">
+              <div class="paper"><svg viewBox="0 0 595 520" aria-hidden="true">
+                <g fill="none" stroke="var(--pen)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M40 58 q6-14 14 0 q6 14 14 0 M84 46 v24 M92 58 h18 M118 50 q10-8 14 4 q-2 12-14 14 q14 0 16 8"/>
+                  <path d="M40 140 h16 M64 128 q8-10 14 2 q-2 10-14 12 h16 M98 132 q8 12 16 0 M124 146 l6-20 l8 20 M148 132 h14 M170 128 q6 18 14 0 M194 140 q6-12 14 0 q-4 8-10 4 M218 126 v20 M228 132 q8 10 16 0 M256 140 q8-14 16 0 q-6 8-12 2"/>
+                  <path d="M40 220 h16 M64 210 q8-10 14 2 q-2 10-14 12 h16 M98 214 q8 12 16 0 M128 214 h12 M148 206 q8 14 16 0 M174 220 q6-12 14 0 M200 206 v20 M212 214 q8 10 16 0 M240 220 q8-14 16 0"/>
+                </g>
+                <circle cx="300" cy="202" r="7" fill="var(--ai)"/><circle cx="300" cy="202" r="2.6" fill="#fff"/>
+              </svg></div>
+              <div class="margin">
+                <div class="mcard" style="margin-top:28%"><div class="h">Claude <span class="lbl">C1 · L5</span></div>Close! Check the sign of the second term: ∫ x²/3 dx = x³/9, and it's subtracted.
+                  <div class="reply"><b style="color:var(--accent)">You</b> · why x²/3 and not x³/3?</div>
+                  <div class="reply"><b style="color:var(--ai)">Claude</b> · Because du = (1/x)dx, so x³/3 · 1/x = x²/3.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="note">Comments are threads that go both ways. Your replies (and new comments you start) skip the 6-second wait and reach the agent immediately. The agent replies in the same thread, and never gets its own words echoed back.</p>
+        </div>
+
+        <!-- step 7 -->
+        <div class="panel" data-panel="6" hidden>
+          <div class="who"><span class="tag">You lasso, tap Ask</span><span class="tag ai">ask C6 p3:L4-5 [3]</span></div>
+          <div class="device">
+            <div class="bar">
+              <span class="title"><b>Calculus II</b><small>Page 3 of 12</small></span>
+              <span class="presence"><span class="dot"></span> Claude is following along</span>
+              <span class="spacer"></span><span class="askbtn">? Ask</span>
+            </div>
+            <div class="canvas" style="min-height:420px">
+              <div class="paper"><svg viewBox="0 0 595 520" aria-hidden="true">
+                <g fill="none" stroke="var(--pen)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M40 58 q6-14 14 0 q6 14 14 0 M84 46 v24 M92 58 h18 M118 50 q10-8 14 4 q-2 12-14 14 q14 0 16 8"/>
+                  <path d="M40 140 h16 M64 128 q8-10 14 2 q-2 10-14 12 h16 M98 132 q8 12 16 0 M124 146 l6-20 l8 20 M148 132 h14 M170 128 q6 18 14 0 M194 140 q6-12 14 0 q-4 8-10 4 M218 126 v20 M228 132 q8 10 16 0 M256 140 q8-14 16 0 q-6 8-12 2"/>
+                  <path d="M40 220 h16 M64 210 q8-10 14 2 q-2 10-14 12 h16 M98 214 q8 12 16 0 M128 214 h12 M148 206 q8 14 16 0 M174 220 q6-12 14 0 M200 206 v20 M212 214 q8 10 16 0 M240 220 q8-14 16 0"/>
+                  <path d="M330 150 c30-40 90-40 110 0 s-60 60-90 30" stroke="var(--teal)"/>
+                </g>
+                <rect x="30" y="116" width="430" height="128" rx="4" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="6 4"/>
+              </svg></div>
+            </div>
+            <div class="sheet">
+              <b style="font-size:14px">Ask about this selection</b>
+              <svg class="crop" viewBox="0 0 430 74" aria-hidden="true"><g fill="none" stroke="#27272a" stroke-width="2" stroke-linecap="round" transform="translate(-30,-118) scale(1)"><path d="M40 140 h16 M64 128 q8-10 14 2 q-2 10-14 12 h16 M98 132 q8 12 16 0 M124 146 l6-20 l8 20 M148 132 h14 M170 128 q6 18 14 0"/><path d="M40 182 h16 M64 172 q8-10 14 2 q-2 10-14 12 h16 M98 176 q8 12 16 0 M128 176 h12 M148 168 q8 14 16 0"/><path d="M330 150 c30-40 90-40 110 0 s-60 60-90 30" stroke="#0f766e"/></g></svg>
+              <div class="field">Why is it minus here? And is my sketch right?</div>
+              <div class="btnrow"><span class="btn">Comment instead</span><span class="btn ai">Send to Claude</span></div>
+            </div>
+          </div>
+          <p class="note">An Ask about a selection is sent immediately. The agent gets the selected lines as images (even ones it already read), plus a crop of anything that isn't whole lines, like your sketch. Its answer is anchored to the selection, and the thread follows the ink if you move it. While you wait, the thread shows <span class="thinking">Thinking<span class="dots"><i></i><i></i><i></i></span></span></p>
+        </div>
+
+        <!-- step 8 -->
+        <div class="panel" data-panel="7" hidden>
+          <div class="who"><span class="tag">You tap the pill</span></div>
+          <div class="device" style="position:relative">
+            <div class="bar">
+              <span class="title"><b>Calculus II</b><small>Page 3 of 12</small></span>
+              <span class="presence"><span class="dot"></span> Claude is following along</span>
+              <span class="spacer"></span><span class="askbtn">? Ask</span>
+            </div>
+            <div class="popover" style="left:120px;right:auto">
+              <h4>Claude is following along</h4>
+              <span class="small muted">Connected 12 min ago</span>
+              <ul>
+                <li><span class="check">✓</span> Reads this notebook</li>
+                <li><span class="check">✓</span> Leaves comments</li>
+                <li><span class="cross">–</span> Saves transcriptions (off)</li>
+                <li><span class="cross">✕</span> Never edits your ink</li>
+              </ul>
+              <div class="btnrow"><span class="btn">Pause sharing</span><span class="btn danger">Stop</span></div>
+            </div>
+            <div class="canvas" style="height:300px"><div class="paper" style="aspect-ratio:auto;height:100%"></div></div>
+          </div>
+          <div class="grid g2" style="margin-top:14px">
+            <div class="card" style="padding:14px"><h3>Pause sharing</h3><p class="small muted" style="margin:0">The agent keeps its access but gets nothing. Its tools say "paused". When you resume, it catches up on everything in one update.</p></div>
+            <div class="card" style="padding:14px"><h3>Stop</h3><p class="small muted" style="margin:0">Turns this notebook's AI access off. The agent's pending <code>wait</code> ends at once. To cut an agent off everywhere, disconnect it in Settings → AI access.</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. IN THE APP -->
+  <section id="app">
+    <h2>What you see in qalm</h2>
+    <p class="sub">The AI lives in a few calm places in the app. Everything agent-related uses assistant blue, so you always know what came from an AI.</p>
+    <div class="grid g3">
+      <div class="card">
+        <span class="presence" style="margin-bottom:10px"><span class="dot"></span> Claude is following along</span>
+        <h3>Presence pill</h3>
+        <p class="small muted" style="margin:0">Shows while an agent is actively waiting on this notebook (or called in the last minute). Tap for what it can do, plus Pause and Stop.</p>
+      </div>
+      <div class="card">
+        <div class="mcard" style="margin-bottom:10px"><div class="h">Claude <span class="lbl">C3 · L7</span></div>Nice, that's correct.</div>
+        <h3>Margin cards and pins</h3>
+        <p class="small muted" style="margin:0">Comments sit beside their line, follow the ink if you move it, and say "Ink removed" if you delete it. Tap one to open its thread.</p>
+      </div>
+      <div class="card">
+        <div style="display:flex;gap:6px;margin-bottom:10px"><span class="btn" style="flex:none">Open</span><span class="btn" style="flex:none;color:var(--ai)">AI</span><span class="btn" style="flex:none">Resolved</span></div>
+        <h3>Comments panel</h3>
+        <p class="small muted" style="margin:0">Every thread, filterable, with reply and resolve. An unread badge on the button. <span class="tag soon">Coming</span> notebook-wide (today: the pages near you).</p>
+      </div>
+      <div class="card">
+        <span class="askbtn" style="margin-bottom:10px">? Ask</span>
+        <h3>Ask</h3>
+        <p class="small muted" style="margin:0">Asks your agent about the page now, without waiting for a pause. Or lasso something first to ask about just that.</p>
+      </div>
+      <div class="card">
+        <div class="rows" style="margin-bottom:10px"><div class="row"><div class="t"><b>AI access</b></div><span class="toggle on"></span></div></div>
+        <h3>AI access switch</h3>
+        <p class="small muted" style="margin:0">Per notebook, off by default. In the new-notebook sheet, the notebook menu and the Ask sheet. "Shared with AI" in the library lists them.</p>
+      </div>
+      <div class="card">
+        <div class="urlbox" style="margin-bottom:10px"><span>/mcp</span><span class="tag">Copy</span></div>
+        <h3>Settings → AI access</h3>
+        <p class="small muted" style="margin:0">The link to connect, pending requests (deny), each agent with its comment and transcribe switches and the notebooks it can see, disconnect, and an activity log.</p>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Readings <span class="tag soon">Building now</span></h3>
+      <p class="small muted" style="margin:0">Select a line and tap "Reading" to see the saved text: your device's guess or the agent's transcription. Edit it to fix it. Your edit is marked as yours, and agents can never overwrite it; they're told to leave a comment instead.</p>
+    </div>
+  </section>
+
+  <!-- 4. WHAT THE AGENT SEES -->
+  <section id="agent">
+    <h2>What the agent actually receives</h2>
+    <p class="sub">Not screenshots of whole pages. Each update is a few lines of plain text ("Q-ink Live"), plus one small image strip with only the lines that changed. That's why it's accurate and cheap.</p>
+    <div class="grid g2">
+      <div>
+        <div class="code"><span class="c"># one update, after a 6 s pause</span>
+<span class="k">#q</span> s=calc2 r=431 p3 <span class="s">"Q3 ∫x^2 ln x dx"</span>
+ L3 v=x^3/3
+<span class="g">+L4</span> <span class="b">[1]</span> ~<span class="s">"=x3/3 lnx - ∫x3/3 1/x dx"</span>
+<span class="g">+L5</span> <span class="b">[2]</span> ~<span class="s">"=x3/3lnx-x3/9"</span>
+<span class="r">-L6</span>
+re C1 <span class="s">"why x²/3 and not x³/3?"</span>
+note C7 p3:L5 <span class="s">"same as the book?"</span>
+ask <span class="s">"is L5 right?"</span></div>
+        <div class="strip" style="margin-top:12px">
+          <svg viewBox="0 0 520 120" aria-label="Image strip: row 1 and row 2">
+            <rect width="520" height="120" fill="#fff"/>
+            <text x="8" y="36" font-size="13" font-family="Geist Mono, monospace" fill="#9a9aa3">[1]</text>
+            <text x="8" y="94" font-size="13" font-family="Geist Mono, monospace" fill="#9a9aa3">[2]</text>
+            <line x1="0" y1="60" x2="520" y2="60" stroke="#ececf0"/>
+            <g fill="none" stroke="#111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" transform="translate(10,-108)">
+              <path d="M40 140 h16 M64 128 q8-10 14 2 q-2 10-14 12 h16 M98 132 q8 12 16 0 M124 146 l6-20 l8 20 M148 132 h14 M170 128 q6 18 14 0 M194 140 q6-12 14 0 q-4 8-10 4 M218 126 v20 M228 132 q8 10 16 0 M256 140 q8-14 16 0 q-6 8-12 2 M280 132 h12 M300 126 q8 14 16 0 M326 140 q8-12 14 0"/>
+            </g>
+            <g fill="none" stroke="#111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" transform="translate(10,-128)">
+              <path d="M40 220 h16 M64 210 q8-10 14 2 q-2 10-14 12 h16 M98 214 q8 12 16 0 M128 214 h12 M148 206 q8 14 16 0 M174 220 q6-12 14 0 M200 206 v20 M212 214 q8 10 16 0 M240 220 q8-14 16 0"/>
+            </g>
+          </svg>
+        </div>
+        <p class="note">The image is rendered on the server from your strokes, in black on white with row numbers, so the agent can read handwriting the on-device guess got wrong (like "x3" that is really x³).</p>
+      </div>
+      <div class="card tablewrap">
+        <table>
+          <thead><tr><th>Element</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>#q s= r= p3 "…"</code></td><td>Header: session, revision, current page and its first line</td></tr>
+            <tr><td><code>&nbsp;L3</code></td><td>One unchanged line above the change, for context</td></tr>
+            <tr><td><code>+L4</code> <code>~L4</code> <code>-L6</code></td><td>Added, changed, removed line. Labels are stable per page; drawings are <code>D1</code>, <code>D2</code>…</td></tr>
+            <tr><td><code>[1]</code></td><td>This line is row 1 of the attached image</td></tr>
+            <tr><td><code>~"…"</code></td><td>Your device's guess at the text (ML Kit on iPad and Android; none on desktop yet)</td></tr>
+            <tr><td><code>"…"</code> (no <code>~</code>)</td><td>Trusted text already saved with <code>transcribe</code>: sent as text, no image</td></tr>
+            <tr><td><code>ask "…"</code></td><td>You tapped Ask, with your question</td></tr>
+            <tr><td><code>ask C6 p3:L4-5 [3] "…"</code></td><td>Ask about a selection: answer in thread C6; <code>[3]</code> is a crop of the part that isn't whole lines</td></tr>
+            <tr><td><code>note C7 p3:L5 "…"</code></td><td>You started thread C7 on a line</td></tr>
+            <tr><td><code>re C1 "…"</code></td><td>You replied in thread C1</td></tr>
+          </tbody>
+        </table>
+        <p class="note" style="padding:0 10px">Updates are self-contained, so the agent's app can trim old ones. <span class="tag soon">Coming</span> When an agent first opens a page it gets only the open threads, each with its latest message, not the whole history.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. TOOLS -->
+  <section id="tools">
+    <h2>The four tools</h2>
+    <p class="sub">That's the agent's entire vocabulary. There's no "tutor mode": the protocol is general, and how the agent behaves (tutor, study buddy, note-taker) is up to you and your agent's instructions.</p>
+    <div class="card tablewrap">
+      <table>
+        <thead><tr><th>Tool</th><th>Arguments</th><th>What it does</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td><code>wait</code></td><td><code>s?</code></td><td>Waits for the next update (long-poll). Without <code>s</code>, lists the live sessions it can see.</td><td><code>wait(s:"calc2")</code> → the update above</td></tr>
+          <tr><td><code>read</code></td><td><code>ref</code></td><td>Reads anything on demand, as text plus an image strip where needed.</td><td><code>read("p3:L2-9")</code>, <code>read("outline")</code>, <code>read("pdf:p2")</code></td></tr>
+          <tr><td><code>transcribe</code></td><td><code>ref</code>, <code>text</code></td><td>Saves its reading of a line, so later updates send text instead of an image. Refused if you wrote that line's text yourself.</td><td><code>transcribe("p3:L5", "x^3/3 ln x - x^3/9")</code></td></tr>
+          <tr><td><code>comment</code></td><td><code>ref</code> or <code>thread</code>, <code>text</code>, <code>resolve?</code></td><td>Starts a thread next to a line, or replies in one. Never changes ink.</td><td><code>comment(thread:"C1", "Because du = …")</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 6. CONTROL -->
+  <section id="control">
+    <h2>You're in control</h2>
+    <p class="sub">Every rule is enforced on the server on every call, not just hidden in the app.</p>
+    <div class="grid g3">
+      <div class="card rail"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><div><h3>Ink is read-only</h3><p>The server has no way for an agent to add, move or erase ink. Agents can only add comments and, if allowed, readings.</p></div></div>
+      <div class="card rail"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h12"/></svg></span><div><h3>Per notebook, off by default</h3><p>An agent sees a notebook only if you granted it and its AI access is on. Trashed and deleted notebooks are invisible.</p></div></div>
+      <div class="card rail"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><div><h3>Separate switches</h3><p>Commenting and saving readings each have their own switch per agent. Your own readings can't be overwritten.</p></div></div>
+      <div class="card rail ai"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></span><div><h3>Pause, Stop, Disconnect</h3><p>Pause sharing from the pill, Stop to turn AI access off, or disconnect an agent everywhere in Settings. All take effect on its next call.</p></div></div>
+      <div class="card rail ai"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><div><h3>Calm by design</h3><p>Updates only after a 6 s pause, at most one per 20 s. Asks, comments and replies go at once. Erased scribbles never leave your device's session.</p></div></div>
+      <div class="card rail good"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg></span><div><h3>Your agent, your data</h3><p>qalm runs no AI and stores no agent memory. The agent you chose sees only what you shared, under its own provider's terms.</p></div></div>
+    </div>
+  </section>
+
+  <!-- 7. COST -->
+  <section id="cost">
+    <h2>Why it's cheap</h2>
+    <p class="sub">Estimated agent cost for one hour of maths tutoring (about 60 updates), at GPT-6 Luna rates. The first thing to measure with real agents is how each provider counts image tokens.</p>
+    <div class="grid g2">
+      <div class="card bars">
+        <div><div class="lab"><span>Full-page screenshots</span><b>$1.36/h · $0.17 cached</b></div><div class="track"><div class="fill" style="width:100%;background:var(--line-strong)"></div></div></div>
+        <div><div class="lab"><span><b>qalm Q-ink Live</b></span><b style="color:var(--accent)">~$0.13/h · ~$0.025 cached</b></div><div class="track"><div class="fill" style="width:9.6%;background:var(--accent)"></div></div></div>
+        <p class="note" style="margin:0">Peak context: ~219k tokens with screenshots vs ~38k with Q-ink.</p>
+      </div>
+      <div class="card">
+        <h3>Where the savings come from</h3>
+        <ul class="small muted" style="margin:6px 0 0;padding-left:18px">
+          <li>Only changed lines are sent, never the whole page.</li>
+          <li>One small black-on-white strip per update, not a full-resolution screenshot.</li>
+          <li>Lines the agent already transcribed come back as text, with no image.</li>
+          <li>Threads add only your words, a few tokens each.</li>
+          <li>On-device reading is free (ML Kit), and qalm runs no model on its servers.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    qalm AI integration · reflects <code>main</code> (Q-ink Live v0.3). Items marked <span class="tag soon">Coming</span> or <span class="tag soon">Building now</span> are in progress. Not yet tested with a real Claude or ChatGPT connector; the flow has been verified end to end with a scripted MCP agent.
+  </footer>
+</main>
+
+<script>
+  // Step tabs
+  const steps = [...document.querySelectorAll('.step')];
+  const panels = [...document.querySelectorAll('.panel')];
+  function show(i) {
+    steps.forEach((s, j) => s.setAttribute('aria-selected', String(i === j)));
+    panels.forEach((p) => (p.hidden = Number(p.dataset.panel) !== i));
+  }
+  steps.forEach((s) => s.addEventListener('click', () => show(Number(s.dataset.step))));
+  document.querySelector('.steplist').addEventListener('keydown', (e) => {
+    const cur = steps.findIndex((s) => s.getAttribute('aria-selected') === 'true');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); const n = Math.min(steps.length - 1, cur + 1); show(n); steps[n].focus(); }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); const n = Math.max(0, cur - 1); show(n); steps[n].focus(); }
+  });
+  // Theme toggle (remembered per viewer when storage is available)
+  const root = document.documentElement;
+  try { const t = localStorage.getItem('qalm-ai-theme'); if (t) root.dataset.theme = t; } catch {}
+  document.getElementById('theme').addEventListener('click', () => {
+    const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    root.dataset.theme = dark ? 'light' : 'dark';
+    try { localStorage.setItem('qalm-ai-theme', root.dataset.theme); } catch {}
+  });
+</script>
+</body>
+</html>
