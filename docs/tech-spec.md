@@ -63,8 +63,9 @@ interface StrokeItem { id: string; type: 'stroke'; tool: Tool; color: string; wi
 interface TextItem  { id: string; type: 'text'; x: number; y: number; w: number; text: string; fontSize: number; color: string; rot?: number }
 interface ImageItem { id: string; type: 'image'; assetId: string; x: number; y: number; w: number; h: number; rot?: number }
 // rot: radians, clockwise on the page, about the top-left corner (x, y); missing = 0
-interface ShapeItem { id: string; type: 'shape'; kind: 'line'|'arrow'|'rect'|'ellipse'|'triangle'; pts: [number, number][]; color: string; width: number }
-// pts: line [a, b]; arrow [tail, tip]; rect and triangle their corners; ellipse [[x0,y0],[x1,y1]] (upright box, older
+interface ShapeItem { id: string; type: 'shape'; kind: 'line'|'arrow'|'double-arrow'|'rect'|'ellipse'|'triangle'|'diamond'|'pentagon'|'hexagon'|'star'; pts: [number, number][]; color: string; width: number }
+// pts: line [a, b]; arrow [tail, tip]; double-arrow [a, b]; rect, triangle, diamond, pentagon, hexagon their corners;
+// star its 10 outer and inner points in order; ellipse [[x0,y0],[x1,y1]] (upright box, older
 // shapes) or the 4 corners of its turned box. Moving or rotating a 2-point rect or ellipse stores 4 corners.
 type Item = StrokeItem | TextItem | ImageItem | ShapeItem;
 type BBox = [x0: number, y0: number, x1: number, y1: number];
@@ -136,7 +137,7 @@ strokes. The app sets the style from the toolbar (per device, with the other too
 Default widths (page units): pen 1.2 / 1.8 / 2.8, highlighter 12.
 ```ts
 strokeOutline(s: StrokeItem): [number, number][]; strokeSvgPath(s: StrokeItem): string
-snapShape(points: InkPoint[], heldMs: number): ShapeItem | null          // only if heldMs >= 500
+snapShape(points: InkPoint[], heldMs: number): ShapeItem | null          // only if heldMs >= SNAP_HOLD_MS (350); see below
 hitTestErase(items: Item[], path: {x:number;y:number}[], radius: number): string[]
 lassoSelect(items: Item[], polygon: {x:number;y:number}[]): string[]   // most of the ink inside, or a box's centre
 // Selection (geometry/transform.ts). Sim = { s, r, ox, oy, dx, dy }: p' = o + s·R(r)·(p − o) + d
@@ -329,3 +330,29 @@ in-app clipboard that works across pages and notebooks, copying image assets int
 front / sends to back, comments, asks and deletes; Ctrl/Cmd + C / X / V / D / A and Delete work on desktop. A thread
 started from a selection stores its item ids (`anchorIds`), so its pin, margin card and Q-ink labels follow the ink; once
 that ink is all deleted, the thread shows only in the panel ("Ink removed").
+
+### Shape snapping (`snapShape`)
+Hold the pen still for **350 ms** (`SNAP_HOLD_MS`) at the end of a stroke and it snaps. Each overlay reports `heldMs`: how long
+the pen stayed within ~1 mm (web, Android) or 2 page units (iOS) of where it lifted. Steps:
+1. Drop the hold's jitter at the end; resample to 96 points evenly spaced along the stroke.
+2. **Closed or open:** a stroke whose end comes back within 20% of its size to its start (after 60% of its length) is
+   closed. A short overshoot past the start is cut off. A tail longer than 18% of the loop (the stem of an "a", the end of
+   an "e") means handwriting: no snap.
+3. **Open strokes:**
+   - **Line:** straight within 7% of its length. Snaps to horizontal or vertical within 5°.
+   - **Arrows:** simplify the stroke (RDP). The longest segment is the shaft. A head is 1 barb, or barb–tip–barb, 6–50% of
+     the shaft and pointing back at 12–75°. Heads at both ends make a `double-arrow`.
+4. **Closed strokes:**
+   - **Corners:** peaks of the turning angle over ±4% of the outline, at least 35° and 1.6× the outline's median turn (a
+     circle turns evenly, so it has none).
+   - **3 corners:** triangle.
+   - **4 corners:** rect if every angle is within 18° of 90°. It keeps its rotation, snaps upright within 5°, and becomes a
+     square within 10%. Otherwise, or with corners at top/right/bottom/left, it's a diamond.
+   - **5–6 corners:** a regular pentagon or hexagon, a point or flat side on top within 6°.
+   - **5 sharp tips visited every other one:** a 5-point star (inner radius 0.382).
+   - **Error limit:** each fit must stay within 6% of the size on average. With 4–7 corners, regular pentagon and hexagon
+     fits of the whole outline are tried too.
+   - **Otherwise, an ellipse:** principal axes and extents, error under 11% (7% when corners were found). It becomes a circle
+     when round within 10%, and upright within 8°.
+Synthetic tests (jitter, wobble, rounded corners, overshoot, rotation) and held handwriting (e, a, s, 8, 2, m, L, V, Z, N,
+cursive, spirals, scribbles) are in `packages/core/test/shapes.test.ts`; handwriting never snaps there.

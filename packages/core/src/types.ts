@@ -37,9 +37,20 @@ export interface StrokeItem {
 /** `rot` (radians, clockwise on the page) turns a text box or image about its top-left corner `(x, y)`; missing = 0. */
 export interface TextItem { id: string; type: 'text'; x: number; y: number; w: number; text: string; fontSize: number; color: string; rot?: number }
 export interface ImageItem { id: string; type: 'image'; assetId: string; x: number; y: number; w: number; h: number; rot?: number }
-export type ShapeKind = 'line' | 'arrow' | 'rect' | 'ellipse' | 'triangle';
+export type ShapeKind =
+  | 'line'
+  | 'arrow'
+  | 'double-arrow'
+  | 'rect'
+  | 'ellipse'
+  | 'triangle'
+  | 'diamond'
+  | 'pentagon'
+  | 'hexagon'
+  | 'star';
 /**
- * `pts` per kind: line `[a, b]`; arrow `[tail, tip]`; rect 4 corners; triangle 3 corners;
+ * `pts` per kind: line `[a, b]`; arrow `[tail, tip]`; double-arrow `[a, b]`; rect 4 corners; triangle 3 corners;
+ * diamond 4, pentagon 5, hexagon 6 corners; star its 10 outer and inner points in order;
  * ellipse `[[x0, y0], [x1, y1]]` (axis-aligned box, older shapes) or the 4 corners of its rotated box.
  */
 export interface ShapeItem { id: string; type: 'shape'; kind: ShapeKind; pts: [number, number][]; color: string; width: number }

@@ -97,7 +97,7 @@ If `s.platforms` stays below 16.1, the code still compiles because `zOffset` and
 
 **Eraser, lasso, `heldMs`**
 - [ ] The eraser sends `onErase` while moving, and the cursor circle follows it. The lasso draws a dashed polygon and sends `onLasso` on lift.
-- [ ] Holding the Pencil still for at least 500 ms at the end of a stroke reports `heldMs` ≥ 500, which triggers shape snapping.
+- [ ] Holding the Pencil still for at least 350 ms at the end of a stroke reports `heldMs` ≥ 350, which triggers shape snapping.
 
 **Functions**
 - [ ] `ensureModel('en-US')` downloads once (watch for the network call), and later calls resolve at once.

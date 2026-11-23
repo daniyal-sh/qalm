@@ -77,9 +77,9 @@ describe('stroke geometry', () => {
 describe('snapShape', () => {
   const kind = (p: InkPoint[], held = 600) => snapShape(p, held)?.kind ?? null;
 
-  it('needs a 500 ms hold', () => {
-    expect(snapShape(pts([0, 0], [100, 0]), 499)).toBeNull();
-    expect(kind(pts([0, 0], [100, 0]), 500)).toBe('line');
+  it('needs a 350 ms hold', () => {
+    expect(snapShape(pts([0, 0], [100, 0]), 349)).toBeNull();
+    expect(kind(pts([0, 0], [100, 0]), 350)).toBe('line');
   });
 
   it('recognises each shape', () => {
@@ -97,9 +97,10 @@ describe('snapShape', () => {
 
   it('fits the geometry', () => {
     const r = snapShape(pts([0, 0], [120, 0], [120, 80], [0, 80], [0, 1]), 600)!;
-    expect(r.pts).toEqual([[0, 0], [120, 0], [120, 80], [0, 80]]);
+    const want = [[0, 0], [120, 0], [120, 80], [0, 80]];
+    r.pts.forEach((p, i) => p.forEach((v, j) => expect(Math.abs(v - want[i]![j]!)).toBeLessThan(2))); // corners sit a resample step inside
     const a = snapShape(pts([0, 0], [100, 0], [85, -12], [100, 0], [85, 12]), 600)!;
-    expect(a.pts).toEqual([[0, 0], [100, 0]]);
+    a.pts.flat().forEach((v, i) => expect(v).toBeCloseTo([0, 0, 100, 0][i]!, 6));
   });
 });
 
