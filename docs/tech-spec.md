@@ -98,6 +98,7 @@ class Notebook {                     // wraps the index doc
 class Page {                         // wraps one page doc
   constructor(doc: Y.Doc); readonly doc: Y.Doc
   items(): Item[]; addItem(item: Item): void; updateItem(id, patch): void; removeItems(ids: string[]): void
+  addItems(items: Item[]): void; updateItems(patches: Iterable<[id, patch]>): void   // one transaction (one undo step) each; same result as one call per item
   reorder(ids: string[], to: 'front' | 'back'): void   // z-order; keeps their order among themselves
   lines(): Line[]                    // maintained automatically on add/update/remove
   setLineText(lineKey, text, src: 'device'|'agent'|'user', conf?): void
@@ -124,9 +125,24 @@ it edited, so undo goes to the right page. Edits from other devices and agents a
 When a stroke is added, it joins an existing `line` if its vertical overlap with the line's bbox is ≥ 50% of the smaller
 height **and** the horizontal gap is ≤ 1.5 × the line's height. Otherwise it starts a new line whose **key is the stroke's ID**.
 Shape items, and strokes taller than 2.5 × the page's median line height, form `drawing`s with the same keying, merged with
-overlapping drawings (the earliest key wins). Lines with no items are deleted. When a line's items change, its `text` is cleared
-unless `textSrc === 'user'`. Two offline devices may create two separate lines that overlap. That's fine, because keys never collide.
+overlapping drawings (the earliest key wins). Lines with no items are deleted.
+
+**A line's reading** (`text`, `textSrc`, `conf`: an agent's `transcribe`, the device's guess, the student's text) is of
+its items. It is cleared, unless `textSrc === 'user'`, when an edit changes **which items the line has**: an item joins
+(a stroke written onto it, one moved onto it) or leaves (erased, moved away, so a partly moved line loses it on both
+parts). An edit that leaves the line with the same items under the same key keeps it: moving, resizing or rotating a
+whole line (or a selection of whole lines), recolouring, reordering. "An edit" is one transaction (one undo step): the
+items are reassigned one by one, which splits and re-merges a moved line on the way, and the reading is settled against
+the line's items at the start of the transaction. Moving a line's items in separate transactions is a change per step.
+A reading saved during a transaction is of the items at that point. Two offline devices may create two separate lines that overlap. That's fine, because keys never collide.
 Short labels (`L7`, `D2`) exist **only in Q-ink**, and the server assigns them (§4).
+
+Items are assigned one at a time, in the order they are added or changed, so a bulk edit (moving, duplicating or
+deleting a selection) gives the same lines and keys as editing its items one by one. To keep that fast, `Page` keeps
+the page's grouping in a per-doc **line index** that each step updates (no re-reading of the whole page per item), and
+writes items' `line` fields once when the outermost `Page` call returns. The index follows transactions made through
+`Page` and is rebuilt after anything else changes the doc (remote updates, undo, or raw writes, also between two `Page`
+calls in one transaction). Moving 3000 strokes takes ~45 ms instead of ~2.4 s.
 
 ### Geometry, rendering and export
 Stroke outlines use **perfect-freehand** settings everywhere, so live and finished strokes are identical on every platform.

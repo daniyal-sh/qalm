@@ -1,4 +1,4 @@
-import { boxSelect, textHeight, hitTestErase, hitTestPoint, isIdentity, lassoSelect, LOCAL_ORIGIN, Page, snapShape, type Item, type PageInfo, type TextItem } from '@qalm/core';
+import { boxSelect, textHeight, hitTestErase, hitTestPoint, isIdentity, lassoSelect, Page, snapShape, type Item, type PageInfo, type TextItem } from '@qalm/core';
 import { InkOverlay, PageCanvas, QalmInk, type InkOverlayProps } from 'qalm-ink';
 import * as React from 'react';
 import { PixelRatio, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -237,19 +237,21 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   const rootRef = React.useRef<React.ComponentRef<typeof View>>(null);
   const lastTap = React.useRef<{ id: string; at: number } | null>(null);
 
-  /** Commits a selection edit as one undo step (line assignment re-runs for moved ink). */
+  /** Commits a selection edit as one undo step (line assignment re-runs for moved ink, incrementally). */
   const commit = (edit: LiveEdit) => {
     if (!page || !sel) return;
     if (edit.kind === 'sim' && isIdentity(edit.sim)) return;
     ed.touchPage(info.id);
-    page.doc.transact(() => {
-      if (edit.kind === 'text') page.updateItem(edit.id, edit.patch as Partial<TextItem>);
-      else
-        for (const id of sel) {
+    mark('qalm:commit-start', { items: sel.length });
+    if (edit.kind === 'text') page.updateItem(edit.id, edit.patch as Partial<TextItem>);
+    else
+      page.updateItems(
+        sel.flatMap((id) => {
           const it = page.item(id);
-          if (it) page.updateItem(id, transformPatch(it, edit.sim));
-        }
-    }, LOCAL_ORIGIN);
+          return it ? [[id, transformPatch(it, edit.sim)] as const] : [];
+        }),
+      );
+    mark('qalm:commit-end', { items: sel.length });
   };
 
   /** A tap at a page point while the lasso tool is on: select what's there (Shift/Ctrl/Cmd: add or remove it). */
