@@ -66,6 +66,13 @@ export class Page {
   private readonly order: Y.Array<string>;
   private readonly lineMap: Y.Map<Y.Map<unknown>>;
   private readonly commentMap: Y.Map<Y.Map<unknown>>;
+  /**
+   * Decoded items by their Y.Map, and the last `items()` array: decoding every stroke's points on each change was the
+   * main cost of editing a page with thousands of strokes. Entries are dropped when their map changes (locally in
+   * `setFields`, remotely or by undo through `observeDeep`), so unchanged items keep their identity across reads.
+   */
+  private decoded = new WeakMap<YItem, Item>();
+  private list: Item[] | null = null;
 
   constructor(doc: Y.Doc) {
     this.doc = doc;
@@ -73,6 +80,28 @@ export class Page {
     this.order = doc.getArray('order');
     this.lineMap = doc.getMap('lines');
     this.commentMap = doc.getMap('comments');
+    this.itemMap.observeDeep((events) => {
+      this.list = null;
+      for (const ev of events) if (ev.target !== this.itemMap) this.decoded.delete(ev.target as YItem);
+    });
+    this.order.observe(() => {
+      this.list = null;
+    });
+  }
+
+  private read(m: YItem): Item {
+    let it = this.decoded.get(m);
+    if (!it) {
+      it = readItem(m);
+      this.decoded.set(m, it);
+    }
+    return it;
+  }
+
+  /** Drops cached reads of `m` (a local write inside a transaction, before observers run). */
+  private dirty(m?: YItem): void {
+    this.list = null;
+    if (m) this.decoded.delete(m);
   }
 
   private tx(fn: () => void): void {
@@ -90,19 +119,24 @@ export class Page {
     return out;
   }
 
-  /** Items in z-order. */
+  /**
+   * Items in z-order. The array and its items are cached and shared between calls (same objects until they change):
+   * treat them as read-only.
+   */
   items(): Item[] {
-    return this.orderedIds().map((id) => readItem(this.itemMap.get(id)!));
+    this.list ??= this.orderedIds().map((id) => this.read(this.itemMap.get(id)!));
+    return this.list;
   }
 
   item(id: string): Item | undefined {
     const m = this.itemMap.get(id);
-    return m ? readItem(m) : undefined;
+    return m ? this.read(m) : undefined;
   }
 
   addItem(item: Item): void {
     this.tx(() => {
       const m = new Y.Map<unknown>();
+      this.dirty();
       this.itemMap.set(item.id, m);
       m.set('id', item.id);
       m.set('type', item.type);
@@ -116,6 +150,7 @@ export class Page {
     this.tx(() => {
       const m = this.itemMap.get(id);
       if (!m) return;
+      this.dirty(m);
       setFields(m, patch as Record<string, unknown>);
       const type = m.get('type');
       if ((type === 'stroke' || type === 'shape') && Object.keys(patch).some((k) => GEOMETRY_KEYS.has(k))) {
@@ -141,6 +176,7 @@ export class Page {
     this.tx(() => {
       const gone = new Set(ids);
       const touched = new Set<string>();
+      this.dirty();
       for (const id of ids) {
         const key = this.itemMap.get(id)?.get('line');
         if (typeof key === 'string') touched.add(key);
