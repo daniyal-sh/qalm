@@ -269,7 +269,7 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
         />
       ) : null}
       {anchors.map((a) => {
-        const c = comments.find((x) => x.lineKey === a.lineKey && !x.resolved) ?? comments.find((x) => x.lineKey === a.lineKey);
+        const c = comments.find((x) => x.id === a.lineKey) ?? comments.find((x) => x.lineKey === a.lineKey && !x.anchor && !x.resolved) ?? comments.find((x) => x.lineKey === a.lineKey);
         return c ? (
           <Pressable
             key={a.lineKey}

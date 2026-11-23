@@ -84,6 +84,13 @@ characters.
 The student grants access for each notebook or folder on the approval screen. `transcribe` and `comment` each have their own switch.
 A student's reply reopens a resolved thread.
 
+**Presence and pause (app side, no protocol change).** The app shows "Claude is following along" while an agent has a
+pending `wait` on the notebook or made a call in the last minute, named by its OAuth client name. The student can
+**pause sharing** there: while paused, `wait` sends nothing (it times out as `#q s=… paused`, and the session list marks
+the session `paused`), and `read`, `transcribe` and `comment` fail with a message saying so. The grant stays. When the
+student resumes, a pending `wait` wakes and the next update catches up on everything since the last one, so agents
+should simply keep calling `wait`. "Stop" turns the notebook's AI access off.
+
 ## 4. Rough budget (one hour of math tutoring)
 
 About 60 updates an hour, with every changed line as an image. Priced at GPT-6 Luna's standard rates:

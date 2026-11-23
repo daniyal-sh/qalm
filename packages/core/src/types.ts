@@ -83,6 +83,8 @@ export interface NotebookMeta {
   size: Size;
   orientation: Orientation;
   aiAccess: boolean;
+  /** "Pause sharing": agents keep their access but get no updates and can't call tools until resumed. */
+  aiPaused?: boolean;
   createdAt: number;
   updatedAt: number;
 }

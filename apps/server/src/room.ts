@@ -6,7 +6,7 @@ import * as decoding from 'lib0/decoding';
 import { Notebook, Page } from '@qalm/core';
 import type { Env } from './env';
 import { parseDocId, nbDocId, pgDocId, room, type DocRef } from './docs';
-import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit, type PageEdit } from './agent';
+import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit, type AgentWho, type PageEdit, type Presence } from './agent';
 
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
@@ -342,34 +342,40 @@ export class DocRoom extends DurableObject<Env> {
   }
 
   /** For the session list: the live AI access switch (unknown → off) and the last client update. */
-  agentInfo(docId: string): { aiAccess: boolean; at: number } {
+  agentInfo(docId: string): { aiAccess: boolean; paused: boolean; at: number } {
     this.setDocId(docId);
-    return { aiAccess: this.agents().aiAccess(), at: this.agents().lastClientUpdateAt() };
+    return { aiAccess: this.agents().aiAccess(), paused: this.agents().paused(), at: this.agents().lastClientUpdateAt() };
   }
 
-  async agentWait(docId: string, clientId: string, session: string, cfg: AgentConfig): Promise<AgentResult> {
+  /** For the editor's presence pill (GET /ai/presence). */
+  agentPresence(docId: string): Presence {
+    this.setDocId(docId);
+    return this.agents().presence();
+  }
+
+  async agentWait(docId: string, who: AgentWho, session: string, cfg: AgentConfig): Promise<AgentResult> {
     this.setDocId(docId);
     try {
-      return await this.agents().wait(clientId, session, cfg);
+      return await this.agents().wait(who, session, cfg);
     } catch (e) {
       return { text: e instanceof Error ? e.message : String(e), svg: null, changed: false, error: true };
     }
   }
 
-  async agentRead(docId: string, ref: string): Promise<AgentResult> {
+  async agentRead(docId: string, ref: string, who: AgentWho): Promise<AgentResult> {
     this.setDocId(docId);
     try {
-      return await this.agents().read(ref);
+      return await this.agents().read(ref, who);
     } catch (e) {
       return { text: e instanceof Error ? e.message : String(e), svg: null, changed: false, error: true };
     }
   }
 
   /** Expected failures (bad ref, line gone) come back as `{ ok: false }` rather than RPC exceptions. */
-  async agentEdit(docId: string, edit: AgentEdit): Promise<{ ok: boolean; text: string }> {
+  async agentEdit(docId: string, edit: AgentEdit, who: AgentWho): Promise<{ ok: boolean; text: string }> {
     this.setDocId(docId);
     try {
-      return { ok: true, text: await this.agents().edit(edit) };
+      return { ok: true, text: await this.agents().edit(edit, who) };
     } catch (e) {
       return { ok: false, text: e instanceof Error ? e.message : String(e) };
     }

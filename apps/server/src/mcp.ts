@@ -162,7 +162,7 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
     // Only notebooks whose AI access is on right now.
     const rows = infos.filter((r) => r.aiAccess);
     rows.sort((a, b) => b.at - a.at);
-    const lines = ['#q sessions', ...rows.map(({ n, at }) => `s=${sessionOf(n.id)} ${JSON.stringify(n.title)}${t - at < LIVE_MS ? ' live' : ''}`)];
+    const lines = ['#q sessions', ...rows.map(({ n, at, paused }) => `s=${sessionOf(n.id)} ${JSON.stringify(n.title)}${t - at < LIVE_MS ? ' live' : ''}${paused ? ' paused' : ''}`)];
     const text = lines.join('\n');
     await log(env, g, 'wait', 'sessions', text, null);
     return { content: [{ type: 'text', text }] };
@@ -172,15 +172,16 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
   const docId = nbDocId(nb.id);
   const stub = room(env, docId);
   const session = sessionOf(nb.id);
+  const who = { clientId: props.clientId, name: g.client_name, canComment: !!g.can_comment, canTranscribe: !!g.can_transcribe };
   await env.DB.prepare('UPDATE grants SET last_used_at = ?2, last_session = ?3 WHERE id = ?1').bind(g.id, now(), session).run();
 
   if (name === 'wait') {
-    const r = await stub.agentWait(docId, props.clientId, session, agentCfg(env));
+    const r = await stub.agentWait(docId, who, session, agentCfg(env));
     return result(env, g, 'wait', `${nb.title}${r.changed ? '' : ' (no changes)'}`, r);
   }
   if (name === 'read') {
     const ref = str(args.ref, 'ref', 64);
-    const r = await stub.agentRead(docId, ref);
+    const r = await stub.agentRead(docId, ref, who);
     return result(env, g, 'read', `${nb.title} ${ref}`, r);
   }
   const text = str(args.text, 'text');
@@ -190,14 +191,14 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
     const cref = thread ? undefined : str(args.ref, 'ref', 64);
     if (args.resolve !== undefined && typeof args.resolve !== 'boolean') throw new ToolError('resolve must be true or false');
     const resolve = thread ? args.resolve === true : undefined;
-    const msg = await edited(stub.agentEdit(docId, { op: 'comment', ref: cref, thread, text, resolve, agentName: g.client_name }));
+    const msg = await edited(stub.agentEdit(docId, { op: 'comment', ref: cref, thread, text, resolve, agentName: g.client_name }, who));
     await log(env, g, 'comment', `${nb.title} ${thread ?? cref}`, text, null);
     return { content: [{ type: 'text', text: msg }] };
   }
   const ref = str(args.ref, 'ref', 64);
   if (name === 'transcribe') {
     if (!g.can_transcribe) throw new ToolError('This connection may not save transcriptions. The student can turn this on in Settings → AI access.');
-    const msg = await edited(stub.agentEdit(docId, { op: 'transcribe', ref, text }));
+    const msg = await edited(stub.agentEdit(docId, { op: 'transcribe', ref, text }, who));
     await log(env, g, 'transcribe', `${nb.title} ${ref}`, text, null);
     return { content: [{ type: 'text', text: msg }] };
   }

@@ -97,3 +97,26 @@ export function toggleId(ids: string[], id: string, on: boolean): string[] {
   if (!on && has) return ids.filter((x) => x !== id);
   return ids;
 }
+
+/** Agents following a notebook right now (GET /ai/presence): a pending wait, or a call in the last minute. */
+export interface Presence {
+  aiAccess: boolean;
+  paused: boolean;
+  agents: { name: string; waiting: boolean; lastAt: number; canComment: boolean; canTranscribe: boolean }[];
+}
+
+export async function getPresence(tm: Authed, notebookId: string): Promise<Presence> {
+  return json<Presence>(await tm.fetch(`/ai/presence?nb=${encodeURIComponent(notebookId)}`));
+}
+
+/** "Claude", "Claude and Tutor", "Claude and 2 others". */
+export function presenceNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names[0]} and ${names.length - 1} others`;
+}
+
+/** What the agents can do: "read and comment", … */
+export function presenceCan(agents: Pick<Presence['agents'][number], 'canComment' | 'canTranscribe'>[]): string {
+  return grantSummary({ canComment: agents.some((a) => a.canComment), canTranscribe: agents.some((a) => a.canTranscribe) });
+}

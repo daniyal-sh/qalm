@@ -17,7 +17,7 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
   const [reply, setReply] = React.useState<string | null>(null);
   const agent = cm.author.kind === 'agent';
   const quote = lineQuote(data.lines, cm.lineKey);
-  const hasLine = data.lines.some((l) => l.key === cm.lineKey);
+  const hasLine = !!cm.anchor || data.lines.some((l) => l.key === cm.lineKey);
   return (
     <Pressable
       accessibilityRole="button"
@@ -43,7 +43,7 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
         </View>
       </View>
       <Text variant="meta" tone="muted" numberOfLines={2} style={{ fontStyle: 'italic' }}>
-        {quote ? `“${quote}”` : hasLine ? 'Handwritten line' : 'The line was erased'}
+        {quote ? `“${quote}”` : cm.anchor ? 'On a selection' : hasLine ? 'Handwritten line' : 'The line was erased'}
       </Text>
       <Text>{cm.text}</Text>
       {cm.replies.map((r, i) => (
@@ -98,6 +98,23 @@ export function CommentsPanel({
   const { c } = useTheme();
   const [filter, setFilter] = React.useState<CommentFilter>('open');
   const rows = commentRows(pages, filter);
+  // Focusing a thread (a margin card or pin) scrolls it into view.
+  const scroll = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const tops = React.useRef(new Map<string, number>());
+  const scrolledTo = React.useRef<string | null>(null);
+  const scrollToActive = React.useCallback(() => {
+    if (!activeId || scrolledTo.current === activeId) return;
+    const y = tops.current.get(activeId);
+    if (y === undefined) return;
+    scrolledTo.current = activeId;
+    scroll.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+  }, [activeId]);
+  React.useEffect(() => {
+    if (!activeId) scrolledTo.current = null;
+    // A resolved thread is only listed under Resolved.
+    else if (filter !== 'resolved' && rows.some((r) => r.comment.id === activeId && r.comment.resolved)) setFilter('resolved');
+    scrollToActive();
+  });
   return (
     <View style={[styles.panel, { backgroundColor: c.surface, borderLeftColor: c.line }]}>
       <View style={styles.top}>
@@ -117,25 +134,32 @@ export function CommentsPanel({
           ]}
         />
       </View>
-      <ScrollView contentContainerStyle={{ padding: 12, gap: 10, flexGrow: 1 }}>
+      <ScrollView ref={scroll} contentContainerStyle={{ padding: 12, gap: 10, flexGrow: 1 }}>
         {rows.length ? (
           rows.map((r) => (
-            <Card
+            <View
               key={r.comment.id}
-              row={r}
-              active={r.comment.id === activeId}
-              onSelect={() => onSelect(r.comment.id === activeId ? null : r.comment.id)}
-              onJump={() => {
-                onSelect(r.comment.id);
-                onJump(r.pageId);
+              onLayout={(e) => {
+                tops.current.set(r.comment.id, e.nativeEvent.layout.y);
+                if (r.comment.id === activeId) scrollToActive();
               }}
-            />
+            >
+              <Card
+                row={r}
+                active={r.comment.id === activeId}
+                onSelect={() => onSelect(r.comment.id === activeId ? null : r.comment.id)}
+                onJump={() => {
+                  onSelect(r.comment.id);
+                  onJump(r.pageId);
+                }}
+              />
+            </View>
           ))
         ) : (
           <EmptyState
             icon="message-square"
             title={filter === 'resolved' ? 'Nothing resolved yet' : 'No comments here'}
-            body="Connected agents pin comments next to your lines. They can read and comment, but never change your ink."
+            body="Select something with the lasso to comment on it or ask about it. Connected agents can read and comment, but never change your ink."
           />
         )}
       </ScrollView>

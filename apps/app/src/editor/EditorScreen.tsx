@@ -20,8 +20,11 @@ import { Button, IconButton, Pill, TextField, Toggle } from '../ui/controls';
 import { EmptyState, Menu, Row, Sheet, useToast, type MenuItem } from '../ui/layout';
 import { Text } from '../ui/Text';
 import { CommentsPanel } from './CommentsPanel';
+import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence } from './ai';
+import { markAllSeen, marginCards, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
-import { cloneItems } from './items';
+import { cloneItems, itemBBox, unionBBox } from './items';
+import { SelectionThumb } from './SelectionThumb';
 import { PageView } from './PageView';
 import { Toolbar } from './Toolbar';
 import { CrossPageUndo } from './undoStack';
@@ -119,6 +122,23 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       return n;
     });
   }, []);
+  // ---- live agent: presence, "thinking…" after an Ask, unread agent comments ----
+  const agents = usePresence(s.user ? s.tm : null, notebookId, !!meta?.aiAccess);
+  const [seen, setSeen] = React.useState<SeenThreads>({});
+  const seenKey = `seen:${notebookId}`;
+  React.useEffect(() => {
+    void kvGet<SeenThreads>(seenKey).then((v) => v && setSeen((cur) => ({ ...v, ...cur })));
+  }, [seenKey]);
+  const [thinking, setThinking] = React.useState<Thinking | null>(null);
+  const isThinking = stillThinking(thinking, pageData, Date.now());
+  React.useEffect(() => {
+    if (!thinking) return;
+    if (!isThinking) return setThinking(null);
+    const t = setTimeout(() => setThinking((x) => (x === thinking ? null : x)), Math.max(0, thinking.at + THINKING_MS - Date.now()));
+    return () => clearTimeout(t);
+  }, [thinking, isThinking]);
+  const unread = unreadCount(pageData.values(), seen);
+
   const lastPage = React.useRef<string | null>(null);
   const touchTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchPage = React.useCallback(
@@ -169,6 +189,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const totalH = contentHeight(slots, GAP) + 80;
   const contentW = Math.max(viewport.w, Math.max(0, ...slots.map((x) => x.width)) + 48);
   const [first, last] = mountedRange(slots, scrollY, viewport.h, 2);
+  // Comment cards sit in the margin beside the page when there's room; otherwise pins on the page and the panel.
+  const gutter = (contentW - Math.max(0, ...slots.map((x) => x.width))) / 2;
+  const wideMargin = gutter >= 200;
+  const marginW = Math.min(240, gutter - 40);
   const current = currentPageIndex(slots, scrollY, viewport.h);
   const currentPageId = pages[current]?.id ?? null;
 
@@ -226,6 +250,11 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   }, [commitZoom]);
 
   const selectionPage = selection ? pageData.get(selection.pageId)?.page : undefined;
+  const openSelection = (mode: 'ask' | 'comment') => {
+    if (!selection || !selectionPage) return;
+    const box = unionBBox(selection.ids.map((id) => selectionPage.item(id)).filter((x) => !!x).map(itemBBox));
+    if (box) openAsk({ pageId: selection.pageId, ids: selection.ids, bbox: box, mode });
+  };
   const deleteSelection = React.useCallback(() => {
     if (!selection || !selectionPage) return;
     selectionPage.removeItems(selection.ids);
@@ -264,6 +293,12 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const [menu, setMenu] = React.useState<MenuState>(null);
   const [askOpen, setAskOpen] = React.useState(false);
   const [askText, setAskText] = React.useState('');
+  /** Ask (or comment) about a selection; null for the general Ask. */
+  const [askScope, setAskScope] = React.useState<{ pageId: string; ids: string[]; bbox: [number, number, number, number]; mode: 'ask' | 'comment' } | null>(null);
+  const openAsk = (scope: typeof askScope = null) => {
+    setAskScope(scope);
+    setAskOpen(true);
+  };
   const [renaming, setRenaming] = React.useState(false);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [toast, showToast] = useToast();
@@ -358,14 +393,56 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     });
 
   const sendAsk = () => {
-    if (!notebook || !askText.trim()) return;
-    notebook.addAsk(lastPage.current ?? currentPageId ?? pages[0]!.id, askText.trim());
+    const text = askText.trim();
+    if (!notebook || !text) return;
+    const scope = askScope;
+    const data = scope ? pageData.get(scope.pageId) : undefined;
+    let askThread: string | undefined;
+    if (scope && data) {
+      // A thread anchored to the selection; for an Ask, the agent answers in it.
+      const ids = new Set(scope.ids);
+      const first = data.lines.filter((l) => l.itemIds.some((id) => ids.has(id))).sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0])[0];
+      const asking = scope.mode === 'ask';
+      const commentId = data.page.addComment({ lineKey: first?.key ?? '', author: { kind: 'user', name: 'You' }, text, anchor: scope.bbox, ask: asking || undefined });
+      if (asking) {
+        notebook.addAsk(scope.pageId, text, { sel: { itemIds: scope.ids, bbox: scope.bbox }, commentId });
+        askThread = commentId;
+      }
+      setSelection(null);
+      setActiveComment(commentId);
+    } else if (!scope) notebook.addAsk(lastPage.current ?? currentPageId ?? pages[0]!.id, text);
     setAskText('');
     setAskOpen(false);
-    showToast(meta?.aiAccess ? 'Sent to your connected agents' : 'Saved. Turn on AI access so agents can see it');
+    setAskScope(null);
+    if (scope?.mode === 'comment') return;
+    if (meta?.aiAccess && agents.length && !meta.aiPaused) setThinking(startThinking(pageData, Date.now(), askThread));
+    else showToast(!meta?.aiAccess ? 'Saved. Turn on AI access so agents can see it' : meta.aiPaused ? 'Saved. Sharing is paused' : 'Sent. No agent is following right now');
   };
 
+  const scopeInfo = askScope ? pages.find((x) => x.id === askScope.pageId) : undefined;
+  const scopePage = askScope ? pageData.get(askScope.pageId)?.page : undefined;
   const commentCount = [...pageData.values()].reduce((n, d) => n + d.comments.filter((x) => !x.resolved).length, 0);
+  React.useEffect(() => {
+    if (!commentsOpen || !unread) return;
+    const t = setTimeout(() => {
+      setSeen((cur) => {
+        const next = markAllSeen(pageData.values(), cur);
+        if (next !== cur) void kvSet(seenKey, next);
+        return next;
+      });
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [commentsOpen, unread, pageData, seenKey]);
+  // Narrow windows have no margin for cards: say so when an agent writes while the panel is closed.
+  // (Only entries written after the editor opened, so pages loading while scrolling stay quiet.)
+  const newestAgent = newestAgentEntry(pageData.values());
+  const notifiedAt = React.useRef(Date.now());
+  React.useEffect(() => {
+    if (!newestAgent || newestAgent.at <= notifiedAt.current) return;
+    notifiedAt.current = newestAgent.at;
+    if (!commentsOpen && !wideMargin) showToast(`${newestAgent.name} commented. Open comments to read it.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newestAgent?.at]);
 
   const edCtx = React.useMemo<EditorCtx | null>(
     () =>
@@ -429,25 +506,33 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                 Page {current + 1} of {pages.length}
               </Text>
               {!narrow ? syncPill : null}
-              {!narrow && meta.aiAccess ? <Pill label="AI can read" tone="assistant" /> : null}
+              {meta.aiAccess && (agents.length || meta.aiPaused) ? (
+                <PresencePill agents={agents} notebook={notebook} paused={!!meta.aiPaused} thinking={isThinking} compact={narrow} />
+              ) : !narrow && meta.aiAccess ? (
+                <Pill label="AI can read" tone="assistant" />
+              ) : null}
             </View>
           </View>
           <IconButton icon="rotate-ccw" label="Undo" disabled={!undo.canUndo} onPress={() => undo.undo()} />
           <IconButton icon="rotate-cw" label="Redo" disabled={!undo.canRedo} onPress={() => undo.redo()} />
           <View>
             <IconButton icon="message-square" label="Comments" selected={commentsOpen} onPress={() => setCommentsOpen((x) => !x)} />
-            {commentCount > 0 ? (
-              <View pointerEvents="none" style={[styles.badge, { backgroundColor: c.assistant }]}>
+            {unread > 0 || commentCount > 0 ? (
+              <View
+                pointerEvents="none"
+                accessibilityLabel={unread ? `${unread} unread` : undefined}
+                style={[styles.badge, { backgroundColor: unread ? c.assistant : c.muted }]}
+              >
                 <Text variant="meta" tone="onAccent" style={{ fontSize: 10, lineHeight: 14 }}>
-                  {commentCount}
+                  {unread || commentCount}
                 </Text>
               </View>
             ) : null}
           </View>
           {narrow ? (
-            <IconButton icon="help-circle" label="Ask" tone="assistant" onPress={() => setAskOpen(true)} />
+            <IconButton icon="help-circle" label="Ask" tone="assistant" onPress={() => openAsk()} />
           ) : (
-            <Button label="Ask" icon="help-circle" variant="assistant" size="sm" onPress={() => setAskOpen(true)} />
+            <Button label="Ask" icon="help-circle" variant="assistant" size="sm" onPress={() => openAsk()} />
           )}
           <IconButton icon="more-vertical" label="More" onPress={(e) => moreMenu({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY + 20 })} />
         </View>
@@ -469,6 +554,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                     {slots.map((slot, i) => {
                       const info = pages[i]!;
                       const left = (contentW - slot.width) / 2;
+                      const data = i >= first && i <= last ? pageData.get(info.id) : undefined;
+                      const cards = wideMargin && data ? marginCards(data.lines, data.comments, slot.width / info.size.w, MARGIN_CARD_H, 8, activeCommentId, slot.height) : [];
                       return (
                         <React.Fragment key={slot.id}>
                           <View style={[styles.page, { left, top: slot.top, width: slot.width, height: slot.height, borderColor: c.line }]}>
@@ -485,6 +572,22 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                             </Text>
                             <IconButton icon="more-horizontal" label={`Page ${i + 1} options`} size={32} onPress={(e) => pageMenu(i, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })} />
                           </View>
+                          {cards.length ? (
+                            <View pointerEvents="box-none" style={{ position: 'absolute', left: left + slot.width + 14, top: slot.top, width: marginW, height: slot.height }}>
+                              {cards.map((m) => (
+                                <MarginCard
+                                  key={m.comment.id}
+                                  comment={m.comment}
+                                  top={m.top}
+                                  width={marginW}
+                                  active={m.comment.id === activeCommentId}
+                                  seen={seen}
+                                  thinking={isThinking && thinking?.commentId === m.comment.id}
+                                  onPress={() => edCtx.setActiveComment(m.comment.id)}
+                                />
+                              ))}
+                            </View>
+                          ) : null}
                         </React.Fragment>
                       );
                     })}
@@ -545,6 +648,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                       setSelection({ pageId: selection.pageId, ids: copies.map((x) => x.id) });
                     }}
                   />
+                  <IconButton icon="message-square" label="Comment on selection" size={36} onPress={() => openSelection('comment')} />
+                  <Button label="Ask" accessibilityLabel="Ask about selection" icon="help-circle" variant="assistant" size="sm" onPress={() => openSelection('ask')} />
                   <IconButton icon="trash-2" label="Delete selection" tone="bad" size={36} onPress={deleteSelection} />
                   <IconButton icon="x" label="Deselect" size={36} onPress={() => setSelection(null)} />
                 </View>
@@ -583,19 +688,40 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         <Sheet
           visible={askOpen}
           onClose={() => setAskOpen(false)}
-          title="Ask your agent"
+          title={askScope ? (askScope.mode === 'comment' ? 'Comment on the selection' : 'Ask about the selection') : 'Ask your agent'}
           width={480}
           footer={
             <>
               <Button label="Cancel" onPress={() => setAskOpen(false)} />
-              <Button label="Send" variant="assistant" icon="send" disabled={!askText.trim()} onPress={sendAsk} />
+              <Button
+                label={askScope?.mode === 'comment' ? 'Comment' : 'Send'}
+                variant={askScope?.mode === 'comment' ? 'primary' : 'assistant'}
+                icon="send"
+                disabled={!askText.trim()}
+                onPress={sendAsk}
+              />
             </>
           }
         >
+          {askScope && scopeInfo && scopePage ? (
+            <SelectionThumb info={scopeInfo} items={askScope.ids.map((id) => scopePage.item(id)).filter((x) => !!x)} bbox={askScope.bbox} />
+          ) : null}
           <Text tone="muted">
-            Connected agents get your question right away, with what changed on page {current + 1}. Answers appear as comments next to your lines.
+            {askScope?.mode === 'comment'
+              ? 'Your comment is pinned next to the selection. Connected agents see it and can reply.'
+              : askScope
+                ? 'Connected agents get your question right away, with an image of the selection. The answer appears in a thread next to it.'
+                : `Connected agents get your question right away, with what changed on page ${current + 1}. Answers appear as comments next to your lines.`}
           </Text>
-          <TextField value={askText} onChangeText={setAskText} placeholder="Is line 5 right?" multiline autoFocus accessibilityLabel="Question" style={{ minHeight: 72 }} />
+          <TextField
+            value={askText}
+            onChangeText={setAskText}
+            placeholder={askScope?.mode === 'comment' ? 'Add a comment' : askScope ? 'What would you like to know about this?' : 'Is line 5 right?'}
+            multiline
+            autoFocus
+            accessibilityLabel={askScope?.mode === 'comment' ? 'Comment' : 'Question'}
+            style={{ minHeight: 72 }}
+          />
           <View style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: c.line, borderRadius: radius.control }}>
             <Row title="AI access" description={meta.aiAccess ? 'Agents you approved can read and comment' : 'Off: agents can’t see this notebook'} last>
               <Toggle label="AI access" value={meta.aiAccess} onChange={(v) => notebook.setMeta({ aiAccess: v })} />

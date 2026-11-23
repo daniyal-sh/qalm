@@ -2,7 +2,7 @@ import type { Env } from './env';
 import { num } from './env';
 import { handleAuth, requireUser, TooManyRequests } from './auth';
 import { handleAuthorize, messagePage } from './consent';
-import { canAccess, deleteNotebook, parseDocId, room } from './docs';
+import { canAccess, deleteNotebook, nbDocId, parseDocId, room } from './docs';
 import { type GrantRow, userNotebooks } from './grants';
 import { HttpError, error, json, now, origin, randomToken, readJson, sha256Hex } from './util';
 
@@ -167,7 +167,7 @@ function grantJson(g: GrantRow) {
 
 /**
  * JSON API for the app's AI access screen (Bearer):
- * GET /ai/grants · PATCH /ai/grants/{id} {canComment?, canTranscribe?, notebookIds?, folderIds?} · DELETE /ai/grants/{id} · GET /ai/requests · POST /ai/requests/{id}/deny · GET /ai/activity?limit=
+ * GET /ai/grants · PATCH /ai/grants/{id} {canComment?, canTranscribe?, notebookIds?, folderIds?} · DELETE /ai/grants/{id} · GET /ai/requests · POST /ai/requests/{id}/deny · GET /ai/activity?limit= · GET /ai/presence?nb=
  */
 async function aiApi(req: Request, env: Env, path: string): Promise<Response | null> {
   const userId = await requireUser(req, env);
@@ -232,6 +232,13 @@ async function aiApi(req: Request, env: Env, path: string): Promise<Response | n
   if (rm && req.method === 'POST') {
     await env.DB.prepare(`UPDATE auth_requests SET status = 'denied' WHERE id = ?1 AND user_id = ?2 AND status = 'pending'`).bind(rm[1], userId).run();
     return json({ ok: true });
+  }
+  // The editor's presence pill: which agents are following this notebook right now, and whether sharing is paused.
+  if (path === '/ai/presence' && req.method === 'GET') {
+    const nb = new URL(req.url).searchParams.get('nb') ?? '';
+    const doc = parseDocId(nbDocId(nb));
+    if (!nb || !doc || !(await canAccess(env, userId, doc))) throw new HttpError(404, 'Not found');
+    return json(await room(env, doc.id).agentPresence(doc.id));
   }
   if (path === '/ai/activity' && req.method === 'GET') {
     const limit = Math.min(200, Math.max(1, num(new URL(req.url).searchParams.get('limit') ?? undefined, 50)));
