@@ -201,10 +201,22 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
 - **R2** `ASSETS`: `PUT /assets/{sha256}` and `GET /assets/{sha256}` (Bearer auth; content-addressed).
 - **App API** (Bearer, CORS `*` for the web/Electron build): `GET /ai/grants`, `PATCH /ai/grants/{id} {canComment?, canTranscribe?, notebookIds?, folderIds?}`,
   `DELETE /ai/grants/{id}`, `GET /ai/requests`, `POST /ai/requests/{id}/deny`, `GET /ai/activity?limit=`.
-- **D1** tables: `users`, `sessions`, `magic_links`, `notebooks(id, owner_id, title, ai_access)`, `sync_tickets`, OAuth tables, and
+- **D1** tables: `users`, `sessions`, `magic_links`, `notebooks(id, owner_id, title, ai_access)`, `sync_tickets`, `email_sends`, OAuth tables, and
   `grants(client_id, user_id, notebook_ids|folder_ids, can_comment, can_transcribe, expires_at)`.
-- **Auth:** `POST /auth/email/start`, `GET /auth/email/verify`, `POST /auth/apple`, `POST /auth/google`. These return `{accessToken (JWT, 1h), refreshToken}`,
-  and `POST /auth/refresh` renews them. In dev, emails are logged to the console.
+- **Auth:** `POST /auth/email/start`, `POST /auth/email/verify`, `POST /auth/apple`, `POST /auth/google`. These return `{accessToken (JWT, 1h), refreshToken}`,
+  `POST /auth/refresh` renews them and `POST /auth/logout` ends the session. In dev, emails are logged to the console.
+  - **Email links are bound to the device that asked.** The app sends `{email, nonceHash}` (sha256 of a random nonce it keeps for 15 min).
+    The email has a link to the app's verify route (`MAGIC_LINK_URL`, normally the web app's `/auth/email/verify`; universal link / `qalm://` on native)
+    and a 6-digit code. The app consumes it with `POST /auth/email/verify` `{token, nonce}` or `{email, code, nonce}` (5 wrong codes and that code is dead).
+    A link the device has no nonce for is consumed only with `{token, confirm: true}`, after the app asked "Sign in as …?" (it reads the address
+    with `POST /auth/email/lookup {token}`, which doesn't use the link up).
+  - **A GET never uses up a link or returns tokens** (mail scanners follow links). `GET /auth/email/verify?token=` shows a page with a Continue
+    button: for app links it opens the app link; for the MCP consent sign-in it POSTs the token (same origin only), which sets the web cookie.
+  - **Rate limits:** at most 5 sign-in emails per address and 20 per client IP (`CF-Connecting-IP`) per hour, for `/auth/email/start` and
+    `/authorize/signin`; over that, 429 with `Retry-After`.
+  - **Refresh rotation:** each refresh rotates the token. The immediately-previous token still works for 60 s after a rotation and returns
+    the current pair (two tabs refreshing at once); any other stale token ends the session. Access tokens carry the session id (`sid`) and
+    stay valid until they expire (1 h) after logout.
 - **MCP:** Streamable HTTP at `/mcp` with OAuth 2.1 and dynamic client registration (`@cloudflare/workers-oauth-provider`). The consent page is
   served by the worker (mockup screen 5). There are 4 tools: `wait`, `read`, `transcribe` and `comment`, as in `qink-live.md`. Images are returned as MCP image
   content: a PNG made from `renderLinesStripSvg` with `@resvg/resvg-wasm`.
@@ -222,6 +234,10 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
   - Settings: Account, Pen and palm rejection, and AI access (connected agents, pending requests, activity log)
   - Sign-in
 - **Sync:** the client uses the `y-websocket` provider (with tickets) for each loaded doc, with IndexedDB persistence on web and file persistence on native.
+- **Accounts:** notebooks made while signed out live in `lib:local`. On every sign-in and app start while signed in they're moved into the
+  account library and removed from `lib:local`. After a sign-in this device didn't ask for (a confirmed link), the user is asked first
+  ("Move N notebooks into this account?"). Signing in while signed in to another account always asks first. Token refresh re-reads the stored
+  tokens first (another tab may have rotated them) and, on web, runs under `navigator.locks`. Sign-out calls `/auth/logout` (best effort).
 - **Recognition:** debounced on-device recognition runs 1 s after a line changes, then calls `setLineText(key, …, 'device', score)`.
 
 ## 6. Desktop (`apps/desktop`, Electron)
