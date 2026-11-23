@@ -9,6 +9,7 @@ import {
   BRAND,
   DEEP_LINK_SCHEME,
   MAX_FILE_BYTES,
+  contextMenuEntries,
   deepLinkToPath,
   filtersFor,
   findDeepLink,
@@ -227,8 +228,21 @@ function createWindow() {
     }
   });
   w.webContents.on('will-attach-webview', (e) => e.preventDefault());
+  w.webContents.on('context-menu', (_e, params) => showContextMenu(w, params));
 
   void w.loadURL(startUrl());
+}
+
+/** Right-click in a text field: spelling suggestions and Cut/Copy/Paste (Windows has no menu bar to find them in). */
+function showContextMenu(w: BrowserWindow, params: Electron.ContextMenuParams) {
+  const template: MenuItemConstructorOptions[] = contextMenuEntries(params).map((e) =>
+    e.kind === 'separator'
+      ? { type: 'separator' }
+      : e.kind === 'spelling'
+        ? { label: e.word, click: () => w.webContents.replaceMisspelling(e.word) }
+        : { role: e.role, enabled: e.enabled },
+  );
+  if (template.length) Menu.buildFromTemplate(template).popup({ window: w });
 }
 
 function iconPath(): string | undefined {
@@ -314,7 +328,16 @@ function registerIpc() {
     };
     const r = parent ? await dialog.showSaveDialog(parent, opts) : await dialog.showSaveDialog(opts);
     if (r.canceled || !r.filePath) return { saved: false };
-    await fs.writeFile(r.filePath, a.bytes);
+    // Write next to the target and rename over it, so a failed write never leaves a half-written file (or a
+    // truncated copy of the one being replaced).
+    const tmp = `${r.filePath}.${process.pid}.tmp`;
+    try {
+      await fs.writeFile(tmp, a.bytes);
+      await fs.rename(tmp, r.filePath);
+    } catch (err) {
+      await fs.rm(tmp, { force: true }).catch(() => undefined);
+      throw err;
+    }
     return { saved: true };
   });
 

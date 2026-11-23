@@ -143,3 +143,41 @@ export function openedMime(name: string): string {
       return 'application/octet-stream';
   }
 }
+
+/** What the right-click menu offers (Windows has no menu bar, so this is the only Cut/Copy/Paste by mouse). */
+export type ContextEntry =
+  | { kind: 'spelling'; word: string }
+  | { kind: 'role'; role: 'cut' | 'copy' | 'paste' | 'selectAll'; enabled: boolean }
+  | { kind: 'separator' };
+
+export interface ContextParams {
+  isEditable: boolean;
+  selectionText: string;
+  misspelledWord: string;
+  dictionarySuggestions: readonly string[];
+  editFlags: { canCut: boolean; canCopy: boolean; canPaste: boolean; canSelectAll: boolean };
+}
+
+/**
+ * Text fields: spelling suggestions, then Cut/Copy/Paste/Select all. Selected text elsewhere: Copy. Nothing else
+ * gets a menu (the page's ink surface uses the right button to erase).
+ */
+export function contextMenuEntries(p: ContextParams): ContextEntry[] {
+  const out: ContextEntry[] = [];
+  if (p.isEditable) {
+    if (p.misspelledWord) {
+      for (const word of p.dictionarySuggestions.slice(0, 5)) out.push({ kind: 'spelling', word });
+      if (out.length) out.push({ kind: 'separator' });
+    }
+    out.push(
+      { kind: 'role', role: 'cut', enabled: p.editFlags.canCut },
+      { kind: 'role', role: 'copy', enabled: p.editFlags.canCopy },
+      { kind: 'role', role: 'paste', enabled: p.editFlags.canPaste },
+      { kind: 'separator' },
+      { kind: 'role', role: 'selectAll', enabled: p.editFlags.canSelectAll },
+    );
+  } else if (p.selectionText.trim()) {
+    out.push({ kind: 'role', role: 'copy', enabled: true });
+  }
+  return out;
+}

@@ -41,3 +41,16 @@ test('IPC validation', () => {
   assert.equal(s.openedMime('Doc.PDF'), 'application/pdf');
   assert.equal(s.openedMime('n.qalm'), 'application/x-qalm');
 });
+
+test('the right-click menu: text fields get spelling and editing, selected text gets Copy, the rest nothing', () => {
+  const flags = { canCut: true, canCopy: false, canPaste: true, canSelectAll: true };
+  const base = { isEditable: true, selectionText: '', misspelledWord: '', dictionarySuggestions: [], editFlags: flags };
+  assert.deepEqual(
+    s.contextMenuEntries(base).map((e) => (e.kind === 'role' ? `${e.role}:${e.enabled}` : e.kind)),
+    ['cut:true', 'copy:false', 'paste:true', 'separator', 'selectAll:true'],
+  );
+  const spelled = s.contextMenuEntries({ ...base, misspelledWord: 'teh', dictionarySuggestions: ['the', 'tea', 'ten', 'tech', 'then', 'thee'] });
+  assert.deepEqual(spelled.slice(0, 6).map((e) => e.word ?? e.kind), ['the', 'tea', 'ten', 'tech', 'then', 'separator']);
+  assert.deepEqual(s.contextMenuEntries({ ...base, isEditable: false, selectionText: 'hello' }), [{ kind: 'role', role: 'copy', enabled: true }]);
+  assert.deepEqual(s.contextMenuEntries({ ...base, isEditable: false }), []);
+});
