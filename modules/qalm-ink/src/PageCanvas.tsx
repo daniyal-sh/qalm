@@ -34,7 +34,8 @@ import { traceOutline } from './outlinePath';
 import { usePageImage } from './usePageImage';
 
 export interface CommentAnchor {
-  lineKey: string;
+  /** The thread (comment id) this anchor is for. */
+  id: string;
   bbox: BBox;
   active: boolean;
 }
@@ -381,7 +382,7 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
         {anchors?.filter((a) => a.active).map((a) => {
           const r = { x: a.bbox[0] - 3, y: a.bbox[1] - 3, width: a.bbox[2] - a.bbox[0] + 6, height: a.bbox[3] - a.bbox[1] + 6, r: 4 };
           return (
-            <Group key={`hl-${a.lineKey}`}>
+            <Group key={`hl-${a.id}`}>
               <RoundedRect {...r} color={anchorColors.soft} />
               <RoundedRect {...r} color={anchorColors.line} style="stroke" strokeWidth={hairline} />
             </Group>
@@ -431,7 +432,7 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
         ) : null}
 
         {anchors?.map((a) => (
-          <Group key={`pin-${a.lineKey}`}>
+          <Group key={`pin-${a.id}`}>
             <Circle cx={a.bbox[2] + PIN_RADIUS + 4} cy={a.bbox[1] + PIN_RADIUS} r={a.active ? PIN_RADIUS * 1.2 : PIN_RADIUS} color={anchorColors.pin} />
             <Circle cx={a.bbox[2] + PIN_RADIUS + 4} cy={a.bbox[1] + PIN_RADIUS} r={PIN_RADIUS * 0.4} color="#ffffff" />
           </Group>

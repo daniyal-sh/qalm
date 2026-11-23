@@ -1,4 +1,4 @@
-import { createNotebookUndoManager, inkOnPaper, Notebook, Page, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem, type Item, type Line } from '@qalm/core';
+import { createNotebookUndoManager, inkOnPaper, Notebook, Page, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem, type Item } from '@qalm/core';
 import { router } from 'expo-router';
 import { QalmInk, renderThumbnail } from 'qalm-ink';
 import * as React from 'react';
@@ -34,7 +34,7 @@ import { cloneItems, recolorPatch, selectionBBox, selectionSwatch } from './item
 import { trackModifiers } from './modifiers';
 import { SelectionThumb } from './SelectionThumb';
 import { PageView } from './PageView';
-import { selectionLines } from './reading.logic';
+import { selectionInk } from './reading.logic';
 import { ReadingSheet } from './ReadingSheet';
 import { SwatchStrip } from './Swatches';
 import { Toolbar } from './Toolbar';
@@ -200,11 +200,6 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     if (touchTimer.current) clearTimeout(touchTimer.current);
   }, []);
 
-  // Recognition model (ML Kit downloads it once; web is a no-op).
-  React.useEffect(() => {
-    QalmInk.ensureModel('en-US').catch(() => undefined);
-  }, []);
-
   // A bogus link, or a notebook deleted forever (maybe on another device): "not found", and never a new library entry.
   const entry = library?.entry(notebookId);
   const found = notebookFound(meta, notebookId, !!library, entry);
@@ -321,13 +316,13 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     const box = selectionBBox(selectedItems());
     if (box) openAsk({ pageId: selection.pageId, ids: selection.ids, bbox: box, mode });
   };
-  // Readings: what the selected handwritten lines say (none for drawings, images or text boxes).
-  const selLines = selection && pageData.get(selection.pageId) ? selectionLines(pageData.get(selection.pageId)!.lines, selection.ids) : [];
-  const [reading, setReading] = React.useState<{ pageId: string; page: Page; lines: Line[] } | null>(null);
+  // Reading: what an agent (or the student) read in the selected ink (none for images or text boxes alone).
+  const selInk = selection && pageData.get(selection.pageId) ? selectionInk(pageData.get(selection.pageId)!.items, selection.ids) : [];
+  const [reading, setReading] = React.useState<{ pageId: string; page: Page; ink: string[] } | null>(null);
   const openReading = () => {
     if (!selection || !selectionPage) return;
-    const lines = selectionLines(selectionPage.lines(), selection.ids);
-    if (lines.length) setReading({ pageId: selection.pageId, page: selectionPage, lines });
+    const ink = selectionInk(selectionPage.items(), selection.ids);
+    if (ink.length) setReading({ pageId: selection.pageId, page: selectionPage, ink });
   };
   const deleteSelection = () => {
     if (!selection || !selectionPage) return;
@@ -750,10 +745,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       if (!pages.some((p) => p.id === scope.pageId)) return showToast('That page was deleted. Your text is still here.');
       if (!page) return showToast('Still loading the page. Try again in a moment.');
       // A thread anchored to the selection; for an Ask, the agent answers in it.
-      const ids = new Set(scope.ids);
-      const first = page.lines().filter((l) => l.itemIds.some((id) => ids.has(id))).sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0])[0];
       const asking = scope.mode === 'ask';
-      const commentId = page.addComment({ lineKey: first?.key ?? '', author: { kind: 'user', name: 'You' }, text, anchor: scope.bbox, anchorIds: scope.ids, ask: asking || undefined });
+      const commentId = page.addComment({ author: { kind: 'user', name: 'You' }, text, anchor: scope.bbox, anchorIds: scope.ids, ask: asking || undefined });
       if (asking) {
         notebook.addAsk(scope.pageId, text, { sel: { itemIds: scope.ids, bbox: scope.bbox }, commentId });
         askThread = commentId;
@@ -808,7 +801,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       const slot = slots[i];
       const d = info ? pageData.get(info.id) : undefined;
       if (!info || !slot || !d) continue;
-      const placed = marginCards(d.lines, d.comments, slot.width / info.size.w, MARGIN_CARD_H, MARGIN_CARD_GAP, activeCommentId, slot.height, d.items);
+      const placed = marginCards(d.comments, slot.width / info.size.w, MARGIN_CARD_H, MARGIN_CARD_GAP, activeCommentId, slot.height, d.items);
       for (const m of fitColumn(placed, MARGIN_CARD_H, MARGIN_CARD_GAP, slot.height).shown) marginTops.set(m.comment.id, slot.top + m.top);
     }
   }
@@ -972,7 +965,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                       const cards =
                         column && data
                           ? fitColumn(
-                              marginCards(data.lines, data.comments, slot.width / info.size.w, MARGIN_CARD_H, MARGIN_CARD_GAP, activeCommentId, slot.height, data.items),
+                              marginCards(data.comments, slot.width / info.size.w, MARGIN_CARD_H, MARGIN_CARD_GAP, activeCommentId, slot.height, data.items),
                               MARGIN_CARD_H,
                               MARGIN_CARD_GAP,
                               slot.height,
@@ -1077,7 +1070,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                         selMore.map((m) => <IconButton key={m.label} icon={m.icon!} label={m.label} onPress={m.onPress} />)
                       )}
                       {/* Reading stays on the bar at every width (F6). */}
-                      {selLines.length ? <IconButton icon="type" label={selLines.length > 1 ? 'Readings' : 'Reading'} onPress={openReading} /> : null}
+                      {selInk.length ? <IconButton icon="type" label="Reading" onPress={openReading} /> : null}
                       <Button label="Ask" accessibilityLabel="Ask about selection" icon="message-circle" variant="assistant" size="sm" onPress={() => openSelection('ask')} />
 
                       <IconButton icon="trash-2" label="Delete selection" tone="bad" onPress={deleteSelection} />
@@ -1149,7 +1142,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         {reading ? (
           <ReadingSheet
             page={reading.page}
-            lines={reading.lines}
+            ink={reading.ink}
             onClose={() => setReading(null)}
             onDone={(msg) => {
               touchPage(reading.pageId);
@@ -1186,7 +1179,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               ? 'Your comment is pinned next to the selection. Connected agents see it and can reply.'
               : askScope
                 ? 'Connected agents get your question right away, with an image of the selection. The answer appears in a thread next to it.'
-                : `Connected agents get your question right away, with what changed on page ${current + 1}. Answers appear as comments next to your lines.`}
+                : `Connected agents get your question right away, with what changed on page ${current + 1}. Answers appear as comments next to your ink.`}
           </Text>
           <TextField
             value={askText}

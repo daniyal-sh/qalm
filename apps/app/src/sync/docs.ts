@@ -1,4 +1,5 @@
 import * as Y from 'yjs';
+import { migratePage } from '@qalm/core';
 
 import type { DocPersistence } from './snapshot';
 import type { SyncProvider } from './provider';
@@ -203,10 +204,19 @@ export const docIds = {
 };
 
 /** Opens a doc, waits for local state (and, if online, the first sync up to `syncTimeoutMs`). */
+const migrating = new WeakSet<object>();
+
 export async function openLoaded(m: DocManager, docId: string, syncTimeoutMs = 0): Promise<DocHandle> {
   const h = m.open(docId);
   await h.loaded;
   const p = h.provider();
+  if (docId.startsWith('pg:') && !migrating.has(h.doc)) {
+    // Pages from before regions: move lines to readings and stroke anchors once, locally and after the first sync
+    // (another device may still hold the old data). Idempotent and not undoable (tech-spec §2, migration).
+    migrating.add(h.doc);
+    migratePage(h.doc);
+    p?.whenSynced().then(() => migratePage(h.doc)).catch(() => undefined);
+  }
   if (p && syncTimeoutMs > 0) {
     await Promise.race([p.whenSynced(), new Promise((r) => setTimeout(r, syncTimeoutMs))]);
   }

@@ -110,7 +110,6 @@ describe('selection helpers', () => {
     }, LOCAL_ORIGIN);
     const moved = pb.item(s1.id);
     expect(moved?.type === 'stroke' && moved.bbox[1]).toBeCloseTo(s1.bbox[1] + 300);
-    expect(pb.lines().map((l) => l.itemIds)).toEqual([[s1.id, s2.id]]);
     um.undo();
     const back = pb.item(s1.id);
     expect(back?.type === 'stroke' && back.bbox[1]).toBeCloseTo(s1.bbox[1]);

@@ -16,7 +16,5 @@ export type {
   PenButtonEvent,
   RejectedTouchEvent,
 } from './InkOverlay.types';
-export { QalmInk } from './QalmInk';
+export { default as QalmInk } from './QalmInkModule';
 export type { QalmInkModuleType } from './QalmInk.types';
-/** @deprecated Temporary shim types; removed with `QalmInk.recognize`. */
-export type { RecognizeLine, RecognizeResult } from './QalmInk';

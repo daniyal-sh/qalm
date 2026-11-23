@@ -1,4 +1,4 @@
-import { Library, Notebook, Page, summarizeThreads, type Comment, type Line } from '@qalm/core';
+import { Library, Notebook, Page, summarizeThreads, type Comment } from '@qalm/core';
 import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 
@@ -13,7 +13,7 @@ import {
   currentPageIndex,
   hitAnchor,
   layoutPages,
-  lineQuote,
+  threadQuote,
   mountedRange,
   pdfBucketWidth,
   penButtonTool,
@@ -120,18 +120,20 @@ describe('editor view maths', () => {
     expect(penButtonTool('none', 'pen', 'lasso')).toBe('pen');
   });
 
-  it('anchors open comments to their lines', () => {
-    const lines: Line[] = [
-      { key: 'L1', kind: 'line', itemIds: ['L1'], bbox: [0, 0, 100, 20], text: 'x = 2' },
-      { key: 'L2', kind: 'line', itemIds: ['L2'], bbox: [0, 40, 100, 60] },
-    ];
-    const cm = (id: string, lineKey: string, resolved = false): Comment => ({ id, lineKey, author: { kind: 'agent', name: 'Claude' }, text: 't', createdAt: 1, resolved, replies: [] });
-    const a = commentAnchors(lines, [cm('c1', 'L1'), cm('c2', 'L2', true), cm('c3', 'gone')], 'c1');
-    expect(a).toEqual([{ lineKey: 'L1', bbox: [0, 0, 100, 20], active: true }]);
-    expect(commentAnchors(lines, [cm('c2', 'L2', true)], 'c2')).toHaveLength(1);
-    expect(lineQuote(lines, 'L1')).toBe('x = 2');
-    expect(lineQuote(lines, 'L2')).toBeNull();
-    expect(hitAnchor(a, 109, 5)?.lineKey).toBe('L1');
+  it('anchors open comments to their strokes (live) or box; quotes the fresh reading of their strokes', () => {
+    const p = new Page(new Y.Doc());
+    p.addItem({ id: 's1', type: 'stroke', tool: 'pen', color: '#000', width: 1, points: [{ x: 0, y: 0, p: 0.5, tilt: 1.5, az: 0, t: 0 }, { x: 100, y: 20, p: 0.5, tilt: 1.5, az: 0, t: 8 }], bbox: [0, 0, 100, 20], createdAt: 0 });
+    p.setReading(['s1'], 'x = 2', 'agent', 'Claude');
+    const cm = (id: string, extra: Partial<Comment>, resolved = false): Comment => ({ id, author: { kind: 'agent', name: 'Claude' }, text: 't', createdAt: 1, resolved, replies: [], ...extra });
+    const items = p.items();
+    const a = commentAnchors([cm('c1', { anchorIds: ['s1'] }), cm('c2', { anchor: [0, 40, 100, 60] }, true), cm('c3', { anchorIds: ['gone'] }), cm('c4', {})], 'c1', items);
+    expect(a).toEqual([{ id: 'c1', bbox: [0, 0, 100, 20], active: true }]);
+    expect(commentAnchors([cm('c2', { anchor: [0, 40, 100, 60] }, true)], 'c2', items)).toHaveLength(1);
+    expect(threadQuote(p.readings(), cm('c1', { anchorIds: ['s1'] }))).toBe('x = 2');
+    expect(threadQuote(p.readings(), cm('c4', {}))).toBeNull();
+    p.addItem({ id: 's2', type: 'stroke', tool: 'pen', color: '#000', width: 1, points: [{ x: 102, y: 0, p: 0.5, tilt: 1.5, az: 0, t: 0 }, { x: 110, y: 20, p: 0.5, tilt: 1.5, az: 0, t: 8 }], bbox: [102, 0, 110, 20], createdAt: 0 });
+    expect(threadQuote(p.readings(), cm('c1', { anchorIds: ['s1'] }))).toBeNull(); // stale: no quote
+    expect(hitAnchor(a, 109, 5)?.id).toBe('c1');
     expect(hitAnchor(a, 50, 50)).toBeNull();
   });
 });
@@ -141,18 +143,18 @@ describe('comments panel rows', () => {
     const p1 = new Page(new Y.Doc());
     const p2 = new Page(new Y.Doc());
     const far = new Page(new Y.Doc());
-    const a = p2.addComment({ lineKey: 'k', author: { kind: 'agent', name: 'Claude' }, text: 'agent' });
-    p1.addComment({ lineKey: 'k', author: { kind: 'user', name: 'Me' }, text: 'mine' });
-    const done = p1.addComment({ lineKey: 'k', author: { kind: 'agent', name: 'Claude' }, text: 'old' });
+    const a = p2.addComment({ author: { kind: 'agent', name: 'Claude' }, text: 'agent' });
+    p1.addComment({ author: { kind: 'user', name: 'Me' }, text: 'mine' });
+    const done = p1.addComment({ author: { kind: 'agent', name: 'Claude' }, text: 'old' });
     p1.resolveComment(done);
-    const farId = far.addComment({ lineKey: 'k', author: { kind: 'agent', name: 'Claude' }, text: 'on page 30' });
+    const farId = far.addComment({ author: { kind: 'agent', name: 'Claude' }, text: 'on page 30' });
     const gone = new Page(new Y.Doc());
-    gone.addComment({ lineKey: 'k', author: { kind: 'user', name: 'Me' }, text: 'deleted page' });
+    gone.addComment({ author: { kind: 'user', name: 'Me' }, text: 'deleted page' });
     // The index also has a stale copy of p1's threads (live data wins) and a thread on a deleted page (left out).
     const index = [...summarizeThreads('p1', p1.comments()).map((t) => ({ ...t, text: 'stale' })), ...summarizeThreads('p30', far.comments()), ...summarizeThreads('gone', gone.comments())];
     const loaded = new Map([
-      ['p2', { page: p2, index: 1, lines: [], comments: p2.comments(), items: [] }],
-      ['p1', { page: p1, index: 0, lines: [], comments: p1.comments(), items: [] }],
+      ['p2', { page: p2, index: 1, readings: [], comments: p2.comments(), items: [] }],
+      ['p1', { page: p1, index: 0, readings: [], comments: p1.comments(), items: [] }],
     ]);
     const order = ['p1', 'p2', ...Array.from({ length: 27 }, (_, i) => `x${i}`), 'p30'];
     const rows = threadRows(index, loaded, order);

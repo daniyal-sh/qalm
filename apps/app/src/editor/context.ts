@@ -1,4 +1,4 @@
-import { createUndoManager, type Comment, type Item, type Line, type Notebook, type Page, type PenStyle, type TextItem } from '@qalm/core';
+import { createUndoManager, type Comment, type Item, type Notebook, type Page, type PenStyle, type Reading, type TextItem } from '@qalm/core';
 import * as React from 'react';
 import type * as Y from 'yjs';
 
@@ -35,7 +35,8 @@ export interface EditingText {
 export interface PageData {
   page: Page;
   index: number;
-  lines: Line[];
+  /** Readings of the page's ink (quotes on comment cards). */
+  readings: Reading[];
   comments: Comment[];
   /** The page's items, so threads on a selection can follow their ink. */
   items: Item[];

@@ -30,7 +30,7 @@ export function threadRows(index: readonly ThreadSummary[], loaded: ReadonlyMap<
     if (i === undefined) continue;
     for (const comment of data.comments) {
       live.add(comment.id);
-      out.push({ pageId, index: i, summary: summarizeThread(pageId, comment, data.lines), data, comment });
+      out.push({ pageId, index: i, summary: summarizeThread(pageId, comment, data.readings), data, comment });
     }
   }
   for (const t of index) {
