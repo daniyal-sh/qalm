@@ -63,6 +63,8 @@ export interface Line {
   kind: 'line' | 'drawing';
   itemIds: string[];
   bbox: BBox;
+  /** The writing band [top, bottom]: median top and bottom of its items (`geometry/lines.ts`). Not filled in yet. */
+  band?: [top: number, bottom: number];
   text?: string;
   textSrc?: TextSrc;
   conf?: number;
