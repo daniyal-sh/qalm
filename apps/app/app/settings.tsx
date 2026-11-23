@@ -45,7 +45,7 @@ function AccountSection() {
       {s.serverUrl ? (
         <Panel>
           {s.user ? (
-            <Row title="Sign out" description="Notebooks on this device stay here. Sign in again to sync them." last>
+            <Row title="Sign out" description="Your notebooks stay in your account. Sign in again to see and sync them." last>
               <Button
                 label="Sign out"
                 variant="danger"
