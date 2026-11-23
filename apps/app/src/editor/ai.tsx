@@ -30,7 +30,8 @@ export function usePresence(tm: TokenManager | null, notebookId: string, enabled
         const p = await getPresence(tm, notebookId);
         if (alive) setAgents(p.aiAccess ? p.agents : []);
       } catch {
-        /* offline or signed out: keep the last answer */
+        // Offline, or the session expired: don't keep claiming an agent is following along.
+        if (alive) setAgents((a) => (a.length ? [] : a));
       }
       if (alive) timer = setTimeout(tick, POLL_MS);
     };
@@ -41,6 +42,35 @@ export function usePresence(tm: TokenManager | null, notebookId: string, enabled
     };
   }, [tm, notebookId, enabled]);
   return agents;
+}
+
+/**
+ * Calls `onRead(ids)` once threads have stayed in `ids` (those on screen and unread) for `ms`. A thread that leaves
+ * the screen starts over when it comes back.
+ */
+export function useReadAfterDwell(ids: readonly string[], ms: number, onRead: (ids: string[]) => void): void {
+  const since = React.useRef(new Map<string, number>());
+  const cb = React.useRef(onRead);
+  cb.current = onRead;
+  const [tick, setTick] = React.useState(0);
+  const key = [...ids].sort().join(',');
+  React.useEffect(() => {
+    const m = since.current;
+    const now = Date.now();
+    const cur = new Set(key ? key.split(',') : []);
+    for (const id of [...m.keys()]) if (!cur.has(id)) m.delete(id);
+    for (const id of cur) if (!m.has(id)) m.set(id, now);
+    if (!m.size) return;
+    const wait = Math.max(0, Math.min(...m.values()) + ms - now);
+    const t = setTimeout(() => {
+      const at = Date.now();
+      const ready = [...m].filter(([, s]) => at - s >= ms).map(([id]) => id);
+      for (const id of ready) m.delete(id);
+      if (ready.length) cb.current(ready);
+      setTick((x) => x + 1);
+    }, wait);
+    return () => clearTimeout(t);
+  }, [key, ms, tick]);
 }
 
 /** A dot that pulses while `on`. */

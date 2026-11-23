@@ -21,8 +21,8 @@ import { Button, IconButton, Pill, TextField, Toggle } from '../ui/controls';
 import { EmptyState, Menu, Row, Sheet, useToast, type MenuItem } from '../ui/layout';
 import { Text } from '../ui/Text';
 import { CommentsPanel } from './CommentsPanel';
-import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence } from './ai';
-import { markAllSeen, marginCards, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, type SeenThreads, type Thinking } from './ai.logic';
+import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence, useReadAfterDwell } from './ai';
+import { marginCards, markSeen, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, unreadIds, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditingText, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
 import { clipSetAt, getClip, pasteItems, setClip, useClip } from './clipboard';
 import { pastedImage, pastedText, pasteSource, readPaste, systemChangedAt, viewCentre, watchSystemClipboard } from './systemPaste';
@@ -764,18 +764,59 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
 
   const scopeInfo = askScope ? pages.find((x) => x.id === askScope.pageId) : undefined;
   const scopePage = askScope ? (heldPage?.page ?? pageData.get(askScope.pageId)?.page) : undefined;
-  const commentCount = [...pageData.values()].reduce((n, d) => n + d.comments.filter((x) => !x.resolved).length, 0);
-  React.useEffect(() => {
-    if (!commentsOpen || !unread) return;
-    const t = setTimeout(() => {
+  // Read state (per device): a thread is read once it is opened (its card, pin or panel row tapped), or once its margin
+  // card or panel card has been on screen for a moment. The badge counts the agent entries not read that way.
+  const pageDataRef = React.useRef(pageData);
+  pageDataRef.current = pageData;
+  const markRead = React.useCallback(
+    (ids: Iterable<string>) => {
+      const want = new Set(ids);
+      const threads = [...pageDataRef.current.values()].flatMap((d) => d.comments).filter((x) => want.has(x.id));
       setSeen((cur) => {
-        const next = markAllSeen(pageData.values(), cur);
+        const next = markSeen(threads, cur);
         if (next !== cur) void kvSet(seenKey, next);
         return next;
       });
-    }, 3000);
-    return () => clearTimeout(t);
-  }, [commentsOpen, unread, pageData, seenKey]);
+    },
+    [seenKey],
+  );
+  const selectThread = React.useCallback(
+    (id: string | null) => {
+      setActiveComment(id);
+      if (id) markRead([id]);
+    },
+    [markRead],
+  );
+  const [panelVisible, setPanelVisible] = React.useState<string[]>([]);
+  // Margin cards on screen: on a visible page, and inside the viewport (checked again, live, when the dwell ends).
+  const marginTops = new Map<string, number>();
+  if (wideMargin) {
+    for (let i = visFirst; i <= visLast; i++) {
+      const info = pages[i];
+      const slot = slots[i];
+      const d = info ? pageData.get(info.id) : undefined;
+      if (!info || !slot || !d) continue;
+      for (const m of marginCards(d.lines, d.comments, slot.width / info.size.w, MARGIN_CARD_H, 8, activeCommentId, slot.height, d.items)) {
+        marginTops.set(m.comment.id, slot.top + m.top);
+      }
+    }
+  }
+  const marginTopsRef = React.useRef(marginTops);
+  marginTopsRef.current = marginTops;
+  const marginOnScreen = (id: string) => {
+    const top = marginTopsRef.current.get(id);
+    return top !== undefined && top < scrollYRef.current + viewportRef.current.h && top + MARGIN_CARD_H > scrollYRef.current;
+  };
+  const unreadSet = unreadIds(pageData.values(), seen);
+  const onScreen = [...marginTops.keys()].filter(marginOnScreen);
+  if (commentsOpen) onScreen.push(...panelVisible);
+  const panelVisibleRef = React.useRef(panelVisible);
+  panelVisibleRef.current = commentsOpen ? panelVisible : [];
+  useReadAfterDwell(
+    onScreen.filter((id) => unreadSet.has(id)),
+    1500,
+    (ids) => markRead(ids.filter((id) => panelVisibleRef.current.includes(id) || marginOnScreen(id))),
+  );
   // Narrow windows have no margin for cards: say so when an agent writes while the panel is closed.
   // (Only entries written after the editor opened, so pages loading while scrolling stay quiet.)
   const newestAgent = newestAgentEntry(pageData.values());
@@ -805,14 +846,14 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             setEditingText,
             activeCommentId,
             setActiveComment: (id: string | null) => {
-              setActiveComment(id);
+              selectThread(id);
               if (id) setCommentsOpen(true);
             },
             reportPage,
             touchPage,
           }
         : null,
-    [notebook, notebookId, tools, setTool, onPenButton, input, undo, registry, selection, editingText, activeCommentId, reportPage, touchPage],
+    [notebook, notebookId, tools, setTool, onPenButton, input, undo, registry, selection, editingText, activeCommentId, selectThread, reportPage, touchPage],
   );
 
   if (!h || !notebook || !meta || !edCtx) {
@@ -860,15 +901,11 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
           <IconButton icon="rotate-ccw" label="Undo" disabled={!undo.canUndo} onPress={() => undo.undo()} />
           <IconButton icon="rotate-cw" label="Redo" disabled={!undo.canRedo} onPress={() => undo.redo()} />
           <View>
-            <IconButton icon="message-square" label="Comments" selected={commentsOpen} onPress={() => setCommentsOpen((x) => !x)} />
-            {unread > 0 || commentCount > 0 ? (
-              <View
-                pointerEvents="none"
-                accessibilityLabel={unread ? `${unread} unread` : undefined}
-                style={[styles.badge, { backgroundColor: unread ? c.assistant : c.muted }]}
-              >
+            <IconButton icon="message-square" label={unread ? `Comments, ${unread} unread` : 'Comments'} selected={commentsOpen} onPress={() => setCommentsOpen((x) => !x)} />
+            {unread > 0 ? (
+              <View pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden style={[styles.badge, { backgroundColor: c.assistant }]}>
                 <Text variant="meta" tone="onAccent" style={{ fontSize: 10, lineHeight: 14 }}>
-                  {unread || commentCount}
+                  {unread}
                 </Text>
               </View>
             ) : null}
@@ -1027,7 +1064,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               <CommentsPanel
                 pages={pageData}
                 activeId={activeCommentId}
-                onSelect={setActiveComment}
+                onSelect={selectThread}
+                onVisible={setPanelVisible}
                 onJump={scrollToPage}
                 onClose={() => {
                   setCommentsOpen(false);

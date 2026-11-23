@@ -4,7 +4,7 @@ import * as Y from 'yjs';
 
 import { grantSummary, getAiOverview, toggleId, updateGrant } from '../src/api/ai';
 import { extractMagicToken } from '../src/auth/magicLink';
-import { commentRows } from '../src/editor/CommentsPanel.logic';
+import { commentRows, filterFor, rowsInView } from '../src/editor/CommentsPanel.logic';
 import {
   anchoredScroll,
   clampZoom,
@@ -151,6 +151,31 @@ describe('comments panel rows', () => {
     expect(commentRows(pages, 'open').map((r) => r.comment.text)).toEqual(['mine', 'agent']);
     expect(commentRows(pages, 'ai').map((r) => r.comment.id)).toEqual([a]);
     expect(commentRows(pages, 'resolved').map((r) => r.comment.id)).toEqual([done]);
+    expect(commentRows(pages, 'all')).toHaveLength(3);
+  });
+
+  it('switches to a tab that lists the active thread (resolved threads are only under Resolved)', () => {
+    const agent = { kind: 'agent' as const, name: 'Claude' };
+    const me = { kind: 'user' as const, name: 'Me' };
+    expect(filterFor({ resolved: true, author: me }, 'open')).toBe('resolved');
+    expect(filterFor({ resolved: true, author: agent }, 'ai')).toBe('resolved');
+    expect(filterFor({ resolved: false, author: me }, 'ai')).toBe('open');
+    expect(filterFor({ resolved: false, author: agent }, 'ai')).toBe('ai');
+    expect(filterFor({ resolved: false, author: agent }, 'resolved')).toBe('open');
+    expect(filterFor({ resolved: false, author: me }, 'open')).toBe('open');
+  });
+
+  it('lists the cards on screen in the panel', () => {
+    const boxes = new Map([
+      ['a', { y: 0, h: 200 }],
+      ['b', { y: 210, h: 200 }],
+      ['c', { y: 420, h: 30 }],
+      ['d', { y: 460, h: 200 }],
+    ]);
+    expect(rowsInView(boxes, 0, 300)).toEqual(['a', 'b']);
+    expect(rowsInView(boxes, 0, 240)).toEqual(['a']); // only 30 px of b
+    expect(rowsInView(boxes, 250, 300)).toEqual(['b', 'c', 'd']);
+    expect(rowsInView(boxes, 0, 0)).toEqual([]);
   });
 });
 

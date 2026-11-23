@@ -5,13 +5,19 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { relativeTime } from '../library/actions';
 import { useTheme } from '../theme/ThemeProvider';
 import { radius } from '../theme/tokens';
-import { Avatar, Button, IconButton, Segmented, TextField } from '../ui/controls';
+import { Avatar, Button, focusRing, IconButton, Segmented, TextField } from '../ui/controls';
 import { EmptyState } from '../ui/layout';
 import { Text } from '../ui/Text';
-import { commentRows, type CommentFilter, type CommentRow } from './CommentsPanel.logic';
+import { commentRows, filterFor, rowsInView, type CommentFilter, type CommentRow, type RowBox } from './CommentsPanel.logic';
 import type { PageData } from './context';
 import { lineQuote } from './view';
 
+type PressState = { pressed: boolean; hovered?: boolean; focused?: boolean };
+
+/**
+ * One thread. The card itself is not a control: its summary (author, where, first message) is the button that
+ * focuses the thread, and Reply / Resolve / Show and the reply field are separate controls below it.
+ */
 function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: boolean; onSelect(): void; onJump(): void }) {
   const { c } = useTheme();
   const { comment: cm, data } = row;
@@ -21,34 +27,38 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
   const inkRemoved = anchorInkRemoved(cm, data.items);
   const onSelection = !!cm.anchor || !!cm.anchorIds?.length;
   const hasLine = onSelection || data.lines.some((l) => l.key === cm.lineKey);
+  const where = inkRemoved ? 'Ink removed' : quote ? `“${quote}”` : onSelection ? 'On a selection' : hasLine ? 'Handwritten line' : 'The line was erased';
+  const accent = agent ? c.assistant : c.accent;
   return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onSelect}
-      style={[
-        styles.card,
-        {
-          backgroundColor: agent ? c.assistantSoft : c.surface,
-          borderColor: active ? (agent ? c.assistant : c.accent) : agent ? c.assistantLine : c.line,
-        },
-      ]}
-    >
-      <View style={styles.head}>
-        <Avatar name={cm.author.name} kind={cm.author.kind} size={26} />
-        <View style={{ flex: 1 }}>
-          <Text variant="label" numberOfLines={1}>
-            {cm.author.name}
-            {agent ? <Text variant="meta" tone="assistant">{'  via MCP'}</Text> : null}
-          </Text>
-          <Text variant="meta" tone="faint">
-            Page {data.index + 1} · {relativeTime(cm.createdAt)}
-          </Text>
+    <View style={[styles.card, { backgroundColor: agent ? c.assistantSoft : c.surface, borderColor: active ? accent : agent ? c.assistantLine : c.line }]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${cm.author.name}${agent ? ', AI agent' : ''}, page ${data.index + 1}: ${cm.text}`}
+        accessibilityHint={hasLine ? 'Highlights it on the page' : undefined}
+        accessibilityState={{ selected: active }}
+        onPress={onSelect}
+        style={(s) => {
+          const st = s as PressState;
+          return [styles.summary, (st.hovered || st.pressed) && { backgroundColor: c.soft }, focusRing(c, st.focused)];
+        }}
+      >
+        <View style={styles.head}>
+          <Avatar name={cm.author.name} kind={cm.author.kind} size={26} />
+          <View style={{ flex: 1 }}>
+            <Text variant="label" numberOfLines={1}>
+              {cm.author.name}
+              {agent ? <Text variant="meta" tone="assistant">{'  AI agent'}</Text> : null}
+            </Text>
+            <Text variant="meta" tone="faint">
+              Page {data.index + 1} · {relativeTime(cm.createdAt)}
+            </Text>
+          </View>
         </View>
-      </View>
-      <Text variant="meta" tone="muted" numberOfLines={2} style={{ fontStyle: 'italic' }}>
-        {inkRemoved ? 'Ink removed' : quote ? `“${quote}”` : onSelection ? 'On a selection' : hasLine ? 'Handwritten line' : 'The line was erased'}
-      </Text>
-      <Text>{cm.text}</Text>
+        <Text variant="meta" tone="muted" numberOfLines={2} style={{ fontStyle: 'italic' }}>
+          {where}
+        </Text>
+        <Text>{cm.text}</Text>
+      </Pressable>
       {cm.replies.map((r, i) => (
         <View key={i} style={[styles.reply, { borderLeftColor: r.author.kind === 'agent' ? c.assistantLine : c.accentLine }]}>
           <Text variant="meta" tone="muted">
@@ -58,7 +68,7 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
         </View>
       ))}
       {reply !== null ? (
-        <View style={{ gap: 8 }}>
+        <View style={styles.actions}>
           <TextField value={reply} onChangeText={setReply} placeholder="Reply" autoFocus multiline accessibilityLabel="Reply" />
           <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
             <Button label="Cancel" size="sm" variant="ghost" onPress={() => setReply(null)} />
@@ -75,13 +85,13 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
           </View>
         </View>
       ) : (
-        <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+        <View style={[styles.actions, { flexDirection: 'row', gap: 6, flexWrap: 'wrap' }]}>
           <Button label="Reply" size="sm" variant="ghost" icon="corner-up-left" onPress={() => setReply('')} />
           {!cm.resolved ? <Button label="Resolve" size="sm" variant="ghost" icon="check" onPress={() => data.page.resolveComment(cm.id)} /> : null}
-          {hasLine ? <Button label="Show" size="sm" variant="ghost" icon="crosshair" onPress={onJump} /> : null}
+          {hasLine ? <Button label="Show" accessibilityLabel="Show on page" size="sm" variant="ghost" icon="crosshair" onPress={onJump} /> : null}
         </View>
       )}
-    </Pressable>
+    </View>
   );
 }
 
@@ -91,38 +101,69 @@ export function CommentsPanel({
   onSelect,
   onJump,
   onClose,
+  onVisible,
 }: {
   pages: Map<string, PageData>;
   activeId: string | null;
   onSelect(id: string | null): void;
   onJump(pageId: string): void;
   onClose(): void;
+  /** The threads whose cards are on screen in the panel (sorted ids; for read state). */
+  onVisible(ids: string[]): void;
 }) {
   const { c } = useTheme();
   const [filter, setFilter] = React.useState<CommentFilter>('open');
   const rows = commentRows(pages, filter);
+  const openCount = commentRows(pages, 'open').length;
+  // When a thread becomes active, or is resolved while active, switch to a tab that lists it (checked against every
+  // thread, not just this tab's rows). Only on that change, so the tabs stay free to switch afterwards.
+  const active = activeId ? commentRows(pages, 'all').find((r) => r.comment.id === activeId)?.comment : undefined;
+  const activeKey = active ? `${active.id}:${active.resolved}` : '';
+  const lastActiveKey = React.useRef('');
+  React.useEffect(() => {
+    if (activeKey === lastActiveKey.current) return;
+    lastActiveKey.current = activeKey;
+    if (active) setFilter((f) => filterFor(active, f));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey]);
   // Focusing a thread (a margin card or pin) scrolls it into view.
   const scroll = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
-  const tops = React.useRef(new Map<string, number>());
+  const boxes = React.useRef(new Map<string, RowBox>());
+  const view = React.useRef({ y: 0, h: 0 });
   const scrolledTo = React.useRef<string | null>(null);
   const scrollToActive = React.useCallback(() => {
     if (!activeId || scrolledTo.current === activeId) return;
-    const y = tops.current.get(activeId);
-    if (y === undefined) return;
+    const b = boxes.current.get(activeId);
+    if (!b) return;
     scrolledTo.current = activeId;
-    scroll.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+    scroll.current?.scrollTo({ y: Math.max(0, b.y - 12), animated: true });
   }, [activeId]);
+  // Which cards are on screen, reported when that changes.
+  const shown = React.useRef<string | null>(null);
+  const onVisibleRef = React.useRef(onVisible);
+  onVisibleRef.current = onVisible;
+  const ids = rows.map((r) => r.comment.id).join(',');
+  const report = React.useCallback(() => {
+    const live = new Set(ids ? ids.split(',') : []);
+    for (const id of [...boxes.current.keys()]) if (!live.has(id)) boxes.current.delete(id);
+    const vis = rowsInView(boxes.current, view.current.y, view.current.h);
+    const key = vis.join(',');
+    if (key === shown.current) return;
+    shown.current = key;
+    onVisibleRef.current(vis);
+  }, [ids]);
   React.useEffect(() => {
     if (!activeId) scrolledTo.current = null;
-    // A resolved thread is only listed under Resolved.
-    else if (filter !== 'resolved' && rows.some((r) => r.comment.id === activeId && r.comment.resolved)) setFilter('resolved');
     scrollToActive();
+    report();
   });
+  React.useEffect(() => () => onVisibleRef.current([]), []);
   return (
     <View style={[styles.panel, { backgroundColor: c.surface, borderLeftColor: c.line }]}>
       <View style={styles.top}>
-        <Text variant="section" style={{ flex: 1 }}>
+        <Text variant="section" style={{ flex: 1 }} numberOfLines={1} accessibilityRole="header">
           Comments
+          {openCount ? <Text variant="meta" tone="faint">{`   ${openCount} open`}</Text> : null}
         </Text>
         <IconButton icon="x" label="Close comments" size={36} onPress={onClose} />
       </View>
@@ -137,14 +178,28 @@ export function CommentsPanel({
           ]}
         />
       </View>
-      <ScrollView ref={scroll} contentContainerStyle={{ padding: 12, gap: 10, flexGrow: 1 }}>
+      <ScrollView
+        ref={scroll}
+        contentContainerStyle={{ padding: 12, gap: 10, flexGrow: 1 }}
+        scrollEventThrottle={100}
+        onScroll={(e) => {
+          view.current.y = e.nativeEvent.contentOffset.y;
+          report();
+        }}
+        onLayout={(e) => {
+          view.current.h = e.nativeEvent.layout.height;
+          report();
+        }}
+      >
         {rows.length ? (
           rows.map((r) => (
             <View
               key={r.comment.id}
               onLayout={(e) => {
-                tops.current.set(r.comment.id, e.nativeEvent.layout.y);
+                const { y, height } = e.nativeEvent.layout;
+                boxes.current.set(r.comment.id, { y, h: height });
                 if (r.comment.id === activeId) scrollToActive();
+                report();
               }}
             >
               <Card
@@ -178,8 +233,10 @@ export function CommentsPanel({
 const styles = StyleSheet.create({
   panel: { flex: 1, width: 340, maxWidth: '100%', borderLeftWidth: StyleSheet.hairlineWidth },
   top: { flexDirection: 'row', alignItems: 'center', paddingLeft: 16, paddingRight: 6, height: 56 },
-  card: { borderRadius: radius.panel, borderWidth: 1, padding: 12, gap: 8 },
+  card: { borderRadius: radius.panel, borderWidth: 1, padding: 6, paddingBottom: 8, gap: 6 },
+  summary: { borderRadius: radius.control, padding: 6, gap: 8 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  reply: { borderLeftWidth: 2, paddingLeft: 10, gap: 2 },
+  reply: { borderLeftWidth: 2, paddingLeft: 10, marginLeft: 6, gap: 2 },
+  actions: { paddingHorizontal: 6, gap: 8 },
   foot: { paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
 });

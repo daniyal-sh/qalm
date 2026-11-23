@@ -40,17 +40,22 @@ export function unreadCount(pages: Iterable<PageData>, seen: SeenThreads): numbe
   return n;
 }
 
-/** `seen` with every loaded thread marked as read (the same object if nothing changed). */
-export function markAllSeen(pages: Iterable<PageData>, seen: SeenThreads): SeenThreads {
+/** `seen` with these threads marked as read up to their latest entry (the same object if nothing changed). */
+export function markSeen(threads: Iterable<Comment>, seen: SeenThreads): SeenThreads {
   let out = seen;
-  for (const d of pages) {
-    for (const c of d.comments) {
-      const n = 1 + c.replies.length;
-      if ((out[c.id] ?? 0) >= n) continue;
-      if (out === seen) out = { ...seen };
-      out[c.id] = n;
-    }
+  for (const c of threads) {
+    const n = 1 + c.replies.length;
+    if ((out[c.id] ?? 0) >= n) continue;
+    if (out === seen) out = { ...seen };
+    out[c.id] = n;
   }
+  return out;
+}
+
+/** Ids of the threads in `pages` with unread agent entries. */
+export function unreadIds(pages: Iterable<PageData>, seen: SeenThreads): Set<string> {
+  const out = new Set<string>();
+  for (const d of pages) for (const c of d.comments) if (unreadIn(c, seen) > 0) out.add(c.id);
   return out;
 }
 
