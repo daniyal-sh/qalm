@@ -176,6 +176,6 @@ describe('text measure and night ink (F1, F17)', () => {
     expect(inkOnPaper('#27272a', 'white')).toBe('#27272a');
     expect(inkOnPaper('#b91c1c', 'night')).toBe('#b91c1c');
     expect(swatchOfInk('#e4e4e7', 'night')).toBe('#27272a');
-    expect(swatchOfInk('#e4e4e7', 'cream')).toBe('#e4e4e7');
+    expect(swatchOfInk('#e4e4e7', 'cream')).toBe('#27272a'); // night ink on a page that's no longer night
   });
 });

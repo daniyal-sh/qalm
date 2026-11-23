@@ -2,7 +2,7 @@ import fontkit from '@pdf-lib/fontkit';
 import { BlendMode, LineCapStyle, PDFDocument, StandardFonts, degrees, rgb, type PDFEmbeddedPage, type PDFFont, type PDFImage, type RGB } from 'pdf-lib';
 import { strokeSvgPath } from '../geometry/stroke';
 import { inkPaint } from '../geometry/color';
-import { paperPattern, DOT_RADIUS, RULE_WIDTH } from '../geometry/paper';
+import { itemsOnPaper, paperPattern, DOT_RADIUS, RULE_WIDTH } from '../geometry/paper';
 import { TEXT_LINE_HEIGHT } from '../geometry/bbox';
 import { shapeSvgPath } from '../render/svg';
 import { wrapText } from '../render/text';
@@ -138,7 +138,7 @@ export async function exportPdf(
     }
 
     const page = await loadPage(info.id);
-    for (const item of page.items()) {
+    for (const item of itemsOnPaper(page.items(), info.paperColor)) {
       switch (item.type) {
         case 'stroke': {
           const d = strokeSvgPath(item);

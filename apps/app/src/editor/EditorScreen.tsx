@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { mark } from '../bench/hook';
 import { exportNotebook, updateNotebookMeta } from '../library/ops';
-import { NameSheet } from '../library/components';
+import { CoverSheet, NameSheet, PaperSheet } from '../library/components';
 import { newId } from '../lib/id';
 import { kvGet, kvSet } from '../lib/kv';
 import { pickFile } from '../lib/files';
@@ -522,6 +522,9 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   }, [s.dm, scopeDocId]);
   const heldPage = React.useMemo(() => (scopeDoc ? { docId: scopeDoc.docId, page: new Page(scopeDoc.doc) } : null), [scopeDoc]);
   const [renaming, setRenaming] = React.useState(false);
+  const [coverOpen, setCoverOpen] = React.useState(false);
+  /** The page whose paper is being changed (its index). */
+  const [paperFor, setPaperFor] = React.useState<number | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [toast, showToast] = useToast();
 
@@ -585,6 +588,16 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     [notebook, notebookId, s.dm, s.assets],
   );
   React.useEffect(() => () => thumbs?.dispose(), [thumbs]);
+  // A page's paper lives in the notebook doc, not the page doc: redraw its thumbnail when it changes (here, undo, sync).
+  const paperSeen = React.useRef(new Map<string, string>());
+  React.useEffect(() => {
+    for (const p of pages) {
+      const k = `${p.paper}|${p.paperColor}`;
+      const was = paperSeen.current.get(p.id);
+      if (was !== undefined && was !== k) thumbs?.invalidate(p.id);
+      paperSeen.current.set(p.id, k);
+    }
+  }, [pages, thumbs]);
   const duplicatePage = (index: number) =>
     void run('Duplicating page…', async () => {
       const src = pages[index];
@@ -640,6 +653,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       items: [
         { label: 'Add page after', icon: 'plus', onPress: () => addPage(index) },
         { label: 'Duplicate page', icon: 'copy', onPress: () => duplicatePage(index) },
+        ...(pages[index]?.background.kind === 'paper' ? [{ label: 'Paper…', icon: 'file' as const, onPress: () => setPaperFor(index) }] : []),
         { label: pages[index]?.bookmarked ? 'Remove bookmark' : 'Bookmark page', icon: 'bookmark', onPress: () => toggleBookmark(index) },
         { label: 'Move up', icon: 'arrow-up', onPress: () => movePage(index, index - 1) },
         { label: 'Move down', icon: 'arrow-down', onPress: () => movePage(index, index + 1) },
@@ -654,6 +668,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       items: [
         { label: 'Add page', icon: 'file-plus', onPress: () => addPage() },
         { label: 'Rename', icon: 'edit-2', onPress: () => setRenaming(true) },
+        { label: 'Cover…', icon: 'book', onPress: () => setCoverOpen(true) },
         {
           label: meta?.aiAccess ? 'Turn off AI access' : 'Turn on AI access',
           icon: 'cpu',
@@ -860,6 +875,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               onDuplicate={duplicatePage}
               onDelete={deletePage}
               onBookmark={toggleBookmark}
+              onPaper={setPaperFor}
             />
           ) : null}
           <View style={{ flex: 1 }} onLayout={(e) => setViewport({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
@@ -1012,6 +1028,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                 onDuplicate={duplicatePage}
                 onDelete={deletePage}
                 onBookmark={toggleBookmark}
+              onPaper={setPaperFor}
               />
             </View>
           ) : null}
@@ -1114,6 +1131,29 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
           />
         </Sheet>
 
+        <PaperSheet
+          visible={paperFor !== null && !!pages[paperFor]}
+          title={`Paper for page ${(paperFor ?? 0) + 1}`}
+          initial={{ paper: pages[paperFor ?? 0]?.paper ?? meta.paper, paperColor: pages[paperFor ?? 0]?.paperColor ?? meta.paperColor }}
+          pdfPages={pages.filter((p) => p.background.kind === 'pdf').length}
+          onClose={() => setPaperFor(null)}
+          onApply={({ paper, paperColor, all }) => {
+            const p = paperFor !== null ? pages[paperFor] : undefined;
+            setPaperFor(null);
+            if (!p) return;
+            notebook.setPagePaper(all ? pages.map((x) => x.id) : [p.id], { paper, paperColor });
+          }}
+        />
+        <CoverSheet
+          visible={coverOpen}
+          initial={{ title: meta.title, cover: meta.cover }}
+          onClose={() => setCoverOpen(false)}
+          onSave={(v) => {
+            setCoverOpen(false);
+            if (library) void updateNotebookMeta({ dm: s.dm, assets: s.assets, library }, notebookId, v);
+            else notebook.setMeta(v);
+          }}
+        />
         <NameSheet
           visible={renaming}
           title="Rename notebook"

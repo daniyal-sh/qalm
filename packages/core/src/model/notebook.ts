@@ -137,6 +137,29 @@ export class Notebook {
     return newPageId;
   }
 
+  /**
+   * Changes the paper (pattern and/or colour) of pages `ids`, in one transaction (one undo step). PDF pages keep their
+   * PDF: they are skipped. Returns how many pages changed.
+   */
+  setPagePaper(ids: readonly string[], patch: { paper?: Paper; paperColor?: PaperColor }): number {
+    const want = new Set(ids);
+    let n = 0;
+    this.tx(() => {
+      for (const m of this.pageArr.toArray()) {
+        if (!want.has(m.get('id') as string) || readPage(m).background.kind !== 'paper') continue;
+        let hit = false;
+        for (const k of ['paper', 'paperColor'] as const) {
+          const v = patch[k];
+          if (v === undefined || m.get(k) === v) continue;
+          m.set(k, v);
+          hit = true;
+        }
+        if (hit) n++;
+      }
+    });
+    return n;
+  }
+
   /** Moves a page so it ends up at `index`. */
   movePage(id: string, index: number): void {
     this.tx(() => {

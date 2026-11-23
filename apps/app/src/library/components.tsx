@@ -200,25 +200,7 @@ export function NewNotebookSheet({ visible, onClose, onCreate }: { visible: bool
       </View>
       <View style={{ gap: 8 }}>
         <Text variant="meta">Paper</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          {PAPERS.map((p) => {
-            const on = p.value === f.paper;
-            return (
-              <Pressable
-                key={p.value}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: on }}
-                onPress={() => set({ paper: p.value })}
-                style={[styles.paperChip, { backgroundColor: on ? c.accentSoft : c.surface, borderColor: on ? c.accentLine : c.line }]}
-              >
-                <PaperGlyph paper={p.value} color={on ? c.accentInk : c.muted} />
-                <Text variant="label" style={{ color: on ? c.accentInk : c.ink2 }}>
-                  {p.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <PaperChoice value={f.paper} onChange={(paper) => set({ paper })} />
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
         <View style={{ gap: 8 }}>
@@ -246,15 +228,7 @@ export function NewNotebookSheet({ visible, onClose, onCreate }: { visible: bool
         </View>
         <View style={{ gap: 8 }}>
           <Text variant="meta">Paper colour</Text>
-          <Segmented<PaperColor>
-            value={f.paperColor}
-            onChange={(paperColor) => set({ paperColor })}
-            options={[
-              { value: 'white', label: 'White', swatch: PAPER_SWATCH.white },
-              { value: 'cream', label: 'Cream', swatch: PAPER_SWATCH.cream },
-              { value: 'night', label: 'Night', swatch: PAPER_SWATCH.night },
-            ]}
-          />
+          <PaperColorChoice value={f.paperColor} onChange={(paperColor) => set({ paperColor })} />
         </View>
       </View>
       <View style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: c.line, borderRadius: radius.control }}>
@@ -263,8 +237,150 @@ export function NewNotebookSheet({ visible, onClose, onCreate }: { visible: bool
         </Row>
       </View>
       <Text variant="meta" tone="faint">
-        You can change the paper for each page later.
+        You can change a page’s paper later from its menu, and the cover from the notebook’s menu.
       </Text>
+    </Sheet>
+  );
+}
+
+/** Paper patterns as chips (accent-soft when selected). */
+export function PaperChoice({ value, onChange }: { value: Paper; onChange(p: Paper): void }) {
+  const { c } = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }} accessibilityRole="radiogroup" accessibilityLabel="Paper">
+      {PAPERS.map((p) => {
+        const on = p.value === value;
+        return (
+          <Pressable
+            key={p.value}
+            accessibilityRole="radio"
+            accessibilityLabel={p.label}
+            accessibilityState={{ checked: on }}
+            onPress={() => onChange(p.value)}
+            style={[styles.paperChip, { backgroundColor: on ? c.accentSoft : c.surface, borderColor: on ? c.accentLine : c.line }]}
+          >
+            <PaperGlyph paper={p.value} color={on ? c.accentInk : c.muted} />
+            <Text variant="label" style={{ color: on ? c.accentInk : c.ink2 }}>
+              {p.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+export function PaperColorChoice({ value, onChange }: { value: PaperColor; onChange(c: PaperColor): void }) {
+  return (
+    <Segmented<PaperColor>
+      value={value}
+      onChange={onChange}
+      accessibilityLabel="Paper colour"
+      options={[
+        { value: 'white', label: 'White', swatch: PAPER_SWATCH.white },
+        { value: 'cream', label: 'Cream', swatch: PAPER_SWATCH.cream },
+        { value: 'night', label: 'Night', swatch: PAPER_SWATCH.night },
+      ]}
+    />
+  );
+}
+
+/**
+ * Change a page's paper after it's made: pattern and colour, for this page or every page. PDF pages keep their PDF, so
+ * "Apply to all pages" skips them. Existing ink stays readable: the default ink follows the paper colour.
+ */
+export function PaperSheet({
+  visible,
+  title,
+  initial,
+  pdfPages,
+  onClose,
+  onApply,
+}: {
+  visible: boolean;
+  title: string;
+  initial: { paper: Paper; paperColor: PaperColor };
+  /** How many pages are PDFs (they're skipped by "Apply to all pages"). */
+  pdfPages: number;
+  onClose(): void;
+  onApply(v: { paper: Paper; paperColor: PaperColor; all: boolean }): void;
+}) {
+  const { c } = useTheme();
+  const [v, setV] = React.useState({ ...initial, all: false });
+  React.useEffect(() => {
+    if (visible) setV({ ...initial, all: false });
+  }, [visible, initial.paper, initial.paperColor]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <Sheet
+      visible={visible}
+      onClose={onClose}
+      title={title}
+      width={560}
+      footer={
+        <>
+          <Button label="Cancel" onPress={onClose} />
+          <Button label="Apply" variant="primary" onPress={() => onApply(v)} />
+        </>
+      }
+    >
+      <View style={{ gap: 8 }}>
+        <Text variant="meta">Paper</Text>
+        <PaperChoice value={v.paper} onChange={(paper) => setV((x) => ({ ...x, paper }))} />
+      </View>
+      <View style={{ gap: 8 }}>
+        <Text variant="meta">Paper colour</Text>
+        <PaperColorChoice value={v.paperColor} onChange={(paperColor) => setV((x) => ({ ...x, paperColor }))} />
+      </View>
+      <View style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: c.line, borderRadius: radius.control }}>
+        <Row title="Apply to all pages" description={pdfPages ? 'PDF pages keep their PDF' : undefined} last>
+          <Toggle label="Apply to all pages" value={v.all} onChange={(all) => setV((x) => ({ ...x, all }))} />
+        </Row>
+      </View>
+      <Text variant="meta" tone="faint">
+        Your ink stays as it is. Graphite switches to light grey on night paper, and back, so it stays readable.
+      </Text>
+    </Sheet>
+  );
+}
+
+/** Change a notebook's cover colour and title. */
+export function CoverSheet({
+  visible,
+  initial,
+  onClose,
+  onSave,
+}: {
+  visible: boolean;
+  initial: { title: string; cover: string };
+  onClose(): void;
+  onSave(v: { title: string; cover: string }): void;
+}) {
+  const [v, setV] = React.useState(initial);
+  React.useEffect(() => {
+    if (visible) setV(initial);
+  }, [visible, initial.title, initial.cover]); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = () => onSave({ title: v.title.trim() || initial.title, cover: v.cover });
+  return (
+    <Sheet
+      visible={visible}
+      onClose={onClose}
+      title="Cover"
+      width={520}
+      footer={
+        <>
+          <Button label="Cancel" onPress={onClose} />
+          <Button label="Save" variant="primary" onPress={save} />
+        </>
+      }
+    >
+      <View style={{ flexDirection: 'row', gap: 20, flexWrap: 'wrap' }}>
+        <Cover color={v.cover} title={v.title || DEFAULT_TITLE} width={120} />
+        <View style={{ flex: 1, minWidth: 220, gap: 12 }}>
+          <TextField value={v.title} onChangeText={(title) => setV((x) => ({ ...x, title }))} placeholder={DEFAULT_TITLE} accessibilityLabel="Title" onSubmitEditing={save} />
+          <Text variant="meta">Colour</Text>
+          <Swatches value={v.cover} onChange={(cover) => setV((x) => ({ ...x, cover }))} />
+        </View>
+      </View>
     </Sheet>
   );
 }

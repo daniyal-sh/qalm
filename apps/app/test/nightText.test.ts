@@ -18,7 +18,7 @@ describe('recolour on night paper (F1)', () => {
   it('ticks graphite for night-ink selections', () => {
     const items = [stroke(0, 0, 10, 0, { color: '#e4e4e7' }), stroke(0, 9, 10, 9, { color: '#E4E4E7' })];
     expect(selectionSwatch(items, 'night')).toBe('#27272a');
-    expect(selectionSwatch(items, 'white')).toBe('#e4e4e7');
+    expect(selectionSwatch(items, 'white')).toBe('#27272a'); // drawn as graphite on light paper (its paper changed: F21)
     expect(selectionSwatch([...items, stroke(0, 0, 1, 1, { color: '#b91c1c' })], 'night')).toBeNull();
   });
 });
