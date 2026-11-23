@@ -14,8 +14,8 @@ test('deep links map to app routes', () => {
   assert.equal(s.deepLinkToPath('https://evil.example/x'), null);
   assert.equal(s.deepLinkToPath('not a url'), null);
   assert.equal(s.deepLinkToPath('qalm:////evil.example/x'), '/evil.example/x');
-  assert.equal(s.findDeepLink(['Qalm.exe', '--flag', 'qalm://auth/x']), 'qalm://auth/x');
-  assert.equal(s.findDeepLink(['Qalm.exe']), null);
+  assert.equal(s.findDeepLink(['qalm.exe', '--flag', 'qalm://auth/x']), 'qalm://auth/x');
+  assert.equal(s.findDeepLink(['qalm.exe']), null);
 });
 
 test('web paths stay inside the root, extensionless paths are SPA routes', () => {

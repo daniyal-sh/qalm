@@ -28,18 +28,18 @@ export async function sendEmail(env: Env, msg: EmailMessage): Promise<void> {
 export function magicLinkEmail(to: string, link: string, code: string | null = null): EmailMessage {
   const l = escapeHtml(link);
   const codeHtml = code
-    ? `<p style="margin:20px 0 0;font-size:13px;line-height:1.5;color:${T.muted}">Or enter this code in Qalm:</p>
+    ? `<p style="margin:20px 0 0;font-size:13px;line-height:1.5;color:${T.muted}">Or enter this code in qalm:</p>
 <div style="margin:6px 0 0;font-size:26px;font-weight:600;letter-spacing:0.18em;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(code)}</div>`
     : '';
   const html = `<!doctype html><html><body style="margin:0;background:${T.bg};font-family:${BRAND_FONT_STACK};color:${T.ink}">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};padding:32px 16px"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:440px;background:${T.surface};border:1px solid ${T.line};border-radius:12px">
 <tr><td style="padding:28px 28px 8px">
-<div style="font-size:18px;font-weight:600;letter-spacing:-0.02em">Qalm</div>
+<div style="font-size:18px;font-weight:600;letter-spacing:-0.02em">qalm</div>
 <div style="font-size:11px;font-weight:500;color:${T.muted}">by Apollo</div>
 </td></tr>
 <tr><td style="padding:16px 28px 4px">
-<h1 style="margin:0 0 8px;font-size:20px;font-weight:600;letter-spacing:-0.02em">Sign in to Qalm</h1>
+<h1 style="margin:0 0 8px;font-size:20px;font-weight:600;letter-spacing:-0.02em">Sign in to qalm</h1>
 <p style="margin:0 0 20px;font-size:15px;line-height:1.5;color:${T.muted}">Tap the button to sign in. The link works once and expires in 15 minutes.</p>
 <a href="${l}" style="display:inline-block;background:${T.accent};color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 20px;border-radius:8px">Sign in</a>
 ${codeHtml}
@@ -49,8 +49,8 @@ ${codeHtml}
 </table></td></tr></table></body></html>`;
   return {
     to,
-    subject: 'Your Qalm sign-in link',
-    text: `Sign in to Qalm:\n${link}\n${code ? `\nOr enter this code in Qalm: ${code}\n` : ''}\nThe link works once and expires in 15 minutes. If you didn't ask to sign in, ignore this email.`,
+    subject: 'Your qalm sign-in link',
+    text: `Sign in to qalm:\n${link}\n${code ? `\nOr enter this code in qalm: ${code}\n` : ''}\nThe link works once and expires in 15 minutes. If you didn't ask to sign in, ignore this email.`,
     html,
   };
 }

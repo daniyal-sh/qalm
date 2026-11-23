@@ -2,8 +2,8 @@
 // MIT License, Copyright (c) 2021 Stephen Ruiz Ltd.
 //
 // A faithful port of getStrokePoints + getStrokeOutlinePoints (`main`, equivalent to npm 1.2.x),
-// restricted to the options Qalm uses: no taper, round caps, linear easing. With simulatePressure false
-// (which Qalm always uses), the simulated-pressure branch has no effect, so it is left out.
+// restricted to the options qalm uses: no taper, round caps, linear easing. With simulatePressure false
+// (which qalm always uses), the simulated-pressure branch has no effect, so it is left out.
 // Loops keep the same floating-point accumulation (`t += step`) as the JS, so the outlines match point for point.
 // The settings live in `FreehandSettings` below (tech-spec §2) and must stay the same as @qalm/core.
 
@@ -39,7 +39,7 @@ struct FreehandOptions {
   var last: Bool
 }
 
-/// Qalm's fixed stroke settings (tech-spec §2).
+/// qalm's fixed stroke settings (tech-spec §2).
 enum FreehandSettings {
   static func tiltPressure(p: Double, tilt: Double) -> Double {
     return min(1, p * (1 + 0.6 * (1 - tilt / (Double.pi / 2))))

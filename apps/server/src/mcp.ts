@@ -13,7 +13,7 @@ import type { AgentResult } from './agent';
 const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
 const INSTRUCTIONS =
-  'Qalm notebooks in Q-ink Live format. Call wait() to list sessions, then wait(s) in a loop to follow live writing. ' +
+  'qalm notebooks in Q-ink Live format. Call wait() to list sessions, then wait(s) in a loop to follow live writing. ' +
   'Lines marked [n] are row n of the attached image; ~"…" is the device guess. Save your reading of a line with transcribe, ' +
   'pin feedback with comment. You can never change ink.';
 
@@ -86,7 +86,7 @@ async function handle(m: RpcMsg, env: Env, props: McpProps): Promise<object | nu
       return ok({
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'qalm', title: 'Qalm by Apollo', version: '0.1.0' },
+        serverInfo: { name: 'qalm', title: 'qalm by Apollo', version: '0.1.0' },
         instructions: INSTRUCTIONS,
       });
     }
@@ -139,7 +139,7 @@ async function target(env: Env, g: GrantRow, s: unknown): Promise<NotebookChoice
 
 async function callTool(env: Env, props: McpProps, name: string, args: Record<string, unknown>): Promise<ToolResult> {
   const g = await activeGrant(env, props.grantId);
-  if (!g || g.user_id !== props.userId) throw new ToolError('Access to Qalm has expired or was revoked. Reconnect to continue.');
+  if (!g || g.user_id !== props.userId) throw new ToolError('Access to qalm has expired or was revoked. Reconnect to continue.');
 
   if (name === 'wait' && (args.s === undefined || args.s === '')) {
     const nbs = await grantedNotebooks(env, g);

@@ -23,7 +23,7 @@ export async function captureEmail(fn: () => Promise<unknown>): Promise<{ link: 
     const text = spy.mock.calls.map((c) => c.join(' ')).join('\n');
     const m = /(https:\/\/\S+\/auth\/email\/verify\?token=\S+)/.exec(text);
     expect(m, 'a magic link was logged').toBeTruthy();
-    return { link: m![1]!, code: /enter this code in Qalm: (\d{6})/.exec(text)?.[1] ?? null };
+    return { link: m![1]!, code: /enter this code in qalm: (\d{6})/.exec(text)?.[1] ?? null };
   } finally {
     spy.mockRestore();
   }

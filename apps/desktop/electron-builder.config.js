@@ -11,7 +11,7 @@ const notarize = !!(
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
   appId: 'com.apollo.qalm',
-  productName: 'Apollo Qalm',
+  productName: 'qalm',
   copyright: 'Copyright © Apollo',
   directories: { output: 'release', buildResources: 'resources' },
   files: ['dist/**/*.js', 'package.json'],
@@ -19,18 +19,18 @@ module.exports = {
   extraResources: [{ from: '../app/dist', to: 'web', filter: ['**/*'] }],
   asar: true,
   npmRebuild: false,
-  protocols: [{ name: 'Qalm', schemes: ['qalm'] }],
+  protocols: [{ name: 'qalm', schemes: ['qalm'] }],
   win: {
     icon: 'resources/icons/icon.ico',
     target: [{ target: 'nsis', arch: ['x64', 'arm64'] }],
-    executableName: 'Qalm',
+    executableName: 'qalm',
   },
   nsis: {
     oneClick: false,
     perMachine: false,
     allowToChangeInstallationDirectory: true,
-    shortcutName: 'Qalm',
-    artifactName: 'Apollo-Qalm-Setup-${version}-${arch}.${ext}',
+    shortcutName: 'qalm',
+    artifactName: 'Apollo-qalm-Setup-${version}-${arch}.${ext}',
   },
   mac: {
     icon: 'resources/icons/icon.icns',
@@ -42,5 +42,5 @@ module.exports = {
     entitlementsInherit: 'resources/entitlements.mac.plist',
     notarize,
   },
-  dmg: { artifactName: 'Apollo-Qalm-${version}-${arch}.${ext}' },
+  dmg: { artifactName: 'Apollo-qalm-${version}-${arch}.${ext}' },
 };

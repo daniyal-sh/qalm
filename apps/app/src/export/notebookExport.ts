@@ -79,7 +79,7 @@ export async function restoreQalm(
   const b = unpackQalm(bytes);
   const src = new Notebook(b.index);
   const old = src.meta();
-  if (!old.id) throw new Error('not a Qalm backup');
+  if (!old.id) throw new Error('not a qalm backup');
   const id = newId();
   const pageIds = new Map(src.pages().map((p) => [p.id, newId()]));
 

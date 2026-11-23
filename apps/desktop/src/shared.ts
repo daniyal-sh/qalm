@@ -2,10 +2,10 @@
 import * as path from 'node:path';
 
 export const BRAND = {
-  name: 'Qalm',
+  name: 'qalm',
   byline: 'by Apollo',
   website: 'https://apollolearn.app',
-  systemName: 'Apollo Qalm',
+  systemName: 'qalm',
   appId: 'com.apollo.qalm',
 } as const;
 
@@ -86,8 +86,8 @@ export function resolveWebPath(root: string, urlPath: string): { file: string; i
 const OPEN_FILTERS: Record<string, { name: string; extensions: string[] }> = {
   'application/pdf': { name: 'PDF', extensions: ['pdf'] },
   '.pdf': { name: 'PDF', extensions: ['pdf'] },
-  '.qalm': { name: 'Qalm notebook', extensions: ['qalm'] },
-  'application/x-qalm': { name: 'Qalm notebook', extensions: ['qalm'] },
+  '.qalm': { name: 'qalm notebook', extensions: ['qalm'] },
+  'application/x-qalm': { name: 'qalm notebook', extensions: ['qalm'] },
   'image/*': { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] },
   'image/png': { name: 'PNG', extensions: ['png'] },
   'image/jpeg': { name: 'JPEG', extensions: ['jpg', 'jpeg'] },

@@ -15,8 +15,8 @@ const require = createRequire(import.meta.url);
 const exe =
   process.env.QALM_EXE ??
   (process.platform === 'win32'
-    ? join(here, '..', 'release', 'win-unpacked', 'Qalm.exe')
-    : join(here, '..', 'release', 'mac-universal', 'Apollo Qalm.app', 'Contents', 'MacOS', 'Apollo Qalm'));
+    ? join(here, '..', 'release', 'win-unpacked', 'qalm.exe')
+    : join(here, '..', 'release', 'mac-universal', 'qalm.app', 'Contents', 'MacOS', 'qalm'));
 if (!existsSync(exe)) throw new Error(`No packaged app at ${exe}: run \`pnpm --filter @qalm/desktop build\``);
 
 const tmp = mkdtempSync(join(tmpdir(), 'qalm-e2e-'));
@@ -28,12 +28,12 @@ const { PDFDocument, StandardFonts } = require('pdf-lib');
 {
   const doc = await PDFDocument.create();
   const page = doc.addPage([612, 792]);
-  page.drawText('Qalm desktop smoke test', { x: 72, y: 700, size: 24, font: await doc.embedFont(StandardFonts.Helvetica) });
+  page.drawText('qalm desktop smoke test', { x: 72, y: 700, size: 24, font: await doc.embedFont(StandardFonts.Helvetica) });
   writeFileSync(pdfIn, await doc.save());
 }
 
 const log = (...a) => console.log('•', ...a);
-// Hosts that are themselves Electron apps may leak ELECTRON_RUN_AS_NODE, which turns Qalm.exe into plain Node.
+// Hosts that are themselves Electron apps may leak ELECTRON_RUN_AS_NODE, which turns qalm.exe into plain Node.
 const env = { ...process.env, QALM_USER_DATA: userData };
 delete env.ELECTRON_RUN_AS_NODE;
 const errors = [];

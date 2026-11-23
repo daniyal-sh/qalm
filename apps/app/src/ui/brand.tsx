@@ -13,7 +13,7 @@ const ORBIT_FRONT =
 const NIB_MASK = 'M60 94 C52 78 38 64 37 48 C36 34 46 22 60 11 C74 22 84 34 83 48 C82 64 68 78 60 94Z';
 const NIB = 'M60 86 C54 73 45 61 44 48 C43 37 50 28 60 19 C70 28 77 37 76 48 C75 61 66 73 60 86Z';
 
-/** The Qalm mark (assets/brand/qalm-mark.svg) with theme colours: ink nib, accent orbit, assistant planet. */
+/** The qalm mark (assets/brand/qalm-mark.svg) with theme colours: ink nib, accent orbit, assistant planet. */
 export function Mark({ size = 32 }: { size?: number }) {
   const { c } = useTheme();
   const id = React.useId().replace(/:/g, '');
@@ -35,7 +35,7 @@ export function Mark({ size = 32 }: { size?: number }) {
   );
 }
 
-/** Lockup: the mark, then "Qalm" (semibold, -0.02em) with "by Apollo" under it (medium, muted, 0.58×). */
+/** Lockup: the mark, then "qalm" (semibold, -0.02em) with "by Apollo" under it (medium, muted, 0.58×). */
 export function Lockup({ size = 20 }: { size?: number }) {
   const { c } = useTheme();
   return (

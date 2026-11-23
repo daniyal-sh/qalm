@@ -1,9 +1,9 @@
-/** Qalm by Apollo tokens (docs/brand.md). Solid surfaces only; no gradients, blur or translucency. */
+/** qalm by Apollo tokens (docs/brand.md). Solid surfaces only; no gradients, blur or translucency. */
 export const BRAND = {
-  name: 'Qalm',
+  name: 'qalm',
   byline: 'by Apollo',
   website: 'https://apollolearn.app',
-  systemName: 'Apollo Qalm',
+  systemName: 'qalm',
   appId: 'com.apollo.qalm',
 } as const;
 

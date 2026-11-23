@@ -1,6 +1,6 @@
-# Qalm v1 technical spec (rev 2)
+# qalm v1 technical spec (rev 2)
 
-Read with `decisions.md` (scope), `qink-live.md` (AI format) and **`brand.md` (Qalm by Apollo: colours, type, mark)**.
+Read with `decisions.md` (scope), `qink-live.md` (AI format) and **`brand.md` (qalm by Apollo: colours, type, mark)**.
 Layouts and flows come from `mockups/editor.html`, `mockups/screens-library.html` and `mockups/screens-ai.html`.
 Their colours and fonts are superseded by `brand.md`.
 This file is the **contract between packages**. If you must change a contract, change it here too.

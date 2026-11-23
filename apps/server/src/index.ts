@@ -22,7 +22,7 @@ function provider(base: string): OAuthProvider<Env> {
       clientRegistrationEndpoint: '/oauth/register',
       accessTokenTTL: 3600,
       refreshTokenTTL: GRANT_TTL_MS / 1000,
-      resourceMetadata: { resource: `${base}/mcp`, resource_name: 'Qalm notebooks' },
+      resourceMetadata: { resource: `${base}/mcp`, resource_name: 'qalm notebooks' },
     });
     providers.set(base, p);
   }

@@ -2,7 +2,7 @@
   "name": "@qalm/desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Qalm by Apollo for Windows and macOS",
+  "description": "qalm by Apollo for Windows and macOS",
   "author": "Apollo",
   "homepage": "https://apollolearn.app",
   "main": "dist/main.js",

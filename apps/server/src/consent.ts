@@ -93,9 +93,9 @@ export function magicLinkPage(email: string, to: { postToken: string } | { href:
       ? `<form method="post" action="/auth/email/verify"><input type="hidden" name="token" value="${e(to.postToken)}"><div class="foot"><button class="p" type="submit">Continue</button></div></form>`
       : `<div class="foot"><a class="btn" href="${e(to.href)}">Continue</a></div>`;
   const res = page(
-    'Sign in to Qalm',
+    'Sign in to qalm',
     `<div class="logos"><span class="mark">${MARK_SVG}</span></div>
-<h1>Sign in to Qalm</h1><p class="sub">Continue as <b>${e(email)}</b>. Only continue if you just asked for this link.</p>
+<h1>Sign in to qalm</h1><p class="sub">Continue as <b>${e(email)}</b>. Only continue if you just asked for this link.</p>
 ${button}`,
   );
   res.headers.set('Referrer-Policy', 'no-referrer');
@@ -105,9 +105,9 @@ ${button}`,
 function signInPage(returnTo: string, sent = false, error?: string): Response {
   if (sent) return messagePage('Check your email', 'We sent you a sign-in link. Open it in this browser to continue.');
   return page(
-    'Sign in to Qalm',
+    'Sign in to qalm',
     `<div class="logos"><span class="mark">${MARK_SVG}</span></div>
-<h1>Sign in to Qalm</h1><p class="sub">An app wants to connect to your notes. Sign in first.</p>
+<h1>Sign in to qalm</h1><p class="sub">An app wants to connect to your notes. Sign in first.</p>
 ${error ? `<div class="err">${e(error)}</div>` : ''}
 <form method="post" action="/authorize/signin">
 <input type="hidden" name="return" value="${e(returnTo)}">

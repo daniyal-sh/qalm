@@ -1,7 +1,7 @@
-// Electron main process for Qalm (tech-spec §6): serves the app's web export over app://qalm,
+// Electron main process for qalm (tech-spec §6): serves the app's web export over app://qalm,
 // native open/save dialogs over IPC, qalm:// deep links (email magic-link sign-in), window state.
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, session, shell, type MenuItemConstructorOptions } from 'electron';
-import { promises as fs, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { promises as fs, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 
 import {
@@ -31,6 +31,18 @@ function webRoot(): string {
 app.setName(BRAND.systemName);
 // Tests run against a throwaway profile.
 if (process.env.QALM_USER_DATA) app.setPath('userData', path.resolve(process.env.QALM_USER_DATA));
+else moveLegacyUserData();
+
+/** The app was named "Apollo Qalm" in early builds; carry its profile (notebooks, window state) over once. */
+function moveLegacyUserData() {
+  try {
+    const legacy = path.join(app.getPath('appData'), 'Apollo Qalm');
+    const current = app.getPath('userData');
+    if (legacy !== current && existsSync(legacy) && !existsSync(current)) renameSync(legacy, current);
+  } catch {
+    // Best effort: a fresh profile is still a working app.
+  }
+}
 if (process.platform === 'win32') app.setAppUserModelId(BRAND.appId);
 
 // Must run before `ready`: app:// behaves like https (fetch, workers, wasm streaming, storage, secure context).
@@ -85,7 +97,9 @@ function start() {
     registerAppProtocol();
     registerIpc();
     lockDownSession();
-    Menu.setApplicationMenu(buildMenu());
+    // No menu bar in the window on Windows/Linux (editing shortcuts still work in Chromium). macOS keeps its
+    // system menu bar, which Cmd+C/V/Q and the app menu depend on.
+    Menu.setApplicationMenu(process.platform === 'darwin' ? buildMenu() : null);
     createWindow();
   });
 }
@@ -299,11 +313,11 @@ function registerIpc() {
 
 // ---------- menu ----------
 
+/** macOS only; Windows and Linux windows have no menu bar. */
 function buildMenu(): Menu {
-  const mac = process.platform === 'darwin';
   const template: MenuItemConstructorOptions[] = [
-    ...(mac ? [{ role: 'appMenu' as const, label: BRAND.name }] : []),
-    { label: 'File', submenu: [mac ? { role: 'close' } : { role: 'quit' }] },
+    { role: 'appMenu', label: BRAND.name },
+    { label: 'File', submenu: [{ role: 'close' }] },
     { role: 'editMenu' },
     {
       label: 'View',

@@ -35,7 +35,7 @@ async function connectAgent(
   const jar = cookieJar();
   const first = await call(authorizePath);
   expect(first.status).toBe(200);
-  expect(await first.text()).toContain('Sign in to Qalm');
+  expect(await first.text()).toContain('Sign in to qalm');
   const link = await captureLink(() =>
     call('/authorize/signin', { method: 'POST', body: new URLSearchParams({ email, return: authorizePath }) }),
   );

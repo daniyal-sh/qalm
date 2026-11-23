@@ -1,4 +1,4 @@
-# Qalm v1 decisions
+# qalm v1 decisions
 
 Keep it simple. Anything not listed here is out of v1.
 

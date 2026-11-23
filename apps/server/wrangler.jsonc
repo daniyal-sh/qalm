@@ -1,4 +1,4 @@
-// Qalm server. Resource ids below are placeholders: see README.md ("Setting up Cloudflare").
+// qalm server. Resource ids below are placeholders: see README.md ("Setting up Cloudflare").
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "qalm-server",

@@ -1,13 +1,13 @@
 <img src="assets/brand/qalm-mark.svg" width="72" alt="">
 
-# Qalm by Apollo
+# qalm by Apollo
 
 Handwritten notes, on pages, that feel like paper and that AI agents can read live over MCP.
 
 - `docs/decisions.md`: v1 scope
 - `docs/tech-spec.md`: architecture and contracts between packages
 - `docs/qink-live.md`: the AI-readable live format and MCP tools
-- `docs/brand.md`: Qalm by Apollo design system
+- `docs/brand.md`: qalm by Apollo design system
 - `mockups/`: HTML mockups (layout reference)
 
 ```

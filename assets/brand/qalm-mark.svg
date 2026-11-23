@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <!-- Qalm mark: a pen nib ringed by Apollo's orbit, with Apollo's planet. Built like Board's mark. -->
+  <!-- qalm mark: a pen nib ringed by Apollo's orbit, with Apollo's planet. Built like Board's mark. -->
   <defs><mask id="qalm-ring"><rect width="120" height="100" fill="#fff"/><path d="M60 94 C52 78 38 64 37 48 C36 34 46 22 60 11 C74 22 84 34 83 48 C82 64 68 78 60 94Z" fill="#000"/></mask></defs>
   <path d="M7.5 57.3L8.0 55.7L8.8 53.9L9.8 52.2L11.2 50.4L12.9 48.5L14.8 46.6L17.0 44.7L19.4 42.8L22.1 40.9L25.1 39.0L28.2 37.2L31.5 35.4L35.0 33.6L38.6 31.9L42.3 30.3L46.2 28.7L50.1 27.3L54.1 25.9L58.2 24.7L62.2 23.5L66.2 22.5L70.2 21.6L74.2 20.9L78.0 20.3L81.7 19.8L85.4 19.4L88.8 19.2L92.1 19.2L95.2 19.3L98.1 19.5L100.8 19.9L103.2 20.5L105.4 21.1L107.3 21.9L108.9 22.9L110.3 23.9" stroke="#4338CA" stroke-width="6" mask="url(#qalm-ring)"/>
   <path d="M60 86 C54 73 45 61 44 48 C43 37 50 28 60 19 C70 28 77 37 76 48 C75 61 66 73 60 86Z" stroke="#27272A" stroke-width="7"/>

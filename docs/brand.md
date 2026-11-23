@@ -1,6 +1,6 @@
-# Qalm by Apollo: brand and UI
+# qalm by Apollo: brand and UI
 
-Qalm is part of the Apollo family, alongside Board. It follows **Apollo Study Space**, Apollo's design system,
+qalm is part of the Apollo family, alongside Board. It follows **Apollo Study Space**, Apollo's design system,
 as Board adapts it (`daniyal-sh/board` → `apps/desktop/src/renderer/src/styles.css`, `packages/shared/src/brand.ts`).
 The mockups in `/mockups` set **layout and flows only**. Colours, type and surfaces come from this file.
 Where this file and a mockup differ, this file wins.
@@ -8,12 +8,12 @@ Where this file and a mockup differ, this file wins.
 ## Naming
 ```ts
 export const BRAND = {
-  name: 'Qalm', byline: 'by Apollo', website: 'https://apollolearn.app',
-  systemName: 'Apollo Qalm',          // folders, installer, window title
+  name: 'qalm', byline: 'by Apollo', website: 'https://apollolearn.app',
+  systemName: 'qalm',          // folders, installer, window title
   appId: 'com.apollo.qalm',           // bundle id, Android applicationId, Electron appId
 } as const;
 ```
-Lockup: the mark, then "Qalm" (semibold, -0.02em tracking) with "by Apollo" under it (medium, muted, 0.58×).
+Lockup: the mark, then "qalm" (semibold, -0.02em tracking) with "by Apollo" under it (medium, muted, 0.58×).
 
 ## Mark
 `assets/brand/qalm-mark.svg`: a **pen nib** (qalam = pen) ringed by Apollo's orbit, with Apollo's planet on the front

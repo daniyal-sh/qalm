@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Qalm",
+    "name": "qalm",
     "slug": "qalm",
     "version": "0.1.0",
     "scheme": "qalm",
@@ -20,8 +20,8 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "name": "Apollo Qalm",
-      "shortName": "Qalm",
+      "name": "qalm",
+      "shortName": "qalm",
       "themeColor": "#f3f3f5",
       "backgroundColor": "#f3f3f5"
     },
@@ -32,7 +32,7 @@
       "expo-web-browser",
       [
         "expo-image-picker",
-        { "photosPermission": "Qalm uses your photos when you insert an image on a page." }
+        { "photosPermission": "qalm uses your photos when you insert an image on a page." }
       ]
     ],
     "experiments": {

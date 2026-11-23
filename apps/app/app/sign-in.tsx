@@ -124,7 +124,7 @@ export default function SignIn() {
           <Lockup size={22} />
           <View style={{ gap: 6 }}>
             <Text variant="title">Sign in</Text>
-            <Text tone="muted">Your notebooks sync between your tablet and your computer. You can also use Qalm without an account.</Text>
+            <Text tone="muted">Your notebooks sync between your tablet and your computer. You can also use qalm without an account.</Text>
           </View>
 
           {!s.serverUrl ? (
