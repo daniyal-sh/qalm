@@ -53,7 +53,14 @@ export class YClient {
   private markSynced!: () => void;
   private constructor(readonly ws: WebSocket, readonly doc: Y.Doc) {
     this.synced = new Promise((r) => (this.markSynced = r));
-    ws.addEventListener('message', (ev) => this.onMessage(ev.data as ArrayBuffer | string));
+    // workerd delivers binary frames on client sockets as Blobs; decode them strictly in arrival order.
+    let queue = Promise.resolve();
+    ws.addEventListener('message', (ev) => {
+      const data = ev.data as ArrayBuffer | Blob | string;
+      queue = queue
+        .then(async () => this.onMessage(data instanceof Blob ? await data.arrayBuffer() : data))
+        .catch((e: unknown) => console.error('YClient message failed', e));
+    });
     doc.on('update', (u: Uint8Array, origin: unknown) => {
       if (origin === this) return;
       const e = encoding.createEncoder();
