@@ -7,7 +7,9 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "prepare-web": "node prepare-web.js",
+    "export:web": "node prepare-web.js && expo export -p web"
   },
   "dependencies": {
     "@shopify/react-native-skia": "2.14.0",

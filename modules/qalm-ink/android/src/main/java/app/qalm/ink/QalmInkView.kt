@@ -48,6 +48,11 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     if (changed) layer.redrawPending()
   }
 
+  private fun dropPending(id: String) {
+    val changed = synchronized(pending) { pending.removeAll { it.id == id } }
+    if (changed) layer.redrawPending()
+  }
+
   fun propsChanged() {
     if (hover != null && live == null) layer.drawFrame(frameForHover())
   }
@@ -254,7 +259,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     hover = null
     addPoint(l, point(ev, idx, -1, l))
     parent?.requestDisallowInterceptTouchEvent(true)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) requestUnbufferedDispatch(ev)
+    requestUnbufferedDispatch(ev) // deliver every sample as it arrives, not batched per frame
     render(l)
   }
 
@@ -305,6 +310,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
         val path = QalmFreehand.toPath(QalmFreehand.outline(l.tool, l.width, l.points))
         synchronized(pending) { pending.add(Pending(id, path, l.colorInt, alphaFor(l.tool))) }
         layer.commit()
+        // Never committed (e.g. the app snapped it to a shape): drop it anyway, as iOS does.
+        postDelayed({ dropPending(id) }, PENDING_FALLBACK_MS)
         onStrokeEnd(
           mapOf(
             "id" to id,
@@ -509,12 +516,21 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   }
 
   companion object {
-    // Tech-spec §3 palm rejection
+    // Tech-spec §3 palm rejection. Distances are mm, converted with DisplayMetrics.xdpi (px → mm = 25.4 / xdpi).
+    // 1. Pen always draws; with drawWith = "pen" fingers never draw (they are left to scroll / zoom).
+    // 2. A finger whose touchMajor exceeds PALM_MAJOR_MM[palm] is rejected.
+    // 3. A finger within PEN_LOCKOUT_MS of any pen activity (contact or hover) is rejected; a finger beside or
+    //    below the last pen position on the `hand` side (more than HAND_SIDE_MARGIN_MM past it does not count)
+    //    is rejected while the pen was seen within HAND_SIDE_WINDOW_MS.
+    // 4. ACTION_CANCEL / FLAG_CANCELED retracts the stroke in progress.
     val PALM_MAJOR_MM = mapOf("relaxed" to 9.0, "standard" to 7.0, "strict" to 5.0)
     const val PEN_LOCKOUT_MS = 600L
     const val HAND_SIDE_WINDOW_MS = 1500L
     const val HAND_SIDE_MARGIN_MM = 10.0
+    /** Movement below this counts as holding still (heldMs, for shape snapping). */
     const val HOLD_MOVE_MM = 1.0
+    /** A finished stroke whose id never reaches committedIds is dropped after this (same as iOS). */
+    const val PENDING_FALLBACK_MS = 4000L
     const val HIGHLIGHTER_ALPHA = 0.45
     const val FLAG_CANCELED = 0x20 // MotionEvent.FLAG_CANCELED (API 33)
     val LASSO_COLOR = Color.parseColor("#4338ca")

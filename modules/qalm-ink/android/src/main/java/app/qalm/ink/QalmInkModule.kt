@@ -64,8 +64,8 @@ class QalmInkModule : Module() {
       lines.mapNotNull { line -> recognizeLine(recognizer, line) }
     }
 
-    AsyncFunction("renderPdfPage") { fileUri: String, pageIndex: Int, widthPx: Int ->
-      renderPdfPage(fileUri, pageIndex, widthPx)
+    AsyncFunction("renderPdfPage") { fileUri: String, pageIndex: Int, widthPx: Double ->
+      renderPdfPage(fileUri, pageIndex, Math.round(widthPx).toInt())
     }
 
     View(QalmInkView::class) {

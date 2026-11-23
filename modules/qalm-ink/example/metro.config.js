@@ -13,4 +13,14 @@ config.resolver.nodeModulesPaths = [
   path.join(workspaceRoot, 'node_modules'),
 ];
 
+// pdf-lib (via @qalm/core) ships tslib 1.x, whose ESM entry (`modules/index.js`) default-imports a CJS file and
+// crashes under Metro ("Cannot destructure property '__extends'"). Use its plain ES build instead.
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  const res = context.resolveRequest(context, moduleName, platform);
+  if (moduleName === 'tslib' && res.type === 'sourceFile' && /[\\/]tslib[\\/]modules[\\/]index\.js$/.test(res.filePath)) {
+    return { type: 'sourceFile', filePath: path.join(path.dirname(res.filePath), '..', 'tslib.es6.js') };
+  }
+  return res;
+};
+
 module.exports = config;

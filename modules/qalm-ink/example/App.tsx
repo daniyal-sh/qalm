@@ -2,11 +2,13 @@ import { StatusBar } from 'expo-status-bar';
 import * as React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-// Import the overlay directly: the package entry also exports PageCanvas, which needs @qalm/core.
-import { InkOverlay } from '../src/InkOverlay';
+import { hitTestErase, type Item, type PageInfo, type StrokeItem } from '@qalm/core';
+
+import { InkOverlay, PageCanvas } from '../src';
 import type { InkInputSettings, InkTool } from '../src/InkOverlay.types';
 
 const A4 = { w: 595, h: 842 };
+const PAGE: PageInfo = { id: 'p1', size: A4, paper: 'ruled', paperColor: 'white', background: { kind: 'paper' } };
 const INPUT: InkInputSettings = { drawWith: 'any', hand: 'right', palm: 'standard' };
 const TOOLS: InkTool[] = ['pen', 'highlighter', 'eraser', 'lasso', 'none'];
 const BRUSH: Record<InkTool, { color: string; width: number }> = {
@@ -22,7 +24,10 @@ export default function App() {
   const pageW = Math.min(winW - 32, 820);
   const pageH = (pageW * A4.h) / A4.w;
   const [tool, setTool] = React.useState<InkTool>('pen');
+  const [items, setItems] = React.useState<Item[]>([]);
   const [committedIds, setCommittedIds] = React.useState<string[]>([]);
+  // Hand-off: once PageCanvas has rendered the new items, tell the overlay it may stop drawing them.
+  React.useEffect(() => setCommittedIds(items.map((it) => it.id)), [items]);
   const [log, setLog] = React.useState<string[]>([]);
   const add = (line: string) => {
     console.log(line);
@@ -41,9 +46,7 @@ export default function App() {
       </View>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={[styles.page, { width: pageW, height: pageH }]}>
-          {/* At integration (with @qalm/core) replace this plain paper with:
-              <PageCanvas info={pageInfo} items={items} width={pageW} />
-              and draw finished strokes there; the overlay hides each one once its id is in committedIds. */}
+          <PageCanvas info={PAGE} items={items} width={pageW} />
           <InkOverlay
             pageSize={A4}
             tool={tool}
@@ -53,10 +56,22 @@ export default function App() {
             committedIds={committedIds}
             onStrokeEnd={({ nativeEvent: e }) => {
               add(`stroke ${e.tool} ${e.id.slice(0, 8)} pts=${e.points.length} held=${e.heldMs}ms`);
-              // Without PageCanvas nothing else draws the stroke, so keep it on the overlay
-              // (a real app commits it to the page doc and adds the id here once PageCanvas has drawn it).
+              const xs = e.points.map((p) => p.x);
+              const ys = e.points.map((p) => p.y);
+              const r = e.width / 2;
+              const stroke: StrokeItem = {
+                id: e.id, type: 'stroke', tool: e.tool, color: e.color, width: e.width, points: e.points, createdAt: Date.now(),
+                bbox: [Math.min(...xs) - r, Math.min(...ys) - r, Math.max(...xs) + r, Math.max(...ys) + r],
+              };
+              setItems((its) => [...its, stroke]);
             }}
-            onErase={({ nativeEvent: e }) => add(`erase ${e.path.length} pts`)}
+            onErase={({ nativeEvent: e }) => {
+              add(`erase ${e.path.length} pts`);
+              setItems((its) => {
+                const hit = new Set(hitTestErase(its, e.path, BRUSH.eraser.width / 2));
+                return hit.size ? its.filter((it) => !hit.has(it.id)) : its;
+              });
+            }}
             onLasso={({ nativeEvent: e }) => add(`lasso ${e.polygon.length} pts`)}
             onPenButton={({ nativeEvent: e }) => {
               add(`pen button ${e.kind}`);
@@ -65,8 +80,8 @@ export default function App() {
             onRejectedTouch={({ nativeEvent: e }) => add(`rejected ${e.reason}`)}
           />
         </View>
-        <Pressable onPress={() => setCommittedIds([])} style={styles.tool}>
-          <Text style={styles.toolText}>reset committed</Text>
+        <Pressable onPress={() => setItems([])} style={styles.tool}>
+          <Text style={styles.toolText}>clear page</Text>
         </Pressable>
       </ScrollView>
       <View style={styles.log} pointerEvents="none">
@@ -88,7 +103,7 @@ const styles = StyleSheet.create({
   toolText: { color: '#27272a', fontSize: 14 },
   toolTextOn: { color: '#ffffff' },
   scroll: { alignItems: 'center', padding: 16, gap: 16 },
-  page: { backgroundColor: '#ffffff', borderWidth: StyleSheet.hairlineWidth, borderColor: '#d3d3d9' },
+  page: { backgroundColor: '#ffffff', overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: '#d3d3d9' },
   log: { position: 'absolute', left: 12, bottom: 12, padding: 8, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#d3d3d9' },
   logText: { fontSize: 12, color: '#5c5c65', fontFamily: 'monospace' },
 });

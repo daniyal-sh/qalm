@@ -50,16 +50,23 @@ object QalmFreehand {
       getStroke(points.map { doubleArrayOf(it.x, it.y, tiltPressure(it.p, it.tilt)) }, penOptions(width))
     }
 
-  /** Same smoothing as src/outlinePath.ts: quadratic curves through midpoints, closed, non-zero fill. */
+  /**
+   * Exactly src/outlinePath.ts `traceOutline` (= @qalm/core `outlineToSvgPath`, iOS `Freehand.path`):
+   * M p0, Q p1 mid(p1,p2), then Q p[i] mid(p[i],p[i+1]) for i = 2..n-2, close. Fewer than 4 points: the polygon.
+   * Filled non-zero (Path's default WINDING).
+   */
   fun toPath(outline: List<DoubleArray>, path: Path = Path()): Path {
     val n = outline.size
     if (n == 0) return path
-    val first = outline[0]
-    val last = outline[n - 1]
-    path.moveTo(((last[0] + first[0]) / 2).toFloat(), ((last[1] + first[1]) / 2).toFloat())
-    for (i in 0 until n) {
+    path.moveTo(outline[0][0].toFloat(), outline[0][1].toFloat())
+    if (n < 4) {
+      for (i in 1 until n) path.lineTo(outline[i][0].toFloat(), outline[i][1].toFloat())
+      path.close()
+      return path
+    }
+    for (i in 1 until n - 1) {
       val a = outline[i]
-      val b = outline[(i + 1) % n]
+      val b = outline[i + 1]
       path.quadTo(a[0].toFloat(), a[1].toFloat(), ((a[0] + b[0]) / 2).toFloat(), ((a[1] + b[1]) / 2).toFloat())
     }
     path.close()

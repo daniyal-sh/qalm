@@ -19,6 +19,8 @@ const HAND_SIDE_MARGIN_MM = 10;
 /** Movement smaller than this counts as holding still (heldMs). */
 const HOLD_MOVE_MM = 1;
 const LASSO_COLOR = '#4338ca'; // brand accent
+/** A finished stroke whose id never reaches committedIds (e.g. snapped to a shape) is dropped after this. */
+const PENDING_FALLBACK_MS = 4000;
 
 type Kind = 'ink' | 'erase' | 'lasso';
 
@@ -283,6 +285,11 @@ export function InkOverlay(props: InkOverlayProps) {
           alpha: live.tool === 'highlighter' ? HIGHLIGHTER_ALPHA : 1,
           path: outlinePath(live.tool, live.width, live.points),
         });
+        setTimeout(() => {
+          const before = s.finished.length;
+          s.finished = s.finished.filter((f) => f.id !== id);
+          if (s.finished.length !== before) s.draw();
+        }, PENDING_FALLBACK_MS);
         P.onStrokeEnd({
           nativeEvent: { id, tool: live.tool, color: live.color, width: live.width, points: live.points, heldMs },
         });
