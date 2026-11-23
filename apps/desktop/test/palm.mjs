@@ -234,7 +234,9 @@ try {
   check('pen and finger: a palm resting while the pen writes adds no ink', withPalm > penOnly * 0.7 && withPalm < penOnly * 1.3, `${withPalm} px vs ${penOnly} px`);
   before = after;
   // The barrel button held while writing erases that stroke's path, and leaves the pen selected.
-  const penSelected = async () => (await win.getByRole('button', { name: 'Pen', exact: true }).first().getAttribute('aria-selected')) === 'true';
+  // The selected tool has a filled background (react-native-web doesn't put accessibilityState on a button).
+  const filled = (label) => win.evaluate((l) => getComputedStyle(document.querySelector(`[aria-label="${l}"]`)).backgroundColor !== 'rgba(0, 0, 0, 0)', label);
+  const penSelected = async () => (await filled('Pen')) && !(await filled('Eraser'));
   await penLine(cx - 170, cy + 65, cx + 170, cy + 65, { button: 'right', buttons: 2 });
   await settle();
   after = await ink(clip);

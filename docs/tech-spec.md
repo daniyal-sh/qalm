@@ -302,7 +302,8 @@ own size onto the page, so it needs no zoom state.
 
 **Palm rejection** happens inside each overlay, in **millimetres** converted with the screen's density (Android `xdpi`, iOS points ≈ 0.19 mm on iPad,
 web CSS px = 0.2646 mm):
-1. Pen input always draws. With `drawWith: 'pen'`, touches never draw: they're passed through to scroll and zoom.
+1. Pen input always draws. With `drawWith: 'pen'`, touches never draw: they're passed through to scroll and zoom, except a touch
+   that rules 2 or 3 reject, which never scrolls (web: its `touchstart` is cancelled) and is reported with that reason.
 2. Touches whose contact major axis is larger than the threshold are rejected: relaxed 9 mm, standard 7 mm, strict 5 mm. The major axis is
    the full contact length on every platform: Android `getTouchMajor`, iOS `2 × majorRadius` (not reduced by `majorRadiusTolerance`),
    web the larger of the pointer's `width` / `height`.
@@ -310,6 +311,8 @@ web CSS px = 0.2646 mm):
 4. An OS cancel (`ACTION_CANCEL` / `FLAG_CANCELED` / `touchesCancelled`) retracts the in-progress stroke.
 
 Hover (where supported) shows a brush-size preview. The pen button, squeeze or double-tap fires `onPenButton`, and the app switches to the eraser.
+On web, the barrel button (or eraser end) held while the pen touches only makes that stroke erase; `onPenButton` fires for a press
+while hovering. The right mouse button erases too, and the page has no context menu.
 
 **No on-device recognition.** qalm-ink has no handwriting recognizer on any platform (ML Kit was removed): the user's agent reads handwriting
 from the region images with its own vision. That keeps the app about 20 MB lighter per language and the same on every platform.
