@@ -4,7 +4,7 @@ import { QalmInk, renderThumbnail } from 'qalm-ink';
 import * as React from 'react';
 import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, useWindowDimensions, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { GestureDetector, usePinchGesture } from 'react-native-gesture-handler';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { mark } from '../bench/hook';
 import { exportNotebook, updateNotebookMeta } from '../library/ops';
@@ -87,6 +87,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const meta = React.useMemo(() => notebook?.meta() ?? null, [notebook, ver]);
   const sync = useSyncStatus(h);
   const win = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   React.useEffect(() => mark('qalm:editor-mount'), []);
 
   // ---- tools ----
@@ -1046,7 +1047,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             </View>
 
             {selection && selectionPage ? (
-              <View style={styles.selWrap} pointerEvents="box-none">
+              <View style={[styles.selWrap, { bottom: 20 + insets.bottom }]} pointerEvents="box-none">
                 <View style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
                   {recoloring ? (
                     <>
@@ -1080,7 +1081,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                 </View>
               </View>
             ) : tools.tool === 'lasso' && clip ? (
-              <View style={styles.selWrap} pointerEvents="box-none">
+              <View style={[styles.selWrap, { bottom: 20 + insets.bottom }]} pointerEvents="box-none">
                 <View style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
                   <Button label="Paste" icon="clipboard" size="sm" onPress={sel.paste} />
                 </View>

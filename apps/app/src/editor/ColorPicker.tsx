@@ -1,6 +1,7 @@
 import { HIGHLIGHTER_ALPHA, inkOnPaper, MAX_SWATCHES, normalizeColor, PAPER_BG, splitAlpha, withAlpha, type PaperColor, type SwatchTool } from '@qalm/core';
 import * as React from 'react';
 import { Modal, Pressable, StyleSheet, useWindowDimensions, View, type GestureResponderEvent, type ViewStyle } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '../theme/ThemeProvider';
 import { coverInk, font, radius, shadow2 } from '../theme/tokens';
@@ -78,6 +79,7 @@ export function ColorPicker({ visible, tool, initial: given, saved, anchor, onCl
   const initial = normalizeColor(given) ?? '#27272a';
   const { c } = useTheme();
   const win = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const hl = tool === 'highlighter';
   const start = splitAlpha(initial, hl ? HIGHLIGHTER_ALPHA : 1);
   const [rgb, setRgb] = React.useState(start.rgb);
@@ -115,7 +117,7 @@ export function ColorPicker({ visible, tool, initial: given, saved, anchor, onCl
           left: Math.max(8, Math.min(anchor.x - WIDTH / 2, win.width - WIDTH - 8)),
         }
       : narrow
-        ? { position: 'absolute', bottom: 0, left: 0, right: 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, alignItems: 'center' }
+        ? { position: 'absolute', bottom: 0, left: 0, right: 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, alignItems: 'center', paddingBottom: 16 + insets.bottom }
         : { alignSelf: 'center', marginTop: win.height * 0.15 };
 
   const commitHex = () => {
