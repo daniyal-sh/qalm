@@ -2,7 +2,7 @@ import type { Folder, LibraryEntry } from '@qalm/core';
 import { Redirect, router } from 'expo-router';
 import * as React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { folderCounts, visibleEntries, type LibraryFilter } from '../src/library/actions';
 import { CoverSheet, DEFAULT_FORM, FolderTile, MoveSheet, NameSheet, NewNotebookSheet, NotebookCard } from '../src/library/components';
@@ -69,6 +69,7 @@ export default function LibraryScreen() {
   const s = useSession();
   const { library, entries, folders } = useLibraryData();
   const win = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const wide = win.width >= 900;
   const [filter, setFilter] = React.useState<LibraryFilter>({ kind: 'all' });
   const [query, setQuery] = React.useState('');
@@ -190,7 +191,8 @@ export default function LibraryScreen() {
   const accountLabel = s.user ? (s.profile?.email ?? s.profile?.name ?? 'Signed in') : s.serverUrl ? 'Not signed in' : 'On this device';
 
   const sidebar = (
-    <View style={[styles.sidebar, { backgroundColor: c.surface, borderRightColor: c.line }]}>
+    // The sidebar's surface runs under the status bar and a landscape display cutout; its content stays in the safe area.
+    <View style={[styles.sidebar, { backgroundColor: c.surface, borderRightColor: c.line, width: 260 + insets.left, paddingLeft: 10 + insets.left, paddingTop: 8 + insets.top, paddingBottom: insets.bottom }]}>
       <View style={{ paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: space.lg }}>
         <Lockup size={18} />
       </View>
@@ -240,10 +242,10 @@ export default function LibraryScreen() {
   );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top', 'left', 'right']}>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ flex: 1, flexDirection: 'row' }}>
         {wide ? sidebar : null}
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, paddingTop: insets.top, paddingRight: insets.right, paddingLeft: wide ? 0 : insets.left }}>
           <View style={[styles.header, !wide && { paddingTop: 8 }]}>
             {!wide ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginRight: -space.sm }}>
@@ -411,7 +413,7 @@ export default function LibraryScreen() {
           setMove(null);
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
