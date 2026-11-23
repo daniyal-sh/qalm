@@ -17,7 +17,23 @@ export interface InkPoint {
   t: number;
 }
 
-export interface StrokeItem { id: string; type: 'stroke'; tool: Tool; color: string; width: number; points: InkPoint[]; bbox: BBox; createdAt: number }
+/** Pen nib (pen strokes only). Missing = 'fountain', the look of strokes from before styles existed. */
+export type PenStyle = 'fountain' | 'ball' | 'brush';
+/** Input stabilisation, 1 low .. 3 high (pen strokes only). Missing or 0 = none, as strokes from before it existed. */
+export type Smoothing = 0 | 1 | 2 | 3;
+export interface StrokeItem {
+  id: string;
+  type: 'stroke';
+  tool: Tool;
+  color: string;
+  width: number;
+  points: InkPoint[];
+  bbox: BBox;
+  createdAt: number;
+  /** Stored per stroke so a stroke never changes look when the defaults change. */
+  style?: PenStyle;
+  smoothing?: Smoothing;
+}
 export interface TextItem { id: string; type: 'text'; x: number; y: number; w: number; text: string; fontSize: number; color: string }
 export interface ImageItem { id: string; type: 'image'; assetId: string; x: number; y: number; w: number; h: number }
 export type ShapeKind = 'line' | 'arrow' | 'rect' | 'ellipse' | 'triangle';

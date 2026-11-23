@@ -1,5 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { HIGHLIGHTER_WIDTH, PEN_WIDTHS } from '@qalm/core';
+import { HIGHLIGHTER_WIDTH, PEN_WIDTHS, type PenStyle } from '@qalm/core';
 import * as React from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -21,6 +21,12 @@ const TOOLS: { id: ToolId; icon: MciName; label: string }[] = [
 ];
 
 export const ERASER_SIZES = [4, 10, 22] as const;
+
+const PEN_STYLE_OPTIONS: { id: PenStyle; icon: MciName; label: string }[] = [
+  { id: 'fountain', icon: 'fountain-pen-tip', label: 'Fountain pen' },
+  { id: 'ball', icon: 'pen', label: 'Ballpoint pen' },
+  { id: 'brush', icon: 'brush', label: 'Brush pen' },
+];
 
 function ToolButton({ icon, label, selected, onPress }: { icon: MciName; label: string; selected?: boolean; onPress(): void }) {
   const { c } = useTheme();
@@ -75,6 +81,21 @@ function SizeDot({ size, selected, label, onPress }: { size: number; selected: b
   );
 }
 
+function StyleOption({ icon, label, selected, onPress }: { icon: MciName; label: string; selected: boolean; onPress(): void }) {
+  const { c } = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityLabel={label}
+      accessibilityState={{ checked: selected }}
+      onPress={onPress}
+      style={[styles.sizeHit, { backgroundColor: selected ? c.accentSoft : 'transparent', borderColor: selected ? c.accentLine : 'transparent' }]}
+    >
+      <MaterialCommunityIcons name={icon} size={19} color={selected ? c.accentInk : c.ink2} />
+    </Pressable>
+  );
+}
+
 export interface ToolbarProps {
   tools: ToolState;
   onTool(t: ToolId): void;
@@ -104,6 +125,10 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
             ))}
             {t === 'pen' ? (
               <>
+                <Sep />
+                {PEN_STYLE_OPTIONS.map((o) => (
+                  <StyleOption key={o.id} icon={o.icon} label={o.label} selected={tools.penStyle === o.id} onPress={() => onChange({ penStyle: o.id })} />
+                ))}
                 <Sep />
                 {PEN_WIDTHS.map((w, i) => (
                   <SizeDot key={w} size={4 + i * 3} label={['Fine', 'Medium', 'Bold'][i]!} selected={tools.penWidth === w} onPress={() => onChange({ penWidth: w })} />

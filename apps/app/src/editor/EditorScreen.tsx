@@ -43,6 +43,7 @@ const DEFAULT_TOOLS: ToolState = {
   tool: 'pen',
   penColor: PEN_COLORS[0].hex,
   penWidth: PEN_WIDTHS[1],
+  penStyle: 'fountain',
   hlColor: HIGHLIGHTER_COLORS[0].hex,
   hlWidth: HIGHLIGHTER_WIDTH,
   eraserRadius: 10,

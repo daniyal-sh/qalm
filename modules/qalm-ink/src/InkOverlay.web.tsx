@@ -6,7 +6,9 @@ import {
   PALM_MAJOR_MM,
   PEN_LOCKOUT_MS,
   type InkOverlayProps,
+  type InkPenStyle,
   type InkPoint,
+  type InkSmoothing,
 } from './InkOverlay.types';
 import { traceOutline } from './outlinePath';
 
@@ -37,6 +39,8 @@ interface Live {
   tool: 'pen' | 'highlighter';
   color: string;
   width: number;
+  style: InkPenStyle;
+  smoothing: InkSmoothing;
   rect: DOMRect;
   t0: number;
   points: InkPoint[];
@@ -70,9 +74,9 @@ function afterFrames(n: number, fn: () => void) {
   else requestAnimationFrame(() => afterFrames(n - 1, fn));
 }
 
-function outlinePath(tool: 'pen' | 'highlighter', width: number, pts: InkPoint[]): Path2D {
+function outlinePath(live: Live, pts: InkPoint[]): Path2D {
   const path = new Path2D();
-  traceOutline(liveOutline(tool, width, pts), {
+  traceOutline(liveOutline(live.tool, live.width, pts, live.style, live.smoothing), {
     moveTo: (x, y) => path.moveTo(x, y),
     lineTo: (x, y) => path.lineTo(x, y),
     quadTo: (cx, cy, x, y) => path.quadraticCurveTo(cx, cy, x, y),
@@ -150,7 +154,7 @@ export function InkOverlay(props: InkOverlayProps) {
       if (live?.kind === 'ink') {
         ctx.globalAlpha = live.tool === 'highlighter' ? HIGHLIGHTER_ALPHA : 1;
         ctx.fillStyle = live.color;
-        ctx.fill(outlinePath(live.tool, live.width, live.points.concat(live.predicted)));
+        ctx.fill(outlinePath(live, live.points.concat(live.predicted)));
         ctx.globalAlpha = 1;
       } else if (live?.kind === 'lasso' && live.points.length > 1) {
         ctx.beginPath();
@@ -265,6 +269,8 @@ export function InkOverlay(props: InkOverlayProps) {
         tool: tool === 'highlighter' ? 'highlighter' : 'pen',
         color: P.color,
         width: P.width,
+        style: P.penStyle ?? 'fountain',
+        smoothing: P.smoothing ?? 0,
         rect: canvas.getBoundingClientRect(),
         t0: ev.timeStamp,
         points: [],
@@ -305,7 +311,7 @@ export function InkOverlay(props: InkOverlayProps) {
           id,
           color: live.color,
           alpha: live.tool === 'highlighter' ? HIGHLIGHTER_ALPHA : 1,
-          path: outlinePath(live.tool, live.width, live.points),
+          path: outlinePath(live, live.points), // exactly what PageCanvas will draw: no predicted points
         });
         setTimeout(() => {
           const before = s.finished.length;
@@ -313,7 +319,16 @@ export function InkOverlay(props: InkOverlayProps) {
           if (s.finished.length !== before) s.draw();
         }, PENDING_FALLBACK_MS);
         P.onStrokeEnd({
-          nativeEvent: { id, tool: live.tool, color: live.color, width: live.width, points: live.points, heldMs },
+          nativeEvent: {
+            id,
+            tool: live.tool,
+            color: live.color,
+            width: live.width,
+            points: live.points,
+            heldMs,
+            style: live.style,
+            smoothing: live.smoothing,
+          },
         });
       }
       draw();

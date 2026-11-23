@@ -124,7 +124,7 @@ function useStrokePaths(items: Item[]): Map<string, SkPath> {
     const out = new Map<string, SkPath>();
     for (const it of items) {
       if (it.type !== 'stroke') continue;
-      const key = `${it.tool}|${it.width}|${it.points.length}|${it.bbox.join(',')}`;
+      const key = `${it.tool}|${it.width}|${it.style}|${it.smoothing}|${it.points.length}|${it.bbox.join(',')}`;
       const hit = cache.current.get(it.id);
       const entry = hit && hit.key === key ? hit : { key, path: outlineToPath(strokeOutline(it)) };
       next.set(it.id, entry);
