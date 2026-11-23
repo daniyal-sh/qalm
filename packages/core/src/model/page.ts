@@ -9,6 +9,43 @@ type YItem = Y.Map<unknown>;
 
 interface Group { key: string; kind: Line['kind']; ids: string[]; bbox: BBox; first: number }
 
+/**
+ * A page doc's line grouping: what line assignment used to recompute from every item on each step, kept up to date
+ * by the steps instead. Shared by every `Page` wrapping the doc. It is built from the doc on first use, followed
+ * through each transaction in which `Page` methods ran, and dropped as soon as any other transaction changes the doc
+ * (remote updates, undo, raw writes), so the next use rebuilds it. Don't mix raw writes to `items`, `order` or `lines`
+ * with `Page` calls inside one transaction: the index wouldn't see them.
+ */
+interface LineIndex {
+  /** The transaction following it; null between transactions (still exact). */
+  tx: Y.Transaction | null;
+  /** Relative z-position of every item in `order` (only comparisons matter). */
+  pos: Map<string, number>;
+  next: number;
+  /** Ids in `order` whose item is gone (left by concurrent edits). */
+  ghosts: Set<string>;
+  /** Line key of every grouped item, and cached bboxes. */
+  lineOf: Map<string, string>;
+  bb: Map<string, BBox>;
+  groups: Map<string, Group>;
+}
+
+const indexes = new WeakMap<Y.Doc, LineIndex>();
+const watched = new WeakSet<Y.Doc>();
+
+/** Keeps a doc's index across transactions that only `Page` methods made, and drops it after any other change. */
+function watch(doc: Y.Doc): void {
+  if (watched.has(doc)) return;
+  watched.add(doc);
+  // Before any observer of the transaction can read lines.
+  doc.on('beforeObserverCalls', (tx: Y.Transaction) => {
+    const ix = indexes.get(doc);
+    if (!ix) return;
+    if (ix.tx === tx) ix.tx = null;
+    else if (tx.changed.size > 0) indexes.delete(doc);
+  });
+}
+
 /** Line height assumed while a page has no lines yet. */
 const DEFAULT_LINE_HEIGHT = 24;
 const GEOMETRY_KEYS = new Set(['points', 'bbox', 'x', 'y', 'w', 'h', 'pts']);
@@ -135,6 +172,7 @@ export class Page {
 
   addItem(item: Item): void {
     this.tx(() => {
+      const replaced = this.itemMap.has(item.id);
       const m = new Y.Map<unknown>();
       this.dirty();
       this.itemMap.set(item.id, m);
@@ -142,7 +180,18 @@ export class Page {
       m.set('type', item.type);
       setFields(m, item as unknown as Record<string, unknown>);
       this.order.push([item.id]);
+      this.indexAdded(item.id, replaced);
       if (item.type === 'stroke' || item.type === 'shape') this.assign(item.id);
+    });
+  }
+
+  /**
+   * Adds items in one transaction (one undo step), in order: the same result as `addItem` for each. Line assignment
+   * keeps its grouping up to date within a transaction, so this is linear-ish rather than quadratic in the page size.
+   */
+  addItems(items: readonly Item[]): void {
+    this.tx(() => {
+      for (const it of items) this.addItem(it);
     });
   }
 
@@ -152,10 +201,18 @@ export class Page {
       if (!m) return;
       this.dirty(m);
       setFields(m, patch as Record<string, unknown>);
+      this.indexUpdated(id);
       const type = m.get('type');
       if ((type === 'stroke' || type === 'shape') && Object.keys(patch).some((k) => GEOMETRY_KEYS.has(k))) {
         this.relayout(id);
       }
+    });
+  }
+
+  /** Updates items in one transaction (one undo step), in order: the same result as `updateItem` for each. */
+  updateItems(patches: Iterable<readonly [id: string, patch: Partial<Item>]>): void {
+    this.tx(() => {
+      for (const [id, patch] of patches) this.updateItem(id, patch);
     });
   }
 
@@ -165,6 +222,7 @@ export class Page {
       const move = new Set(ids.filter((id) => this.itemMap.has(id)));
       if (!move.size) return;
       this.dirty();
+      this.dropIndex();
       const moved = this.orderedIds().filter((id) => move.has(id));
       const arr = this.order.toArray();
       for (let i = arr.length - 1; i >= 0; i--) if (move.has(arr[i]!)) this.order.delete(i, 1);
@@ -183,21 +241,29 @@ export class Page {
         if (typeof key === 'string') touched.add(key);
         this.itemMap.delete(id);
       }
+      // Delete from the end, a run of adjacent slots at a time.
       const arr = this.order.toArray();
-      for (let i = arr.length - 1; i >= 0; i--) if (gone.has(arr[i]!)) this.order.delete(i, 1);
+      for (let i = arr.length - 1; i >= 0; i--) {
+        if (!gone.has(arr[i]!)) continue;
+        let j = i;
+        while (j > 0 && gone.has(arr[j - 1]!)) j--;
+        this.order.delete(j, i - j + 1);
+        i = j;
+      }
+      this.indexRemoved([...gone]);
       const groups = this.groups();
       for (const key of touched) {
         if (groups.has(key)) this.touch(key);
-        else this.lineMap.delete(key);
+        else this.deleteEntry(key);
       }
     });
   }
 
   /** Lines and drawings, ordered by their first item's z-order. */
   lines(): Line[] {
-    return [...this.groups().values()].map((g) => {
+    return [...this.groups().values()].sort((a, b) => a.first - b.first).map((g) => {
       const e = this.lineMap.get(g.key);
-      const line: Line = { key: g.key, kind: g.kind, itemIds: g.ids, bbox: g.bbox };
+      const line: Line = { key: g.key, kind: g.kind, itemIds: [...g.ids], bbox: g.bbox };
       const text = e?.get('text');
       if (typeof text === 'string') {
         line.text = text;
@@ -298,6 +364,7 @@ export class Page {
     for (const id of src.orderedIds()) ids.set(id, makeId());
     this.tx(() => {
       this.dirty();
+      this.dropIndex();
       const order: string[] = [];
       for (const [oldId, id] of ids) {
         const from = src.itemMap.get(oldId)!;
@@ -331,37 +398,165 @@ export class Page {
   }
 
   // ---- line assignment (always runs inside a transaction) ----
+  //
+  // Each step (assign, relayout, merge) reads the page's grouping. It used to be rebuilt from every item on each read,
+  // which made a bulk edit of n items O(n²). The grouping now lives in a per-transaction `LineIndex` that each step
+  // keeps up to date; the steps themselves, and so their results, are unchanged.
 
-  private groups(): Map<string, Group> {
-    const groups = new Map<string, Group>();
-    this.orderedIds().forEach((id, idx) => {
-      const m = this.itemMap.get(id)!;
-      const key = m.get('line');
-      if (typeof key !== 'string') return;
-      const bb = itemBBox(readGeometry(m));
-      let g = groups.get(key);
-      if (!g) {
-        const kind = this.lineMap.get(key)?.get('kind');
-        g = { key, kind: kind === 'drawing' ? 'drawing' : 'line', ids: [], bbox: bb, first: idx };
-        groups.set(key, g);
+  /** The index, if there is a current one, joined to the running transaction (does not build it). */
+  private peek(): LineIndex | undefined {
+    const ix = indexes.get(this.doc);
+    if (!ix) return undefined;
+    const tx = this.doc._transaction;
+    if (ix.tx === null) ix.tx = tx;
+    return ix.tx === tx ? ix : undefined;
+  }
+
+  /** The index, built from the doc if there is no current one. */
+  private ix(): LineIndex {
+    const ix = this.peek();
+    if (ix) return ix;
+    const tx = this.doc._transaction;
+    const built: LineIndex = { tx, pos: new Map(), next: 0, ghosts: new Set(), lineOf: new Map(), bb: new Map(), groups: new Map() };
+    for (const id of this.order.toArray()) {
+      if (built.pos.has(id) || built.ghosts.has(id)) continue;
+      const m = this.itemMap.get(id);
+      if (!m) {
+        built.ghosts.add(id);
+        continue;
       }
-      // Entry missing (deleted concurrently): a group with a shape is a drawing.
-      if (!this.lineMap.has(key) && m.get('type') === 'shape') g.kind = 'drawing';
+      const idx = built.next++;
+      built.pos.set(id, idx);
+      const key = m.get('line');
+      if (typeof key !== 'string') continue;
+      const bb = itemBBox(readGeometry(m));
+      built.lineOf.set(id, key);
+      built.bb.set(id, bb);
+      let g = built.groups.get(key);
+      if (!g) {
+        g = { key, kind: 'line', ids: [], bbox: unionBBox(null, bb), first: idx };
+        built.groups.set(key, g);
+      }
       g.ids.push(id);
       g.bbox = unionBBox(g.bbox, bb);
-    });
-    return groups;
+    }
+    for (const g of built.groups.values()) g.kind = this.kindOf(g);
+    watch(this.doc);
+    indexes.set(this.doc, built);
+    return built;
+  }
+
+  /** Forgets the index (after a change it doesn't track); the next read rebuilds it from the doc. */
+  private dropIndex(): void {
+    indexes.delete(this.doc);
+  }
+
+  /** Lines and drawings by key (unordered: sort by `first` for z-order). Live during a transaction: don't keep or mutate. */
+  private groups(): Map<string, Group> {
+    return this.ix().groups;
+  }
+
+  /** A group's kind: its entry's, or (entry missing, e.g. deleted concurrently) a drawing if it has a shape. */
+  private kindOf(g: Group): Line['kind'] {
+    const e = this.lineMap.get(g.key);
+    if (e) return e.get('kind') === 'drawing' ? 'drawing' : 'line';
+    return g.ids.some((id) => this.itemMap.get(id)?.get('type') === 'shape') ? 'drawing' : 'line';
+  }
+
+  private refreshKind(key: string): void {
+    const g = this.peek()?.groups.get(key);
+    if (g) g.kind = this.kindOf(g);
+  }
+
+  /** Recomputes a group's bbox, first item and kind after its items changed; drops it if empty. */
+  private regroup(ix: LineIndex, g: Group): void {
+    if (!g.ids.length) {
+      ix.groups.delete(g.key);
+      return;
+    }
+    let bb: BBox | null = null;
+    for (const id of g.ids) bb = unionBBox(bb, this.cachedBBox(ix, id));
+    g.bbox = bb!;
+    g.first = ix.pos.get(g.ids[0]!)!;
+    g.kind = this.kindOf(g);
+  }
+
+  /** Takes items out of their groups in the index. */
+  private detach(ix: LineIndex, ids: Iterable<string>): void {
+    const from = new Map<string, Set<string>>();
+    for (const id of ids) {
+      const key = ix.lineOf.get(id);
+      if (key === undefined) continue;
+      ix.lineOf.delete(id);
+      let s = from.get(key);
+      if (!s) from.set(key, (s = new Set()));
+      s.add(id);
+    }
+    for (const [key, gone] of from) {
+      const g = ix.groups.get(key)!;
+      g.ids = g.ids.filter((id) => !gone.has(id));
+      this.regroup(ix, g);
+    }
+  }
+
+  private cachedBBox(ix: LineIndex, id: string): BBox {
+    let bb = ix.bb.get(id);
+    if (!bb) {
+      bb = itemBBox(readGeometry(this.itemMap.get(id)!));
+      ix.bb.set(id, bb);
+    }
+    return bb;
   }
 
   private bboxOf(id: string): BBox {
-    return itemBBox(readGeometry(this.itemMap.get(id)!));
+    return this.cachedBBox(this.ix(), id);
+  }
+
+  /** An item was added at the top of the z-order (after `order.push`). */
+  private indexAdded(id: string, replaced: boolean): void {
+    const ix = this.peek();
+    if (!ix) return;
+    // Re-adding an id the order already holds keeps its old slot: rebuild rather than track that.
+    if (replaced || ix.pos.has(id) || ix.ghosts.has(id)) return this.dropIndex();
+    ix.pos.set(id, ix.next++);
+  }
+
+  /** An item's fields changed: refresh its bbox and its group's. */
+  private indexUpdated(id: string): void {
+    const ix = this.peek();
+    if (!ix) return;
+    const old = ix.bb.get(id);
+    ix.bb.delete(id);
+    const key = ix.lineOf.get(id);
+    if (key === undefined) return;
+    const bb = this.cachedBBox(ix, id);
+    if (old && old[0] === bb[0] && old[1] === bb[1] && old[2] === bb[2] && old[3] === bb[3]) return;
+    this.regroup(ix, ix.groups.get(key)!);
+  }
+
+  /** Items were deleted (from `items` and every slot of `order`). */
+  private indexRemoved(ids: string[]): void {
+    const ix = this.peek();
+    if (!ix) return;
+    this.detach(ix, ids);
+    for (const id of ids) {
+      ix.pos.delete(id);
+      ix.bb.delete(id);
+      ix.ghosts.delete(id);
+    }
   }
 
   private newEntry(key: string, kind: Line['kind']): Y.Map<unknown> {
     const e = new Y.Map<unknown>();
     this.lineMap.set(key, e);
     e.set('kind', kind);
+    this.refreshKind(key);
     return e;
+  }
+
+  private deleteEntry(key: string): void {
+    this.lineMap.delete(key);
+    this.refreshKind(key);
   }
 
   /** A line's items changed: clear its text unless the user wrote it. */
@@ -374,7 +569,33 @@ export class Page {
   }
 
   private setLine(id: string, key: string): void {
-    this.itemMap.get(id)!.set('line', key);
+    this.setLines([id], key);
+  }
+
+  /** Puts items in line `key`. */
+  private setLines(ids: string[], key: string): void {
+    for (const id of ids) this.itemMap.get(id)!.set('line', key);
+    const ix = this.peek();
+    if (!ix) return;
+    // Only ordered items are grouped (an item missing from `order` keeps its line field but is in no group).
+    const add = ids.filter((id) => ix.pos.has(id) && ix.lineOf.get(id) !== key);
+    if (!add.length) return;
+    this.detach(ix, add);
+    for (const id of add) ix.lineOf.set(id, key);
+    let g = ix.groups.get(key);
+    if (!g) {
+      g = { key, kind: 'line', ids: [], bbox: [0, 0, 0, 0], first: 0 };
+      ix.groups.set(key, g);
+    }
+    const pos = ix.pos;
+    g.ids = g.ids.concat(add).sort((a, b) => pos.get(a)! - pos.get(b)!);
+    this.regroup(ix, g);
+  }
+
+  private unsetLine(id: string): void {
+    this.itemMap.get(id)!.delete('line');
+    const ix = this.peek();
+    if (ix) this.detach(ix, [id]);
   }
 
   /** The best line for bbox `b`: smallest gap, then largest overlap, then smallest key. */
@@ -412,6 +633,7 @@ export class Page {
     const e = this.lineMap.get(id);
     if (e) {
       e.set('kind', drawing ? 'drawing' : 'line');
+      this.refreshKind(id);
       this.touch(id);
     } else this.newEntry(id, drawing ? 'drawing' : 'line');
     this.setLine(id, id);
@@ -421,10 +643,11 @@ export class Page {
   /** Merges two groups; the one whose first item is earliest in z-order keeps its key. */
   private merge(a: Group, b: Group): string {
     const [win, lose] = a.first <= b.first ? [a, b] : [b, a];
-    for (const id of lose.ids) this.setLine(id, win.key);
-    this.lineMap.delete(lose.key);
-    this.touch(win.key);
-    return win.key;
+    const key = win.key;
+    this.setLines([...lose.ids], key);
+    this.deleteEntry(lose.key);
+    this.touch(key);
+    return key;
   }
 
   private mergeDrawings(key: string): void {
@@ -432,7 +655,11 @@ export class Page {
       const groups = this.groups();
       const g = groups.get(key);
       if (!g) return;
-      const other = [...groups.values()].find((o) => o.kind === 'drawing' && o.key !== key && intersects(o.bbox, g.bbox));
+      // The first overlapping drawing in z-order.
+      let other: Group | undefined;
+      for (const o of groups.values()) {
+        if (o.kind === 'drawing' && o.key !== key && intersects(o.bbox, g.bbox) && (!other || o.first < other.first)) other = o;
+      }
       if (!other) return;
       key = this.merge(g, other);
     }
@@ -453,14 +680,14 @@ export class Page {
       for (const o of others) ob = unionBBox(ob, this.bboxOf(o));
       if (g.kind === 'line' ? fitsLine(b, ob!) : intersects(b, ob!)) return; // still belongs here
       if (id !== key) {
-        m.delete('line');
+        this.unsetLine(id);
         this.touch(key);
         return this.assign(id);
       }
       // The line follows its key item; the remaining items split off under their first item's id.
       const rest = others[0]!;
       this.newEntry(rest, g.kind);
-      for (const o of others) this.setLine(o, rest);
+      this.setLines(others, rest);
       this.touch(key);
       groups = this.groups();
     }

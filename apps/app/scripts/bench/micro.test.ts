@@ -1,5 +1,5 @@
 // Micro-benchmarks for big notebooks: `pnpm --filter @qalm/app bench:micro` (prints the median ms per call).
-import { Notebook, Page, strokeOutline, type StrokeItem } from '@qalm/core';
+import { LOCAL_ORIGIN, Notebook, Page, strokeOutline, type Item, type StrokeItem } from '@qalm/core';
 import { describe, test } from 'vitest';
 import * as Y from 'yjs';
 
@@ -7,13 +7,15 @@ import { A4, buildMixedIndex, fillPage, MIXED } from '../../src/bench/gen';
 import { makeStroke, transformPatch } from '../../src/editor/items';
 import { currentPageIndex, layoutPages, mountedRange } from '../../src/editor/view';
 
-function bench(name: string, fn: () => void): void {
+/** Times `fn`; with `setup`, each run times only `fn(setup())`. */
+function bench<T = void>(name: string, fn: (x: T) => void, setup?: () => T): void {
   test(name, () => {
     const times: number[] = [];
     const t0 = performance.now();
     while (times.length < 5 || (performance.now() - t0 < 1500 && times.length < 200)) {
+      const x = setup ? setup() : (undefined as T);
       const s = performance.now();
-      fn();
+      fn(x);
       times.push(performance.now() - s);
     }
     times.sort((a, b) => a - b);
@@ -56,16 +58,46 @@ describe('page with 5000 strokes', () => {
 });
 const update = Y.encodeStateAsUpdate(heavy);
 
-describe('selection commit', () => {
-  bench('move 3000 strokes (one transaction)', () => {
-    const d = new Y.Doc();
-    fillPage(d, 3000, A4, 5);
-    const pg = new Page(d);
+/** One local transaction of `updateItem`s, like `Page.updateItems` (written this way so it also runs on older cores). */
+function updateAll(pg: Page, patch: (it: Item) => Partial<Item>): void {
+  const items = pg.items();
+  pg.doc.transact(() => items.forEach((it) => pg.updateItem(it.id, patch(it))), LOCAL_ORIGIN);
+}
+
+function page3000(): Page {
+  const d = new Y.Doc();
+  fillPage(d, 3000, A4, 5);
+  return new Page(d);
+}
+
+describe('selection commit (3000 strokes; page setup not timed)', () => {
+  bench('move 3000 strokes', (pg) => {
     const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 5, dy: 3 };
-    pg.doc.transact(() => {
-      for (const it of pg.items()) pg.updateItem(it.id, transformPatch(it, sim));
-    });
-  });
+    updateAll(pg, (it) => transformPatch(it, sim));
+  }, page3000);
+  bench('move 3000 strokes far (every line splits)', (pg) => {
+    const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 0, dy: 300 };
+    updateAll(pg, (it) => transformPatch(it, sim));
+  }, page3000);
+  bench('rotate + scale 3000 strokes', (pg) => {
+    const sim = { s: 0.8, r: 0.2, ox: 300, oy: 400, dx: 0, dy: 0 };
+    updateAll(pg, (it) => transformPatch(it, sim));
+  }, page3000);
+  bench('recolour 3000 strokes', (pg) => {
+    updateAll(pg, () => ({ color: '#b91c1c' }));
+  }, page3000);
+  bench('duplicate 3000 strokes', (pg) => {
+    const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 20, dy: 20 };
+    const copies = pg.items().map((it) => ({ ...it, ...transformPatch(it, sim), id: `c-${it.id}` }) as StrokeItem);
+    pg.doc.transact(() => copies.forEach((c) => pg.addItem(c)), LOCAL_ORIGIN);
+  }, page3000);
+  bench('delete 3000 strokes', (pg) => {
+    pg.removeItems(pg.items().map((it) => it.id));
+  }, page3000);
+  bench('erase 300 strokes one by one (one transaction)', (pg) => {
+    const ids = pg.items().slice(0, 300).map((it) => it.id);
+    pg.doc.transact(() => ids.forEach((id) => pg.removeItems([id])), LOCAL_ORIGIN);
+  }, page3000);
 });
 
 describe('300-page layout', () => {
