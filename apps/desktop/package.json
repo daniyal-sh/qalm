@@ -14,7 +14,7 @@
     "build": "pnpm --filter @qalm/app export:web && pnpm run icons && tsc -p . && electron-builder --config electron-builder.config.js --dir",
     "dist": "pnpm --filter @qalm/app export:web && pnpm run icons && tsc -p . && electron-builder --config electron-builder.config.js",
     "typecheck": "tsc --noEmit -p .",
-    "test": "node --test test/unit.test.mjs",
+    "test": "tsc -p . && node --test test/unit.test.mjs",
     "e2e": "node test/e2e.mjs"
   },
   "devDependencies": {
