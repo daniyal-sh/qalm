@@ -7,7 +7,8 @@
   "types": "src/index.ts",
   "license": "UNLICENSED",
   "scripts": {
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "gen:fixture": "esbuild scripts/gen-freehand-fixture.ts --bundle --platform=node --outfile=android/build/gen-fixture.cjs --log-level=warning && node android/build/gen-fixture.cjs"
   },
   "dependencies": {
     "@qalm/core": "workspace:*",
