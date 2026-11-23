@@ -38,7 +38,10 @@ export interface PageData {
   /** Readings of the page's ink (quotes on comment cards). */
   readings: Reading[];
   comments: Comment[];
-  /** The page's items, so threads on a selection can follow their ink. */
+  /**
+   * The page's items, so comment cards can follow their ink. Only kept fresh on pages with comments or the selection
+   * (reporting every stroke re-rendered the whole editor); anything else reads `page.items()`, which is cached.
+   */
   items: Item[];
 }
 
