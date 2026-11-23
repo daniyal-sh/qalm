@@ -22,6 +22,9 @@ export function Cover({ color, title, width, pdf }: { color: string; title: stri
         { width, height: h, backgroundColor: color, borderColor: c.line },
       ]}
     >
+      {/* Spine: a solid darker band with a hairline crease (no gradients, per brand.md). */}
+      <View style={[styles.spine, { width: Math.max(8, Math.round(width * 0.06)) }]} />
+      <View style={[styles.crease, { left: Math.max(8, Math.round(width * 0.06)) }]} />
       <View style={[styles.sticker, { backgroundColor: c.surface, borderColor: c.line, maxWidth: width - 28 }]}>
         <Text variant="meta" numberOfLines={2} style={{ color: c.ink, fontFamily: font.semibold, fontSize: Math.max(10, Math.min(13, width / 13)) }}>
           {title || DEFAULT_TITLE}
@@ -62,7 +65,8 @@ export function NotebookCard({
         <Cover color={entry.cover} title={entry.title} width={width} pdf={pdf} />
       </Pressable>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 4 }}>
-        <View style={{ flex: 1, gap: 2 }}>
+        {/* The title opens the notebook too; screen readers use the cover button above. */}
+        <Pressable accessible={false} onPress={onOpen} style={{ flex: 1, gap: 2 }}>
           <Text variant="label" numberOfLines={1}>
             {entry.title || DEFAULT_TITLE}
           </Text>
@@ -73,7 +77,7 @@ export function NotebookCard({
             {entry.favorite ? <Icon name="star" size={12} color={c.warn} /> : null}
             {entry.aiAccess ? <Pill label="AI" tone="assistant" /> : null}
           </View>
-        </View>
+        </Pressable>
         <IconButton
           icon="more-horizontal"
           label={`More for ${entry.title || DEFAULT_TITLE}`}
@@ -375,6 +379,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sticker: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 4, borderWidth: StyleSheet.hairlineWidth, marginLeft: 6 },
+  spine: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.14)' },
+  crease: { position: 'absolute', top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.22)' },
   folder: {
     flexDirection: 'row',
     alignItems: 'center',

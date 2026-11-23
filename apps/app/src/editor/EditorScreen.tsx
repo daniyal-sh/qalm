@@ -155,8 +155,14 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const [liveScale, setLiveScale] = React.useState(1);
   const [scrollY, setScrollY] = React.useState(0);
   const vScroll = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
-  const [commentsOpen, setCommentsOpen] = React.useState(win.width >= 1100);
-  const panelW = commentsOpen && viewport.w + (commentsOpen ? 340 : 0) >= 900 ? 340 : 0;
+  // Dock the comments panel beside the page only on wide windows; below that it floats over the page.
+  // Decided by window width (not the page viewport, which itself shrinks when the panel docks).
+  const dockComments = win.width >= 1100;
+  const [commentsOpen, setCommentsOpen] = React.useState(dockComments);
+  // Rotating to portrait (or narrowing the window) turns a docked panel into one covering the page: close it.
+  React.useEffect(() => {
+    if (!dockComments) setCommentsOpen(false);
+  }, [dockComments]);
   const base = baseWidth(viewport.w);
   const slots = React.useMemo(() => layoutPages(pages, base, zoom, GAP, 96), [pages, base, zoom]);
   const totalH = contentHeight(slots, GAP) + 80;
@@ -546,7 +552,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
           </View>
 
           {commentsOpen ? (
-            <View style={panelW ? undefined : [StyleSheet.absoluteFill, { alignItems: 'flex-end' }]} pointerEvents="box-none">
+            <View style={dockComments ? undefined : [StyleSheet.absoluteFill, { alignItems: 'flex-end' }]} pointerEvents="box-none">
+              <View style={dockComments ? { flex: 1 } : [{ flex: 1, maxWidth: '100%' }, shadow2]}>
               <CommentsPanel
                 pages={pageData}
                 activeId={activeCommentId}
@@ -557,6 +564,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                   setActiveComment(null);
                 }}
               />
+              </View>
             </View>
           ) : null}
         </View>
