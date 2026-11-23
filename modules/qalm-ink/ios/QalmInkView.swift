@@ -21,6 +21,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private static let fingerClaimDistance: CGFloat = 3       // points of movement that also claim a finger stroke
   private static let heldRadius = 2.0                // page units, for heldMs
   private static let pendingFallback: TimeInterval = 4.0   // drop an uncommitted finished stroke after this
+  // committedIds arrive once Skia has its new picture; it shows it a frame or two later, so keep ours until then.
+  private static let handoffDelay: TimeInterval = 0.05
   private static let useMultiplyForHighlighter = true
   private static let lassoColor = UIColor(red: 0x43 / 255.0, green: 0x38 / 255.0, blue: 0xca / 255.0, alpha: 1) // accent
   private static let eraserCursorColor = UIColor(red: 0x8b / 255.0, green: 0x8b / 255.0, blue: 0x95 / 255.0, alpha: 1) // faint
@@ -172,13 +174,16 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     committed = Set(ids)
     let done = pending.keys.filter { committed.contains($0) }
     if done.isEmpty { return }
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    for id in done {
-      pending[id]?.layer.removeFromSuperlayer()
-      pending[id] = nil
+    DispatchQueue.main.asyncAfter(deadline: .now() + QalmInkView.handoffDelay) { [weak self] in
+      guard let self = self else { return }
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      for id in done {
+        self.pending[id]?.layer.removeFromSuperlayer()
+        self.pending[id] = nil
+      }
+      CATransaction.commit()
     }
-    CATransaction.commit()
   }
 
   private func applyInputConfig() {

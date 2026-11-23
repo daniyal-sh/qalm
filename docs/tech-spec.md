@@ -150,19 +150,24 @@ background image, items in z-order (stroke Skia paths built from `strokeOutline`
 - iOS: coalesced and predicted `UITouch`es, drawn into a dedicated layer every frame (a Metal or Core Graphics live layer).
 - Web: a canvas overlay with `getCoalescedEvents`, `getPredictedEvents` and a `desynchronized` 2D context.
 
-When the pen lifts, the overlay emits `onStrokeEnd` with a new stroke `id`. It **keeps drawing that stroke until its id appears in
-`committedIds`**, so nothing flickers or pops at hand-off.
+When the pen lifts, the overlay redraws the stroke from its real points only (no predicted points), which is exactly the geometry
+PageCanvas will draw, and emits `onStrokeEnd` with a new stroke `id`. It **keeps drawing that stroke until its id appears in
+`committedIds`, and then for a short hand-off** (2 animation frames on web, 50 ms on iOS and Android), so nothing flickers at hand-off.
+`committedIds` are not the page's items: they come from `PageCanvas`'s `onDrawn`, which fires from an effect inside the Skia tree, i.e.
+once Skia's own reconciler has committed and handed the new picture to its view. On web that is often several frames after React
+commits the page (Skia's reconciler is asynchronous), and dropping the stroke earlier left a blank frame. The app passes the newest 64
+drawn ids.
 
 ```ts
 // PageCanvas (TS, all platforms)
-interface PageCanvasProps { info: PageInfo; items: Item[]; selection?: string[]; anchors?: { lineKey: string; bbox: BBox; active: boolean }[]; pdfImage?: string /*uri*/; width: number /*px*/ }
+interface PageCanvasProps { info: PageInfo; items: Item[]; selection?: string[]; anchors?: { lineKey: string; bbox: BBox; active: boolean }[]; pdfImage?: string /*uri*/; width: number /*px*/; onDrawn?(ids: string[]): void /*item ids, once Skia has them*/ }
 // InkOverlay (native view QalmInkView; web: src/InkOverlay.web.tsx)
 type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'none';
 interface InkOverlayProps {
   pageSize: { w: number; h: number };          // page units; the overlay's laid-out size maps linearly onto the page
   tool: InkTool; color: string; width: number;
   input: { drawWith: 'pen' | 'any'; hand: 'left' | 'right'; palm: 'relaxed' | 'standard' | 'strict' };
-  committedIds: string[];                       // stroke ids already drawn by PageCanvas
+  committedIds: string[];                       // stroke ids already drawn by PageCanvas (from its onDrawn)
   onStrokeEnd(e: { nativeEvent: { id: string; tool: 'pen'|'highlighter'; color: string; width: number; points: InkPoint[]; heldMs: number } }): void;
   onErase(e: { nativeEvent: { path: {x:number;y:number}[] } }): void;
   onLasso(e: { nativeEvent: { polygon: {x:number;y:number}[] } }): void;
