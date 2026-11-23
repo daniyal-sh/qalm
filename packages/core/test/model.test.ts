@@ -221,6 +221,8 @@ describe('undo', () => {
     const rp = new Page(remote);
     sync(local, remote);
     rp.addItem(stroke('theirs', 62, 100, 70, 120));
+    // Sync before the next local add: concurrent inserts are ordered by random clientID, which made this flaky.
+    sync(local, remote);
     page.addItem(stroke('mine2', 50, 200, 60, 220));
     sync(local, remote);
     expect(page.items().map((i) => i.id)).toEqual(['mine', 'theirs', 'mine2']);
