@@ -182,7 +182,6 @@ D1 migrations: `0001_init`, `0002_user_assets`, `0003_notebook_deleted`, `0004_a
   `MAGIC_LINK_URL` assumes the web app lives at `https://qalm.app/auth/email/verify`; for local dev use
   `http://localhost:8081/auth/email/verify`.
 - **Smaller gaps:**
-  - The comments panel only lists comments on loaded pages (visible ±2).
   - Users can reply to agent comments but can't start their own.
   - Pinch zoom on tablets works only with "pen only"; with "pen and finger" use the ± buttons.
   - The live highlighter uses plain alpha; finished highlights use multiply.

@@ -36,10 +36,11 @@ on screen (plus or minus 2) are loaded on the device. Durable Objects hold one d
 
 ```
 nb:{notebookId}            index doc
-  meta:   Y.Map  { id, title, cover, paper, paperColor, size:{w,h}, orientation, aiAccess, aiPaused?, createdAt, updatedAt }
+  meta:   Y.Map  { id, title, cover, paper, paperColor, size:{w,h}, orientation, aiAccess, aiPaused?, threadsIndexed?, createdAt, updatedAt }
   pages:  Y.Array<Y.Map>   { id, size:{w,h}, paper, paperColor, background: {kind:'paper'} | {kind:'pdf', assetId, pageIndex}, bookmarked? }
   assets: Y.Map<assetId, {id, sha256, mime, name, bytes, pageCount?}>
   asks:   Y.Array<{id, pageId, text, at, sel?: {itemIds, bbox}, commentId?}>   sel: an Ask about a selection; commentId: its thread
+  threads: Y.Map<commentId, ThreadSummary>   the thread index (below): a summary of every comment thread in the notebook
 
 pg:{notebookId}:{pageId}   page doc
   items:    Y.Map<itemId, Y.Map>   item fields below; stroke points as Uint8Array
@@ -57,6 +58,32 @@ are skipped: their pattern and colour don't apply. Ink isn't rewritten. Instead,
 `itemsOnPaper`, so the default ink follows the paper: graphite (#27272a) draws as night ink (#e4e4e7) on night paper,
 and night ink draws as graphite on white and cream. Other colours draw as stored. The cover (colour, title) is `meta`
 plus the library entry (`updateNotebookMeta`), like a rename. It isn't on the undo stack.
+
+**Thread index.** The comments panel, the unread badge, the "N open" count and "… commented" toasts cover the whole
+notebook, but only nearby page docs are loaded. So the index doc keeps a `ThreadSummary` per thread:
+`{id, pageId, lineKey, onSelection?, quote?, author, text, last: {author, text, at}, kinds, lastAgent?: {name, at}, resolved, ask?, createdAt, updatedAt}`
+(texts cut to 280 characters; `kinds` has one letter per entry, `a` agent or `u` student, which is all unread counts need).
+The page doc stays the source of truth; the summary is a mirror, written with `Notebook.putThreads` (origin
+`THREADS_ORIGIN`, so never undone):
+- **Who writes it:** the notebook room after an agent's `comment` (the page room returns the page's summaries), the notebook
+  room when a page room reports a student's comment change (it sends the page's summaries with `pageChanged`), and the app
+  for every loaded page (`mirrorLoadedThreads`, so offline and signed-out notebooks have it too). Writes are skipped when
+  nothing changed.
+- **Conflicts:** a thread only gains entries, and between entries only goes from open to resolved (a reply reopens it).
+  `putThreads` keeps whichever copy has more entries, and keeps `resolved` at equal length, so a writer holding an older
+  copy of a page (a device that hasn't synced it yet) can't roll an entry back. Concurrent writes of one key converge
+  because the server rewrites the summary from the merged page each time a student's change reaches the page room.
+  Comments are never deleted, so entries are never removed; threads on deleted pages are filtered out by the page list
+  (and come back if the delete is undone).
+- **Older notebooks:** a notebook made before the index has no `meta.threadsIndexed`. The editor indexes it once in the
+  background, 3 s after opening: each page doc in turn through the doc manager's LRU (released straight away), then sets
+  the flag (synced, so other devices skip it). A page that couldn't sync leaves the flag unset for a later visit. New
+  notebooks start with the flag set; a `.qalm` restore rebuilds the index from the restored pages.
+- **In the app:** `threadRows` lists loaded pages' threads live (full card: replies, Reply / Resolve / Show) and the rest
+  from the index (latest message and "Go to page n": selecting it scrolls there, which loads the page and the full thread).
+  Read state (`seen:{notebookId}`), "thinking…" and toasts all work on summaries, so an agent's reply on page 30 while
+  you're on page 2 raises the badge and a toast naming the page.
+- Q-ink labels (`QinkThreads`) stay in the notebook room's storage; the index is for the app and isn't sent to agents.
 
 **Saved colours (swatches).** One list per tool; text and shapes use the pen list. Pen colours are `#rrggbb`. A highlighter
 colour is `#rrggbb` (drawn at the default 0.45 alpha, like every highlight made before custom colours) or `#rrggbbaa`,
@@ -348,7 +375,9 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
   - Editor: a virtualized vertical list of pages, each a `PageCanvas` with an `InkOverlay`, plus the floating toolbar, comments panel, Ask button, pinch zoom, and undo/redo.
     Live agent: a presence pill ("Claude is following along", "… is thinking…" after an Ask until an agent entry arrives or 90 s;
     tap for what it can do, Pause sharing, Stop), open threads as cards in the margin beside the page when the gutter is ≥ 200 px
-    (pins on the page otherwise, plus a toast when an agent writes), and an unread badge on Comments (per device, `seen:{notebookId}` in kv)
+    (pins on the page otherwise, plus a toast when an agent writes where its card isn't in view), and an unread badge on Comments (per device,
+    `seen:{notebookId}` in kv: a thread is read once it's opened, or its margin card or panel card has been on screen for 1.5 s).
+    The comments panel lists every thread in the notebook (§2, thread index)
   - Page navigator (top-bar "Pages"): thumbnails of every page, as a sidebar on windows ≥ 900 px wide and a full-screen grid below
     that. Tap to jump, long-press and drag to reorder, bookmark (with a Bookmarks filter), duplicate and delete; the current page is
     highlighted. Thumbnails render lazily (only cells on screen, one at a time, into an offscreen CPU surface as small JPEGs) and are
