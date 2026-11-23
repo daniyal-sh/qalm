@@ -16,6 +16,8 @@ import android.view.View
 import androidx.annotation.RequiresApi
 import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
 import androidx.input.motionprediction.MotionEventPredictor
+import com.facebook.react.views.scroll.ReactHorizontalScrollView
+import com.facebook.react.views.scroll.ReactScrollView
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -43,7 +45,32 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     override fun claim(disallow: Boolean) {
       parent?.requestDisallowInterceptTouchEvent(disallow)
     }
+    override fun holdScroll(hold: Boolean) = this@QalmInkView.holdScroll(hold)
   })
+
+  /** Scroll views this view stopped for a finger stroke (see InkInput), to be restored when it ends. */
+  private val heldScrollViews = ArrayList<View>()
+
+  private fun holdScroll(hold: Boolean) {
+    if (!hold) {
+      for (v in heldScrollViews) {
+        when (v) {
+          is ReactScrollView -> v.scrollEnabled = true
+          is ReactHorizontalScrollView -> v.scrollEnabled = true
+        }
+      }
+      heldScrollViews.clear()
+      return
+    }
+    var p = parent
+    while (p != null) {
+      when {
+        p is ReactScrollView && p.scrollEnabled -> { p.scrollEnabled = false; heldScrollViews.add(p) }
+        p is ReactHorizontalScrollView && p.scrollEnabled -> { p.scrollEnabled = false; heldScrollViews.add(p) }
+      }
+      p = p.parent
+    }
+  }
 
   // ---- props ----
   var pageW = 595.0
@@ -133,6 +160,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   }
 
   override fun onDetachedFromWindow() {
+    input.reset()
     layer.release()
     super.onDetachedFromWindow()
   }

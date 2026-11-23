@@ -16,10 +16,12 @@ import kotlin.math.max
  * 4. `ACTION_CANCEL` / `FLAG_CANCELED` retracts the stroke in progress, as do a second finger (a scroll or zoom)
  *    and a contact that grows into a palm.
  *
- * Every stroke claims the gesture on touch-down (`requestDisallowInterceptTouchEvent`), so a parent ScrollView
- * can't steal a fast stroke whose first move is already past its touch slop; a rejected palm is claimed too, so it
- * never scrolls. Claiming doesn't cancel the editor's pinch: react-native-gesture-handler 3 only cancels legacy
- * handlers on it, not `usePinchGesture`; a second finger retracts the stroke and releases the claim.
+ * A stroke must own its gesture from touch-down: a parent ScrollView checks for a scroll before the overlay sees
+ * the same move, so a fast stroke whose first move is past the touch slop would scroll the page instead. A pen (or
+ * mouse) stroke claims the gesture (`requestDisallowInterceptTouchEvent`), and so does a rejected palm, so it never
+ * scrolls. A finger stroke can't: that call also stops react-native-gesture-handler's pinch for the rest of the
+ * gesture (two fingers would never zoom with "pen and finger"). It holds the ancestor scroll views still instead
+ * ([Host.holdScroll]), and a second finger releases them, retracts the stroke and lets the pinch or scroll go on.
  */
 internal class InkInput(private val host: Host) {
   interface Host {
@@ -35,6 +37,8 @@ internal class InkInput(private val host: Host) {
     fun penButton()
     /** `parent.requestDisallowInterceptTouchEvent(disallow)`. */
     fun claim(disallow: Boolean)
+    /** Stop (true) or restore (false) scrolling in the ancestor scroll views, without touching gesture handlers. */
+    fun holdScroll(hold: Boolean)
   }
 
   var drawWith = "pen" // pen | any
@@ -45,6 +49,7 @@ internal class InkInput(private val host: Host) {
   var livePointer = -1
     private set
   private var liveIsPen = false
+  private var scrollHeld = false
 
   private var lastPenTime = Long.MIN_VALUE / 2
   private var lastPenX = 0f
@@ -74,6 +79,7 @@ internal class InkInput(private val host: Host) {
             retract("cancelled")
           } else {
             livePointer = -1
+            releaseScroll()
             host.finish(ev, idx)
           }
         }
@@ -128,7 +134,12 @@ internal class InkInput(private val host: Host) {
     if (!host.start(ev, idx, isPen, eraser)) return
     livePointer = ev.getPointerId(idx)
     liveIsPen = isPen
-    host.claim(true)
+    if (isFinger(ev.getToolType(idx))) {
+      scrollHeld = true
+      host.holdScroll(true)
+    } else {
+      host.claim(true)
+    }
   }
 
   private fun onMove(ev: MotionEvent) {
@@ -143,6 +154,7 @@ internal class InkInput(private val host: Host) {
     if (idx < 0) return
     if (!liveIsPen && isFinger(ev.getToolType(idx)) && palmSizeExceeded(ev, idx)) {
       retract("palm-size") // the contact grew into a palm; keep swallowing it
+      host.claim(true)
       return
     }
     host.move(ev, idx)
@@ -150,8 +162,21 @@ internal class InkInput(private val host: Host) {
 
   private fun retract(reason: String?) {
     livePointer = -1
+    releaseScroll()
     host.retract()
     if (reason != null) host.rejected(reason)
+  }
+
+  private fun releaseScroll() {
+    if (!scrollHeld) return
+    scrollHeld = false
+    host.holdScroll(false)
+  }
+
+  /** The view is going away mid-stroke: give the scroll views back. */
+  fun reset() {
+    livePointer = -1
+    releaseScroll()
   }
 
   private fun notePen(ev: MotionEvent, idx: Int) {
