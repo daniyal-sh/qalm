@@ -21,7 +21,7 @@ import { confirm } from '../ui/confirm';
 import { Button, IconButton, Pill, TextField, Toggle } from '../ui/controls';
 import { EmptyState, Menu, Row, Sheet, useToast, type MenuItem } from '../ui/layout';
 import { Text } from '../ui/Text';
-import { CommentsPanel } from './CommentsPanel';
+import { CommentsPanel, PANEL_W } from './CommentsPanel';
 import { threadRows } from './CommentsPanel.logic';
 import { mirrorLoadedThreads, useThreadBackfill, useThreadIndex } from './threadIndex';
 import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence, useReadAfterDwell } from './ai';
@@ -1096,7 +1096,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
           </View>
 
           {commentsOpen ? (
-            <View style={dockComments ? undefined : [StyleSheet.absoluteFill, { alignItems: 'flex-end' }]} pointerEvents="box-none">
+            // Docked: a fixed-width column beside the page area (never squeezed by it). Floating: over the page, at the right.
+            <View style={dockComments ? { width: PANEL_W, flexShrink: 0 } : [StyleSheet.absoluteFill, { alignItems: 'flex-end' }]} pointerEvents="box-none">
               <View style={dockComments ? { flex: 1 } : [{ flex: 1, maxWidth: '100%' }, shadow2]}>
               <CommentsPanel
                 threads={threads}
