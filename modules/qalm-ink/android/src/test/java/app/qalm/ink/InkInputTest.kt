@@ -28,7 +28,6 @@ class InkInputTest {
 
   private val host = object : InkInput.Host {
     override val mmPerPx get() = this@InkInputTest.mmPerPx
-    override val density = 2f
     override fun start(ev: MotionEvent, idx: Int, isPen: Boolean, eraser: Boolean): Boolean {
       log += "start ${ev.getPointerId(idx)} ${if (isPen) "pen" else "touch"}${if (eraser) " eraser" else ""}"
       return startResult
@@ -112,27 +111,20 @@ class InkInputTest {
   }
 
   @Test
-  fun fingerDrawsAndClaimsOnlyAfterMovingOrWaiting() {
+  fun aFingerStrokeClaimsTheGestureOnTouchDown() {
+    // so a parent ScrollView can't steal a fast stroke whose first move is already past its touch slop
     send(1000, MotionEvent.ACTION_DOWN, finger(0, 100f, 100f))
-    send(1010, MotionEvent.ACTION_MOVE, finger(0, 104f, 100f)) // 2 dp: not yet
-    assertEquals(listOf("start 0 touch", "move 0"), log)
-    send(1020, MotionEvent.ACTION_MOVE, finger(0, 107f, 100f)) // 3.5 dp
-    assertEquals(listOf("start 0 touch", "move 0", "claim true", "move 0"), log)
-    send(1030, MotionEvent.ACTION_UP, finger(0, 107f, 100f))
-
-    log.clear()
-    send(5000, MotionEvent.ACTION_DOWN, finger(0, 100f, 100f))
-    send(5079, MotionEvent.ACTION_MOVE, finger(0, 100f, 101f))
-    send(5080, MotionEvent.ACTION_MOVE, finger(0, 100f, 102f)) // held 80 ms
-    assertEquals(listOf("start 0 touch", "move 0", "claim true", "move 0"), log)
+    send(1016, MotionEvent.ACTION_MOVE, finger(0, 160f, 100f))
+    send(1032, MotionEvent.ACTION_UP, finger(0, 220f, 100f))
+    assertEquals(listOf("start 0 touch", "claim true", "move 0", "finish 0"), log)
   }
 
   @Test
-  fun secondFingerBeforeTheClaimIsAPinchNotInk() {
+  fun aSecondFingerIsAPinchOrScrollNotInk() {
     send(1000, MotionEvent.ACTION_DOWN, finger(0, 100f, 100f))
     send(1030, MotionEvent.ACTION_POINTER_DOWN, finger(0, 100f, 100f), finger(1, 400f, 400f), actionIndex = 1)
     send(1040, MotionEvent.ACTION_MOVE, finger(0, 90f, 90f), finger(1, 420f, 420f))
-    assertEquals(listOf("start 0 touch", "retract", "reject multi-touch", "claim false"), log)
+    assertEquals(listOf("start 0 touch", "claim true", "retract", "reject multi-touch", "claim false"), log)
     assertFalse(input.drawing)
   }
 
@@ -193,7 +185,7 @@ class InkInputTest {
     send(1020, MotionEvent.ACTION_MOVE, finger(0, 120f, 100f, 12.0))
     send(1030, MotionEvent.ACTION_MOVE, finger(0, 130f, 100f, 12.0))
     send(1040, MotionEvent.ACTION_UP, finger(0, 140f, 100f, 12.0))
-    assertEquals(listOf("start 0 touch", "claim true", "move 0", "retract", "reject palm-size", "claim true"), log)
+    assertEquals(listOf("start 0 touch", "claim true", "move 0", "retract", "reject palm-size"), log)
   }
 
   @Test
@@ -244,10 +236,10 @@ class InkInputTest {
     log.clear()
     tap(11_600, finger(1, 500f - mm(15.0), 900f)) // below but clearly left of the pen
     tap(11_700, finger(1, 900f, 500f - mm(15.0))) // right but clearly above
-    assertEquals(List(2) { listOf("start 1 touch", "finish 1") }.flatten(), log)
+    assertEquals(List(2) { listOf("start 1 touch", "claim true", "finish 1") }.flatten(), log)
     log.clear()
     tap(13_001, finger(1, 700f, 700f)) // the pen hasn't been seen for over 3 s
-    assertEquals(listOf("start 1 touch", "finish 1"), log)
+    assertEquals(listOf("start 1 touch", "claim true", "finish 1"), log)
   }
 
   @Test
@@ -259,7 +251,7 @@ class InkInputTest {
     assertEquals(listOf("claim true", "reject hand-side"), log)
     log.clear()
     tap(10_800, finger(1, 700f, 700f)) // below right: fine for a left-hander
-    assertEquals(listOf("start 1 touch", "finish 1"), log)
+    assertEquals(listOf("start 1 touch", "claim true", "finish 1"), log)
   }
 
   @Test
@@ -280,7 +272,7 @@ class InkInputTest {
     send(10_040, MotionEvent.ACTION_MOVE, finger(0, 600f, 600f, 6.0), pen(1, 520f, 500f))
     send(10_050, MotionEvent.ACTION_POINTER_UP, finger(0, 600f, 600f, 6.0), pen(1, 530f, 500f), actionIndex = 1)
     assertEquals(
-      listOf("start 0 touch", "retract", "reject pen-took-over", "start 1 pen", "claim true", "move 1", "finish 1"),
+      listOf("start 0 touch", "claim true", "retract", "reject pen-took-over", "start 1 pen", "claim true", "move 1", "finish 1"),
       log,
     )
   }
@@ -297,7 +289,7 @@ class InkInputTest {
   fun flagCanceledOnUpRetractsInsteadOfCommitting() {
     send(1000, MotionEvent.ACTION_DOWN, finger(0, 100f, 100f))
     send(1100, MotionEvent.ACTION_UP, finger(0, 110f, 100f), flags = InkInput.FLAG_CANCELED)
-    assertEquals(listOf("start 0 touch", "retract", "reject cancelled"), log)
+    assertEquals(listOf("start 0 touch", "claim true", "retract", "reject cancelled"), log)
   }
 
   @Test

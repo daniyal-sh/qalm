@@ -34,7 +34,6 @@ import kotlin.math.min
 class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
   private val input = InkInput(object : InkInput.Host {
     override val mmPerPx get() = this@QalmInkView.mmPerPx
-    override val density get() = resources.displayMetrics.density
     override fun start(ev: MotionEvent, idx: Int, isPen: Boolean, eraser: Boolean) = this@QalmInkView.start(ev, idx, isPen, eraser)
     override fun move(ev: MotionEvent, idx: Int) = onMove(ev, idx)
     override fun finish(ev: MotionEvent, idx: Int) = this@QalmInkView.finish(ev, idx)
@@ -179,8 +178,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     predictor.record(ev)
     input.onTouchEvent(ev)
     // Keep receiving the gesture (a pen may land after a rejected palm). A parent ScrollView can still intercept
-    // finger drags until a stroke claims the gesture or a palm is rejected; ViewGroup clears that flag when the
-    // gesture ends.
+    // finger drags until a stroke starts or a palm is rejected; ViewGroup clears that flag when the gesture ends.
     return true
   }
 
