@@ -1,26 +1,50 @@
-import type { Comment } from '@qalm/core';
+import { summarizeThread, type Comment, type ThreadSummary } from '@qalm/core';
 
 import type { PageData } from './context';
 
 export type CommentFilter = 'open' | 'ai' | 'resolved';
 
+/**
+ * One thread, notebook-wide. On a loaded page it carries the live comment and page data (and its summary is computed
+ * from them); elsewhere only the summary from the notebook's thread index.
+ */
 export interface CommentRow {
   pageId: string;
-  data: PageData;
-  comment: Comment;
+  /** The page's position in the notebook. */
+  index: number;
+  summary: ThreadSummary;
+  data?: PageData;
+  comment?: Comment;
 }
 
-/** Open / AI / resolved comments ('all': every thread), page order then newest first. */
-export function commentRows(pages: Map<string, PageData>, filter: CommentFilter | 'all'): CommentRow[] {
+/**
+ * Every thread in the notebook, page order then newest first: live from the loaded pages, from the thread index for
+ * the rest. Threads on pages no longer in the notebook are left out.
+ */
+export function threadRows(index: readonly ThreadSummary[], loaded: ReadonlyMap<string, PageData>, pageIds: readonly string[]): CommentRow[] {
+  const pos = new Map(pageIds.map((id, i) => [id, i]));
   const out: CommentRow[] = [];
-  for (const [pageId, data] of pages) {
+  const live = new Set<string>();
+  for (const [pageId, data] of loaded) {
+    const i = pos.get(pageId);
+    if (i === undefined) continue;
     for (const comment of data.comments) {
-      if (filter !== 'all' && (filter === 'resolved' ? !comment.resolved : comment.resolved)) continue;
-      if (filter === 'ai' && comment.author.kind !== 'agent') continue;
-      out.push({ pageId, data, comment });
+      live.add(comment.id);
+      out.push({ pageId, index: i, summary: summarizeThread(pageId, comment, data.lines), data, comment });
     }
   }
-  return out.sort((a, b) => a.data.index - b.data.index || b.comment.createdAt - a.comment.createdAt);
+  for (const t of index) {
+    const i = pos.get(t.pageId);
+    if (i === undefined || loaded.has(t.pageId) || live.has(t.id)) continue;
+    out.push({ pageId: t.pageId, index: i, summary: t });
+  }
+  return out.sort((a, b) => a.index - b.index || b.summary.createdAt - a.summary.createdAt);
+}
+
+/** Open / AI / resolved rows ('all': every row). */
+export function filterRows(rows: readonly CommentRow[], filter: CommentFilter | 'all'): CommentRow[] {
+  if (filter === 'all') return [...rows];
+  return rows.filter((r) => (filter === 'resolved' ? r.summary.resolved : !r.summary.resolved && (filter === 'open' || r.summary.author.kind === 'agent')));
 }
 
 /** The tab to show so that thread `c` is listed: `current` if it already lists it. */

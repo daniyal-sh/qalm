@@ -1,4 +1,4 @@
-import { Page, type Comment, type Line } from '@qalm/core';
+import { Page, summarizeThreads, type Comment, type Line } from '@qalm/core';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 
@@ -15,6 +15,9 @@ function pageWith(build: (p: Page) => void): PageData {
   return { page, index: 0, lines: page.lines(), comments: page.comments(), items: page.items() };
 }
 
+/** The page's threads as the thread index has them. */
+const sums = (d: PageData, pageId = 'p1') => summarizeThreads(pageId, d.page.comments(), d.lines);
+
 const line = (key: string, y: number): Line => ({ key, kind: 'line', itemIds: [key], bbox: [50, y, 200, y + 20] });
 const comment = (id: string, lineKey: string, extra: Partial<Comment> = {}): Comment => ({
   id,
@@ -28,7 +31,7 @@ const comment = (id: string, lineKey: string, extra: Partial<Comment> = {}): Com
 });
 
 describe('live agent logic', () => {
-  it('counts unread agent entries and marks them read', () => {
+  it('counts unread agent entries and marks only read threads', () => {
     let a = '';
     const d = pageWith((p) => {
       a = p.addComment({ lineKey: 'k', author: agent, text: 'hi' });
@@ -36,22 +39,20 @@ describe('live agent logic', () => {
       p.replyToComment(a, agent, 'because');
       p.addComment({ lineKey: 'k', author: you, text: 'mine' });
     });
-    expect(agentEntryCount([d])).toBe(2);
-    expect(unreadCount([d], {})).toBe(2);
-    expect(unreadCount([d], { [a]: 2 })).toBe(1);
-    expect([...unreadIds([d], {})]).toEqual([a]);
+    expect(agentEntryCount(sums(d))).toBe(2);
+    expect(unreadCount(sums(d), {})).toBe(2);
+    expect(unreadCount(sums(d), { [a]: 2 })).toBe(1);
+    expect([...unreadIds(sums(d), {})]).toEqual([a]);
     // Only the threads that were read are marked (not every loaded thread).
     const other = d.page.addComment({ lineKey: 'k', author: agent, text: 'later' });
-    d.comments = d.page.comments();
-    const seen = markSeen(d.comments.filter((x) => x.id === a), {});
-    expect(unreadCount([d], seen)).toBe(1);
-    expect([...unreadIds([d], seen)]).toEqual([other]);
-    expect(markSeen(d.comments.filter((x) => x.id === a), seen)).toBe(seen);
+    const seen = markSeen(sums(d).filter((x) => x.id === a), {});
+    expect(unreadCount(sums(d), seen)).toBe(1);
+    expect([...unreadIds(sums(d), seen)]).toEqual([other]);
+    expect(markSeen(sums(d).filter((x) => x.id === a), seen)).toBe(seen);
     // A new reply in a read thread is unread again.
     d.page.replyToComment(a, agent, 'one more');
-    d.comments = d.page.comments();
-    expect(unreadCount([d], seen)).toBe(2);
-    expect(newestAgentEntry([d])?.name).toBe('Claude');
+    expect(unreadCount(sums(d), seen)).toBe(2);
+    expect(newestAgentEntry(sums(d))).toMatchObject({ name: 'Claude', pageId: 'p1' });
   });
 
   it('stacks margin cards beside their lines without overlap, skipping resolved and orphaned threads', () => {
@@ -79,23 +80,26 @@ describe('live agent logic', () => {
     expect(marginCards(lines, [comment('c1', 'a'), comment('c2', 'b'), comment('c3', 'c')], 1, 64, 8, null, 200).map((c) => c.top)).toEqual([376, 448, 520]);
   });
 
-  it('thinking ends when an agent writes on a page loaded at the Ask, or after a timeout', () => {
+  it('thinking ends when an agent writes anywhere in the notebook, or after a timeout', () => {
     let a = '';
     const p1 = pageWith((p) => {
       a = p.addComment({ lineKey: 'k', author: agent, text: 'earlier answer' });
     });
-    const t = startThinking(new Map([['p1', p1]]), 1000);
-    expect(stillThinking(t, new Map([['p1', p1]]), 2000)).toBe(true);
-    // Scrolling: a page with old agent comments mounts, and the asked page unmounts. Neither ends it.
-    const p2 = pageWith((p) => p.addComment({ lineKey: 'k', author: agent, text: 'old' }));
-    expect(stillThinking(t, new Map([['p2', p2]]), 2000)).toBe(true);
-    // The answer arrives as a reply on the page loaded at the Ask, even with other pages mounted around it.
+    const now = Date.now();
+    const t = startThinking(sums(p1), now);
+    expect(stillThinking(t, sums(p1), now + 1000)).toBe(true);
+    // A far page's old agent thread turning up in the index (an older notebook being indexed) doesn't end it.
+    const old = pageWith((p) => p.addComment({ lineKey: 'k', author: agent, text: 'old' }));
+    const oldSums = sums(old, 'p9').map((x) => ({ ...x, createdAt: now - 2 * THINKING_MS }));
+    expect(stillThinking(t, [...sums(p1), ...oldSums], now + 1000)).toBe(true);
+    // A reply, or a new agent thread on any page, ends it.
+    const fresh = pageWith((p) => p.addComment({ lineKey: 'k', author: agent, text: 'new' }));
+    expect(stillThinking(t, [...sums(p1), ...sums(fresh, 'p30')], now + 1000)).toBe(false);
     p1.page.replyToComment(a, agent, 'the answer');
-    const p1b = { ...p1, comments: p1.page.comments() };
-    expect(stillThinking(t, new Map([['p1', p1b], ['p2', p2]]), 2000)).toBe(false);
-    expect(stillThinking(t, new Map([['p1', p1]]), 1000 + THINKING_MS)).toBe(false);
-    expect(stillThinking(null, new Map(), 0)).toBe(false);
-    expect(startThinking(new Map(), 5, 'c9')).toEqual({ before: {}, at: 5, commentId: 'c9' });
+    expect(stillThinking(t, sums(p1), now + 1000)).toBe(false);
+    expect(stillThinking(t, [], now + THINKING_MS)).toBe(false);
+    expect(stillThinking(null, [], 0)).toBe(false);
+    expect(startThinking([], 5, 'c9')).toEqual({ before: {}, at: 5, commentId: 'c9' });
   });
 
   it('reads presence and names agents', async () => {

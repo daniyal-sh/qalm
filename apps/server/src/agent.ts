@@ -325,6 +325,8 @@ export class AgentHub {
     const docId = pgDocId(this.notebookId, pageId);
     const r = await room(this.env, docId).applyAgentEdit(docId, edit);
     if (!r.ok) throw new Error(r.text);
+    // The app's notebook-wide comments list and unread badge read the thread index, not every page.
+    if (r.threads?.length) this.r.putThreads(r.threads);
     if (!r.id) return r.text;
     const threads = this.threads();
     const label = threadLabel(threads, r.id, pageId);

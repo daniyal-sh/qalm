@@ -3,7 +3,7 @@ import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import { Notebook, Page } from '@qalm/core';
+import { Notebook, Page, summarizeThreads, type ThreadSummary } from '@qalm/core';
 import type { Env } from './env';
 import { parseDocId, nbDocId, pgDocId, room, type DocRef } from './docs';
 import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit, type AgentWho, type PageEdit, type Presence } from './agent';
@@ -157,8 +157,10 @@ export class DocRoom extends DurableObject<Env> {
     if (ref.kind === 'pg') {
       const comment = this.commentTouched;
       this.commentTouched = false;
+      // A student's comment or reply: the notebook room mirrors this page's threads into its thread index.
+      const threads = comment ? this.threadSummaries(ref.pageId) : undefined;
       room(this.env, nbDocId(ref.notebookId))
-        .pageChanged(nbDocId(ref.notebookId), ref.pageId, at, comment)
+        .pageChanged(nbDocId(ref.notebookId), ref.pageId, at, comment, threads)
         .catch((e: unknown) => console.error('pageChanged failed', e));
     } else if (ref.kind === 'nb') {
       this.agents().onIndexChanged();
@@ -331,9 +333,22 @@ export class DocRoom extends DurableObject<Env> {
   }
 
   /** Page room → notebook room, on every client update of a page. */
-  pageChanged(docId: string, pageId: string, at: number, comment = false): void {
+  pageChanged(docId: string, pageId: string, at: number, comment = false, threads?: ThreadSummary[]): void {
     this.setDocId(docId);
+    if (threads?.length) this.putThreads(threads);
     this.agents().onPageChanged(pageId, at, comment);
+  }
+
+  /** Notebook room: writes thread summaries from a page room into the index doc's thread index (see Notebook.putThreads). */
+  putThreads(threads: ThreadSummary[]): void {
+    if (this.ref?.kind !== 'nb') throw new Error('Not a notebook room');
+    new Notebook(this.doc).putThreads(threads);
+  }
+
+  /** Page room: the summaries of this page's threads, for the notebook's thread index. */
+  private threadSummaries(pageId: string): ThreadSummary[] {
+    const page = new Page(this.doc);
+    return summarizeThreads(pageId, page.comments(), page.lines());
   }
 
   lastClientUpdateAt(docId: string): number {
@@ -382,7 +397,7 @@ export class DocRoom extends DurableObject<Env> {
   }
 
   /** Notebook room → page room: an agent's transcription, comment or reply. Agents never touch ink. */
-  applyAgentEdit(docId: string, edit: PageEdit): { ok: boolean; text: string; id?: string } {
+  applyAgentEdit(docId: string, edit: PageEdit): { ok: boolean; text: string; id?: string; threads?: ThreadSummary[] } {
     try {
       return { ok: true, ...this.applyAgentEditOrThrow(docId, edit) };
     } catch (e) {
@@ -390,14 +405,14 @@ export class DocRoom extends DurableObject<Env> {
     }
   }
 
-  private applyAgentEditOrThrow(docId: string, edit: PageEdit): { text: string; id?: string } {
+  private applyAgentEditOrThrow(docId: string, edit: PageEdit): { text: string; id?: string; threads?: ThreadSummary[] } {
     this.setDocId(docId);
     if (this.ref?.kind !== 'pg') throw new Error('Not a page room');
     const page = new Page(this.doc);
     if (edit.op === 'reply') {
       if (!page.replyToComment(edit.commentId, { kind: 'agent', name: edit.agentName }, edit.text)) throw new Error(`Thread ${edit.ref} no longer exists`);
       if (edit.resolve) page.resolveComment(edit.commentId);
-      return { text: `Replied in ${edit.ref}${edit.resolve ? ' and resolved it' : ''}` };
+      return { text: `Replied in ${edit.ref}${edit.resolve ? ' and resolved it' : ''}`, threads: this.threadSummaries(this.ref.pageId) };
     }
     const line = page.lines().find((l) => l.key === edit.lineKey);
     if (!line) throw new Error(`Line ${edit.ref} no longer exists`);
@@ -407,6 +422,6 @@ export class DocRoom extends DurableObject<Env> {
       return { text: `Saved ${edit.ref}` };
     }
     const id = page.addComment({ lineKey: edit.lineKey, author: { kind: 'agent', name: edit.agentName }, text: edit.text });
-    return { text: `Commented on ${edit.ref}`, id };
+    return { text: `Commented on ${edit.ref}`, id, threads: this.threadSummaries(this.ref.pageId) };
   }
 }

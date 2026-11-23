@@ -1,10 +1,10 @@
-import { Library, Notebook, Page, type Comment, type Line } from '@qalm/core';
+import { Library, Notebook, Page, summarizeThreads, type Comment, type Line } from '@qalm/core';
 import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 
 import { grantSummary, getAiOverview, toggleId, updateGrant } from '../src/api/ai';
 import { extractMagicToken } from '../src/auth/magicLink';
-import { commentRows, filterFor, rowsInView } from '../src/editor/CommentsPanel.logic';
+import { filterFor, filterRows, rowsInView, threadRows } from '../src/editor/CommentsPanel.logic';
 import {
   anchoredScroll,
   clampZoom,
@@ -137,21 +137,37 @@ describe('editor view maths', () => {
 });
 
 describe('comments panel rows', () => {
-  it('filters open, AI and resolved comments in page order', () => {
+  it('lists every thread notebook-wide: live on loaded pages, from the index elsewhere', () => {
     const p1 = new Page(new Y.Doc());
     const p2 = new Page(new Y.Doc());
+    const far = new Page(new Y.Doc());
     const a = p2.addComment({ lineKey: 'k', author: { kind: 'agent', name: 'Claude' }, text: 'agent' });
     p1.addComment({ lineKey: 'k', author: { kind: 'user', name: 'Me' }, text: 'mine' });
     const done = p1.addComment({ lineKey: 'k', author: { kind: 'agent', name: 'Claude' }, text: 'old' });
     p1.resolveComment(done);
-    const pages = new Map([
+    const farId = far.addComment({ lineKey: 'k', author: { kind: 'agent', name: 'Claude' }, text: 'on page 30' });
+    const gone = new Page(new Y.Doc());
+    gone.addComment({ lineKey: 'k', author: { kind: 'user', name: 'Me' }, text: 'deleted page' });
+    // The index also has a stale copy of p1's threads (live data wins) and a thread on a deleted page (left out).
+    const index = [...summarizeThreads('p1', p1.comments()).map((t) => ({ ...t, text: 'stale' })), ...summarizeThreads('p30', far.comments()), ...summarizeThreads('gone', gone.comments())];
+    const loaded = new Map([
       ['p2', { page: p2, index: 1, lines: [], comments: p2.comments(), items: [] }],
       ['p1', { page: p1, index: 0, lines: [], comments: p1.comments(), items: [] }],
     ]);
-    expect(commentRows(pages, 'open').map((r) => r.comment.text)).toEqual(['mine', 'agent']);
-    expect(commentRows(pages, 'ai').map((r) => r.comment.id)).toEqual([a]);
-    expect(commentRows(pages, 'resolved').map((r) => r.comment.id)).toEqual([done]);
-    expect(commentRows(pages, 'all')).toHaveLength(3);
+    const order = ['p1', 'p2', ...Array.from({ length: 27 }, (_, i) => `x${i}`), 'p30'];
+    const rows = threadRows(index, loaded, order);
+    // Page order; within a page newest first (sorted here, as comments made in the same millisecond tie).
+    expect(rows.map((r) => r.index)).toEqual([0, 0, 1, 29]);
+    expect(rows.map((r) => [r.index, r.summary.text, !!r.comment]).sort()).toEqual([
+      [0, 'mine', true],
+      [0, 'old', true],
+      [1, 'agent', true],
+      [29, 'on page 30', false],
+    ]);
+    expect(filterRows(rows, 'open').map((r) => r.summary.text)).toEqual(['mine', 'agent', 'on page 30']); // 'old' is resolved
+    expect(filterRows(rows, 'ai').map((r) => r.summary.id)).toEqual([a, farId]);
+    expect(filterRows(rows, 'resolved').map((r) => r.summary.id)).toEqual([done]);
+    expect(filterRows(rows, 'all')).toHaveLength(4);
   });
 
   it('switches to a tab that lists the active thread (resolved threads are only under Resolved)', () => {

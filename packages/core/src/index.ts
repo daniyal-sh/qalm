@@ -3,6 +3,7 @@ export { LOCAL_ORIGIN } from './origin';
 export { encodePoints, decodePoints } from './points';
 export { Notebook, createNotebookDoc, type NotebookInit } from './model/notebook';
 export { Page } from './model/page';
+export { summarizeThread, summarizeThreads, threadNewer, agentEntriesAfter, THREADS_ORIGIN, SUMMARY_TEXT, type ThreadSummary } from './model/threads';
 export { Library, DEFAULT_SWATCHES, MAX_SWATCHES, type Folder, type LibraryEntry, type SwatchTool } from './model/library';
 export { normalizeColor, splitAlpha, withAlpha, inkPaint } from './geometry/color';
 export { createUndoManager, createNotebookUndoManager } from './model/undo';

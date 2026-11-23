@@ -2,6 +2,7 @@ import * as Y from 'yjs';
 import { LOCAL_ORIGIN } from '../origin';
 import { newId } from '../ids';
 import type { Ask, Asset, NotebookMeta, PageInfo, Paper, PaperColor, Size } from '../types';
+import { threadNewer, THREADS_ORIGIN, type ThreadSummary } from './threads';
 
 export interface NotebookInit { id: string; title: string; cover: string; paper: Paper; paperColor: PaperColor; size: Size }
 
@@ -33,6 +34,7 @@ export function createNotebookDoc(init: NotebookInit): Y.Doc {
       ...init,
       orientation: init.size.w > init.size.h ? 'landscape' : 'portrait',
       aiAccess: false,
+      threadsIndexed: true, // a new notebook has no threads to index
       createdAt: now,
       updatedAt: now,
     };
@@ -50,6 +52,7 @@ export class Notebook {
   private readonly pageArr: Y.Array<Y.Map<unknown>>;
   private readonly assetMap: Y.Map<Asset>;
   private readonly askArr: Y.Array<Ask>;
+  private readonly threadMap: Y.Map<ThreadSummary>;
 
   constructor(doc: Y.Doc) {
     this.doc = doc;
@@ -57,6 +60,44 @@ export class Notebook {
     this.pageArr = doc.getArray('pages');
     this.assetMap = doc.getMap('assets');
     this.askArr = doc.getArray('asks');
+    this.threadMap = doc.getMap('threads');
+  }
+
+  // ---- thread index (a summary of every comment thread; the page docs hold the threads themselves) ----
+
+  /** Every indexed thread, including ones on pages since deleted (callers filter by the page list). */
+  threads(): ThreadSummary[] {
+    return [...this.threadMap.values()];
+  }
+
+  /**
+   * Writes the summaries of one page's threads (read from its doc) where they are newer than the index: a thread only
+   * gains entries and, between entries, only goes from open to resolved (a reply reopens it), so a writer holding an
+   * older copy of the page can never roll an entry back. Threads are never removed (comments can't be deleted; threads
+   * on deleted pages are filtered out by the page list). Returns whether anything was written.
+   */
+  putThreads(summaries: readonly ThreadSummary[]): boolean {
+    const set: ThreadSummary[] = [];
+    for (const t of summaries) {
+      const cur = this.threadMap.get(t.id);
+      const next = threadNewer(cur, t);
+      if (next) set.push(next);
+    }
+    if (!set.length) return false;
+    this.doc.transact(() => {
+      for (const t of set) this.threadMap.set(t.id, t);
+    }, THREADS_ORIGIN);
+    return true;
+  }
+
+  /** Has every page's threads been indexed once (`markThreadsIndexed`)? Older notebooks start without the index. */
+  threadsIndexed(): boolean {
+    return this.metaMap.get('threadsIndexed') === true;
+  }
+
+  markThreadsIndexed(): void {
+    if (this.threadsIndexed()) return;
+    this.doc.transact(() => this.metaMap.set('threadsIndexed', true), THREADS_ORIGIN);
   }
 
   private tx(fn: () => void): void {

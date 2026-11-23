@@ -104,6 +104,8 @@ export interface NotebookMeta {
   aiAccess: boolean;
   /** "Pause sharing": agents keep their access but get no updates and can't call tools until resumed. */
   aiPaused?: boolean;
+  /** Every page's comment threads are in the notebook's thread index (set once, by the first full pass). */
+  threadsIndexed?: boolean;
   createdAt: number;
   updatedAt: number;
 }

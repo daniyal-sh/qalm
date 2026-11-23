@@ -1,61 +1,52 @@
-import { threadBox as coreThreadBox, type BBox, type Comment, type Item, type Line } from '@qalm/core';
-
-import type { PageData } from './context';
+import { agentEntriesAfter, threadBox as coreThreadBox, type BBox, type Comment, type Item, type Line, type ThreadSummary } from '@qalm/core';
 
 /** Per notebook, on this device: comment id -> thread entries (comment + replies) the student has seen. */
 export type SeenThreads = Record<string, number>;
 
-const entries = (c: Comment) => [{ author: c.author }, ...c.replies];
+/** What read state needs from a thread: its id and who wrote each entry (a `ThreadSummary`). */
+export type ThreadEntries = Pick<ThreadSummary, 'id' | 'kinds'>;
 
-/** Agent-written entries (comments and replies) across the loaded pages. */
-export function agentEntryCount(pages: Iterable<PageData>): number {
+/** Agent-written entries (comments and replies) across these threads. */
+export function agentEntryCount(threads: Iterable<ThreadEntries>): number {
   let n = 0;
-  for (const d of pages) for (const c of d.comments) n += entries(c).filter((e) => e.author.kind === 'agent').length;
+  for (const t of threads) n += agentEntriesAfter(t);
   return n;
 }
 
-/** The latest agent comment or reply on the loaded pages (by its timestamp). */
-export function newestAgentEntry(pages: Iterable<PageData>): { at: number; name: string } | null {
-  let best: { at: number; name: string } | null = null;
-  for (const d of pages) {
-    for (const c of d.comments) {
-      for (const e of [{ author: c.author, at: c.createdAt }, ...c.replies]) {
-        if (e.author.kind === 'agent' && (!best || e.at > best.at)) best = { at: e.at, name: e.author.name };
-      }
-    }
-  }
+/** The latest agent comment or reply (by its timestamp), notebook-wide. */
+export function newestAgentEntry(threads: Iterable<ThreadSummary>): { at: number; name: string; id: string; pageId: string } | null {
+  let best: { at: number; name: string; id: string; pageId: string } | null = null;
+  for (const t of threads) if (t.lastAgent && (!best || t.lastAgent.at > best.at)) best = { ...t.lastAgent, id: t.id, pageId: t.pageId };
   return best;
 }
 
-/** Agent entries in `c` the student hasn't seen yet. */
-export function unreadIn(c: Comment, seen: SeenThreads): number {
-  return entries(c)
-    .slice(seen[c.id] ?? 0)
-    .filter((e) => e.author.kind === 'agent').length;
+/** Agent entries in thread `t` the student hasn't seen yet. */
+export function unreadIn(t: ThreadEntries, seen: SeenThreads): number {
+  return agentEntriesAfter(t, seen[t.id] ?? 0);
 }
 
-export function unreadCount(pages: Iterable<PageData>, seen: SeenThreads): number {
+export function unreadCount(threads: Iterable<ThreadEntries>, seen: SeenThreads): number {
   let n = 0;
-  for (const d of pages) for (const c of d.comments) n += unreadIn(c, seen);
+  for (const t of threads) n += unreadIn(t, seen);
   return n;
 }
 
 /** `seen` with these threads marked as read up to their latest entry (the same object if nothing changed). */
-export function markSeen(threads: Iterable<Comment>, seen: SeenThreads): SeenThreads {
+export function markSeen(threads: Iterable<ThreadEntries>, seen: SeenThreads): SeenThreads {
   let out = seen;
-  for (const c of threads) {
-    const n = 1 + c.replies.length;
-    if ((out[c.id] ?? 0) >= n) continue;
+  for (const t of threads) {
+    const n = t.kinds.length;
+    if ((out[t.id] ?? 0) >= n) continue;
     if (out === seen) out = { ...seen };
-    out[c.id] = n;
+    out[t.id] = n;
   }
   return out;
 }
 
-/** Ids of the threads in `pages` with unread agent entries. */
-export function unreadIds(pages: Iterable<PageData>, seen: SeenThreads): Set<string> {
+/** Ids of the threads with unread agent entries. */
+export function unreadIds(threads: Iterable<ThreadEntries>, seen: SeenThreads): Set<string> {
   const out = new Set<string>();
-  for (const d of pages) for (const c of d.comments) if (unreadIn(c, seen) > 0) out.add(c.id);
+  for (const t of threads) if (unreadIn(t, seen) > 0) out.add(t.id);
   return out;
 }
 
@@ -114,32 +105,30 @@ export function marginCards(
 export const THINKING_MS = 90_000;
 
 export interface Thinking {
-  /** Pages loaded when the Ask was sent: page id -> comment id -> agent entries in that thread. */
-  before: Record<string, Record<string, number>>;
+  /** Every thread when the Ask was sent: comment id -> agent entries in it. */
+  before: Record<string, number>;
   at: number;
   /** The thread the answer goes in (an Ask about a selection); its margin card shows "Thinking…". */
   commentId?: string;
 }
 
-const agentEntries = (c: Comment) => entries(c).filter((e) => e.author.kind === 'agent').length;
-
-/** Snapshot of the loaded pages (page id -> data) when an Ask is sent. */
-export function startThinking(pages: ReadonlyMap<string, PageData>, at: number, commentId?: string): Thinking {
+/** Snapshot of the notebook's threads when an Ask is sent. */
+export function startThinking(threads: Iterable<ThreadEntries>, at: number, commentId?: string): Thinking {
   const before: Thinking['before'] = {};
-  for (const [id, d] of pages) before[id] = Object.fromEntries(d.comments.map((c) => [c.id, agentEntries(c)]));
+  for (const t of threads) before[t.id] = agentEntriesAfter(t);
   return commentId ? { before, at, commentId } : { before, at };
 }
 
 /**
- * Still thinking until an agent writes on a page that was loaded when the Ask went out (comparing per thread, so
- * pages mounting or unmounting while scrolling neither end it nor keep it going), or after THINKING_MS.
+ * Still thinking until an agent writes anywhere in the notebook (a reply, or a new thread), or after THINKING_MS.
+ * A thread first seen later but started well before the Ask (an older notebook's index filling in) doesn't count.
  */
-export function stillThinking(t: Thinking | null, pages: ReadonlyMap<string, PageData>, now: number): boolean {
+export function stillThinking(t: Thinking | null, threads: Iterable<ThreadEntries & Pick<ThreadSummary, 'createdAt'>>, now: number): boolean {
   if (!t || now - t.at >= THINKING_MS) return false;
-  for (const [id, d] of pages) {
-    const was = t.before[id];
-    if (!was) continue;
-    for (const c of d.comments) if (agentEntries(c) > (was[c.id] ?? 0)) return false;
+  for (const x of threads) {
+    const was = t.before[x.id];
+    if (was === undefined && x.createdAt < t.at - THINKING_MS) continue;
+    if (agentEntriesAfter(x) > (was ?? 0)) return false;
   }
   return true;
 }

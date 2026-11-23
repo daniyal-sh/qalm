@@ -21,6 +21,8 @@ import { Button, IconButton, Pill, TextField, Toggle } from '../ui/controls';
 import { EmptyState, Menu, Row, Sheet, useToast, type MenuItem } from '../ui/layout';
 import { Text } from '../ui/Text';
 import { CommentsPanel } from './CommentsPanel';
+import { threadRows } from './CommentsPanel.logic';
+import { mirrorLoadedThreads, useThreadBackfill, useThreadIndex } from './threadIndex';
 import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence, useReadAfterDwell } from './ai';
 import { marginCards, markSeen, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, unreadIds, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditingText, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
@@ -153,6 +155,14 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       return n;
     });
   }, []);
+  // Comment threads notebook-wide: live on the loaded pages, from the notebook's thread index elsewhere.
+  const threadIndex = useThreadIndex(notebook);
+  const threads = React.useMemo(() => threadRows(threadIndex, pageData, pages.map((p) => p.id)), [threadIndex, pageData, pages]);
+  const summaries = React.useMemo(() => threads.map((r) => r.summary), [threads]);
+  React.useEffect(() => {
+    if (notebook) mirrorLoadedThreads(notebook, pageData);
+  }, [notebook, pageData]);
+  const indexing = useThreadBackfill(s.dm, notebook, notebookId);
   // ---- live agent: presence, "thinking…" after an Ask, unread agent comments ----
   const agents = usePresence(s.user ? s.tm : null, notebookId, !!meta?.aiAccess);
   const [seen, setSeen] = React.useState<SeenThreads>({});
@@ -161,14 +171,14 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     void kvGet<SeenThreads>(seenKey).then((v) => v && setSeen((cur) => ({ ...v, ...cur })));
   }, [seenKey]);
   const [thinking, setThinking] = React.useState<Thinking | null>(null);
-  const isThinking = stillThinking(thinking, pageData, Date.now());
+  const isThinking = stillThinking(thinking, summaries, Date.now());
   React.useEffect(() => {
     if (!thinking) return;
     if (!isThinking) return setThinking(null);
     const t = setTimeout(() => setThinking((x) => (x === thinking ? null : x)), Math.max(0, thinking.at + THINKING_MS - Date.now()));
     return () => clearTimeout(t);
   }, [thinking, isThinking]);
-  const unread = unreadCount(pageData.values(), seen);
+  const unread = unreadCount(summaries, seen);
 
   const lastPage = React.useRef<string | null>(null);
   const touchTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -758,7 +768,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     setAskOpen(false);
     setAskScope(null);
     if (scope?.mode === 'comment') return;
-    if (meta?.aiAccess && agents.length && !meta.aiPaused) setThinking(startThinking(pageData, Date.now(), askThread));
+    if (meta?.aiAccess && agents.length && !meta.aiPaused) setThinking(startThinking(summaries, Date.now(), askThread));
     else showToast(!meta?.aiAccess ? 'Saved. Turn on AI access so agents can see it' : meta.aiPaused ? 'Saved. Sharing is paused' : 'Sent. No agent is following right now');
   };
 
@@ -766,14 +776,14 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const scopePage = askScope ? (heldPage?.page ?? pageData.get(askScope.pageId)?.page) : undefined;
   // Read state (per device): a thread is read once it is opened (its card, pin or panel row tapped), or once its margin
   // card or panel card has been on screen for a moment. The badge counts the agent entries not read that way.
-  const pageDataRef = React.useRef(pageData);
-  pageDataRef.current = pageData;
+  const summariesRef = React.useRef(summaries);
+  summariesRef.current = summaries;
   const markRead = React.useCallback(
     (ids: Iterable<string>) => {
       const want = new Set(ids);
-      const threads = [...pageDataRef.current.values()].flatMap((d) => d.comments).filter((x) => want.has(x.id));
+      const read = summariesRef.current.filter((x) => want.has(x.id));
       setSeen((cur) => {
-        const next = markSeen(threads, cur);
+        const next = markSeen(read, cur);
         if (next !== cur) void kvSet(seenKey, next);
         return next;
       });
@@ -807,7 +817,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     const top = marginTopsRef.current.get(id);
     return top !== undefined && top < scrollYRef.current + viewportRef.current.h && top + MARGIN_CARD_H > scrollYRef.current;
   };
-  const unreadSet = unreadIds(pageData.values(), seen);
+  const unreadSet = unreadIds(summaries, seen);
   const onScreen = [...marginTops.keys()].filter(marginOnScreen);
   if (commentsOpen) onScreen.push(...panelVisible);
   const panelVisibleRef = React.useRef(panelVisible);
@@ -817,14 +827,16 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     1500,
     (ids) => markRead(ids.filter((id) => panelVisibleRef.current.includes(id) || marginOnScreen(id))),
   );
-  // Narrow windows have no margin for cards: say so when an agent writes while the panel is closed.
-  // (Only entries written after the editor opened, so pages loading while scrolling stay quiet.)
-  const newestAgent = newestAgentEntry(pageData.values());
+  // Say so when an agent writes while the panel is closed and its card isn't in view: no margin (narrow windows), or
+  // a page out of view, anywhere in the notebook. (Only entries written after the editor opened.)
+  const newestAgent = newestAgentEntry(summaries);
   const notifiedAt = React.useRef(Date.now());
   React.useEffect(() => {
     if (!newestAgent || newestAgent.at <= notifiedAt.current) return;
     notifiedAt.current = newestAgent.at;
-    if (!commentsOpen && !wideMargin) showToast(`${newestAgent.name} commented. Open comments to read it.`);
+    const i = pages.findIndex((p) => p.id === newestAgent.pageId);
+    if (commentsOpen || (wideMargin && i >= visFirst && i <= visLast)) return;
+    showToast(i >= 0 && i !== current ? `${newestAgent.name} commented on page ${i + 1}. Open comments to read it.` : `${newestAgent.name} commented. Open comments to read it.`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newestAgent?.at]);
 
@@ -981,7 +993,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                                   top={m.top}
                                   width={marginW}
                                   active={m.comment.id === activeCommentId}
-                                  seen={seen}
+                                  unread={unreadSet.has(m.comment.id)}
                                   thinking={isThinking && thinking?.commentId === m.comment.id}
                                   onPress={() => edCtx.setActiveComment(m.comment.id)}
                                 />
@@ -1062,7 +1074,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             <View style={dockComments ? undefined : [StyleSheet.absoluteFill, { alignItems: 'flex-end' }]} pointerEvents="box-none">
               <View style={dockComments ? { flex: 1 } : [{ flex: 1, maxWidth: '100%' }, shadow2]}>
               <CommentsPanel
-                pages={pageData}
+                threads={threads}
+                indexing={indexing}
                 activeId={activeCommentId}
                 onSelect={selectThread}
                 onVisible={setPanelVisible}
