@@ -248,8 +248,9 @@ export function Avatar({ name, kind = 'user', size = 28 }: { name: string; kind?
   );
 }
 
-export const TextField = React.forwardRef<TextInput, TextInputProps & { icon?: IconName; containerStyle?: StyleProp<ViewStyle> }>(
-  function TextField({ icon, containerStyle, style, onFocus, onBlur, ...rest }, ref) {
+export type TextFieldProps = TextInputProps & { icon?: IconName; containerStyle?: StyleProp<ViewStyle>; ref?: React.Ref<React.ComponentRef<typeof TextInput>> };
+
+export function TextField({ icon, containerStyle, style, onFocus, onBlur, ref, ...rest }: TextFieldProps) {
     const { c } = useTheme();
     const [focused, setFocused] = React.useState(false);
     return (
@@ -277,8 +278,7 @@ export const TextField = React.forwardRef<TextInput, TextInputProps & { icon?: I
         />
       </View>
     );
-  },
-);
+}
 
 const styles = StyleSheet.create({
   button: {

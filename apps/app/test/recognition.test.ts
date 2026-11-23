@@ -12,7 +12,7 @@ describe('RecognitionScheduler', () => {
   function setup(result: (keys: string[]) => { key: string; text: string; score: number }[]) {
     const page = new Page(new Y.Doc());
     const calls: string[][] = [];
-    const recognize: RecognizeFn = vi.fn(async (lines) => {
+    const recognize = vi.fn<RecognizeFn>(async (lines) => {
       calls.push(lines.map((l) => l.key));
       return result(lines.map((l) => l.key));
     });
