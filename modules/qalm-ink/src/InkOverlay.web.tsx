@@ -13,7 +13,7 @@ import { traceOutline } from './outlinePath';
 /** CSS px → mm (tech-spec §3). */
 const MM_PER_PX = 0.2646;
 /** A touch on the hand side of the pen is rejected while the pen was seen within this window. */
-const HAND_SIDE_WINDOW_MS = 1500;
+const HAND_SIDE_WINDOW_MS = 3000; // same as iOS and Android
 /** "Beside or below" = no more than this far on the other side of / above the pen tip. */
 const HAND_SIDE_MARGIN_MM = 10;
 /** Movement smaller than this counts as holding still (heldMs). */

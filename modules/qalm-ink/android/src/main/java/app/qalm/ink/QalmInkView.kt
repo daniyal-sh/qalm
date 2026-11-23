@@ -525,7 +525,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     // 4. ACTION_CANCEL / FLAG_CANCELED retracts the stroke in progress.
     val PALM_MAJOR_MM = mapOf("relaxed" to 9.0, "standard" to 7.0, "strict" to 5.0)
     const val PEN_LOCKOUT_MS = 600L
-    const val HAND_SIDE_WINDOW_MS = 1500L
+    const val HAND_SIDE_WINDOW_MS = 3000L // same as iOS
     const val HAND_SIDE_MARGIN_MM = 10.0
     /** Movement below this counts as holding still (heldMs, for shape snapping). */
     const val HOLD_MOVE_MM = 1.0
