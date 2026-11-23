@@ -194,6 +194,11 @@ Q-ink refers to pages by **1-based position** (`p3`). A line without text, or wi
 **One renderer for finished content:** `PageCanvas`, a TypeScript component built on `@shopify/react-native-skia`. It runs on iOS and
 Android (Skia) and on web and Electron (CanvasKit, through react-native-skia's web support). It draws the paper (`paperPattern`), the PDF
 background image, items in z-order (stroke Skia paths built from `strokeOutline`), the selection outline, and comment anchors.
+Ink is drawn from **recorded pictures**, one per chunk of up to 256 consecutive strokes and shapes (text and images stay separate nodes,
+so z-order is exact): a page with thousands of strokes is a handful of Skia nodes, zoom only changes the group's scale, and a new
+stroke re-records only the last chunk. Paths are cached per item and rebuilt only when its geometry changes; a page seen for the first
+time builds them in 8 ms slices in the background (newest chunk first). Replaced paths, pictures and images are freed (on web CanvasKit
+objects are never garbage-collected). Images decode off the main thread on web (`createImageBitmap`).
 
 **Only the stroke in progress is native:** `InkOverlay` (native view `QalmInkView`) is a transparent view stacked exactly over the
 `PageCanvas`. It takes all input and draws only the current stroke with minimum latency, using the same perfect-freehand port:
@@ -237,7 +242,8 @@ QalmInk.renderPdfPage(fileUri: string, pageIndex: number, widthPx: number): Prom
 
 **Zoom:** the app's editor handles pinch (react-native-gesture-handler) between 0.75× and 4×. While pinching, it applies a transform.
 When the gesture ends, it lays the page out again at `width = baseWidth × scale`, which re-renders Skia (vector, so crisp) and re-requests the PDF
-background at the nearest width bucket (1×, 2× or 4× the base width). The overlay maps its own size onto the page, so it needs no zoom state.
+background at the nearest width bucket (1×, 2× or 4× the base width, at most 4096 px; pages mounted off screen use 1×). The overlay maps its
+own size onto the page, so it needs no zoom state.
 
 **Palm rejection** happens inside each overlay, in **millimetres** converted with the screen's density (Android `xdpi`, iOS points ≈ 0.19 mm on iPad,
 web CSS px = 0.2646 mm):
@@ -315,6 +321,12 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
 - **Sync:** the client uses the `y-websocket` provider (with tickets) for each loaded doc, with IndexedDB persistence on web and file persistence on native.
   Native snapshot files are replaced crash-safely: write `.tmp`, rename the old file to `.bak`, rename `.tmp` into place, delete `.bak`; reads fall
   back to a complete `.tmp`, then `.bak`.
+- **Big notebooks:** the editor renders views only for pages near the viewport (mounted pages ±2, plus plain page outlines a few pages further)
+  and re-renders on scroll only when the shown pages change. Page docs open one at a time, nearest the current page first (`pageDocQueue`),
+  and stay in an LRU of 24 idle docs (flushed before they are dropped; pages with undo history are dropped last). PDF renders run 2 at a
+  time, newest first, and are skipped if the page scrolled away; on web the last 24 rendered pages are kept and older bitmaps revoked.
+  Benchmark: `pnpm --filter @qalm/app bench:micro`, and `EXPO_PUBLIC_QALM_BENCH=1 pnpm --filter @qalm/app export:web` then
+  `node apps/app/scripts/bench/run.mjs --label <name>` (headless Chrome: 300-page mixed notebook and a 300-page PDF).
 - **`.qalm` backups** restore as a **new** notebook (new notebook and page ids, title + " (restored)"), copying pages, items, lines, comments, assets
   and meta. A backup never merges into the original, so it works under any account and can't resurrect or collide with the original's history.
 - **Accounts:** notebooks made while signed out live in `lib:local`. On every sign-in and app start while signed in they're moved into the
