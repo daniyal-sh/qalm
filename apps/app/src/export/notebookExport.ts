@@ -86,7 +86,8 @@ export async function restoreQalm(
   const index = new Y.Doc();
   const nb = new Notebook(index);
   index.transact(() => {
-    const meta: NotebookMeta = { ...old, id, title: `${old.title || 'Notebook'} (restored)`, updatedAt: Date.now() };
+    // AI access starts off: a restored copy is a new notebook, and sharing it with agents is the user's choice.
+    const meta: NotebookMeta = { ...old, id, title: `${old.title || 'Notebook'} (restored)`, aiAccess: false, updatedAt: Date.now() };
     const m = index.getMap('meta');
     for (const [k, v] of Object.entries(meta)) if (v !== undefined) m.set(k, v);
     for (const p of src.pages()) nb.addPage({ ...p, id: pageIds.get(p.id)! });

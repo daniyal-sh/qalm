@@ -48,6 +48,7 @@ describe('export wiring', () => {
   it('restores a .qalm backup as a new notebook with new ids, leaving the original untouched', async () => {
     const { src, first, nb } = source();
     const second = nb.addPage({ paper: 'grid' });
+    nb.setMeta({ aiAccess: true });
     const asset: Asset = { id: 'a1', sha256: 'e'.repeat(64), mime: 'image/png', name: 'fig.png', bytes: 3 };
     nb.addAsset(asset);
     const page1 = await src.loadPage(first);
@@ -66,6 +67,7 @@ describe('export wiring', () => {
 
     expect(meta.id).not.toBe('nb1');
     expect(meta.title).toBe('Calc (restored)');
+    expect(meta.aiAccess).toBe(false); // sharing a restored copy with agents is the user's choice
     const index = new Notebook(new Y.Doc());
     Y.applyUpdate(index.doc, written.get(docIds.notebook(meta.id))!);
     expect(index.meta()).toMatchObject({ id: meta.id, title: 'Calc (restored)', cover: '#4338ca', paper: 'ruled' });
