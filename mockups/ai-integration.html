@@ -226,7 +226,7 @@
   <div class="hero">
     <span class="eyebrow"><span class="dot"></span> AI in qalm</span>
     <h1>Your own AI, following your handwriting live.</h1>
-    <p class="lead">qalm has no AI of its own. You connect an agent you already use, such as Claude, ChatGPT or any MCP client, and it runs wherever it runs. While you write, it receives compact updates: a small picture of each changed line plus your device's guess at the text. It answers with comments next to your lines. It can read and comment, but it can never touch your ink.</p>
+    <p class="lead">qalm has no AI of its own. You connect an agent you already use, such as Claude, ChatGPT or any MCP client, and it runs wherever it runs. While you write, it receives compact updates: a small picture of what you just wrote or erased, with the ink around it for context, and it reads your handwriting itself. It answers with comments pinned to your ink. It can read and comment, but it can never touch your ink.</p>
     <div class="pills">
       <span class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg> MCP only, no server-side AI</span>
       <span class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Read and comment, never edit ink</span>
@@ -253,8 +253,8 @@
         <text x="46" y="124" font-size="13" font-weight="600" fill="var(--ink)">You write</text>
         <text x="46" y="143" font-size="12" fill="var(--muted)">ink, shapes, text, PDFs, comments</text>
         <rect x="30" y="166" width="260" height="56" rx="10" fill="var(--surface)" stroke="var(--line)"/>
-        <text x="46" y="190" font-size="13" font-weight="600" fill="var(--ink)">On-device reading (ML Kit)</text>
-        <text x="46" y="209" font-size="12" fill="var(--muted)">a quick text guess per line, free</text>
+        <text x="46" y="190" font-size="13" font-weight="600" fill="var(--ink)">No recognizer on the device</text>
+        <text x="46" y="209" font-size="12" fill="var(--muted)">the agent reads your handwriting</text>
         <rect x="30" y="232" width="260" height="56" rx="10" fill="var(--surface)" stroke="var(--line)"/>
         <text x="46" y="256" font-size="13" font-weight="600" fill="var(--ink)">Controls</text>
         <text x="46" y="275" font-size="12" fill="var(--muted)">AI access · Ask · pause · stop</text>
@@ -271,7 +271,7 @@
         <rect x="400" y="154" width="260" height="46" rx="10" fill="var(--surface)" stroke="var(--line)"/>
         <text x="416" y="182" font-size="13" font-weight="600" fill="var(--ink)">Q-ink encoder: what changed?</text>
         <rect x="400" y="208" width="260" height="46" rx="10" fill="var(--surface)" stroke="var(--line)"/>
-        <text x="416" y="236" font-size="13" font-weight="600" fill="var(--ink)">Image strip: changed lines → PNG</text>
+        <text x="416" y="236" font-size="13" font-weight="600" fill="var(--ink)">Regions: changed ink → PNG</text>
         <rect x="400" y="262" width="260" height="46" rx="10" fill="var(--surface)" stroke="var(--line)"/>
         <text x="416" y="290" font-size="13" font-weight="600" fill="var(--ink)">Access checks on every call</text>
         <rect x="400" y="316" width="260" height="40" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
@@ -288,7 +288,7 @@
         <text x="786" y="190" font-size="13" font-weight="600" fill="var(--ink)">Calls 4 tools</text>
         <text x="786" y="209" font-size="12" fill="var(--muted)" font-family="Geist Mono, monospace">wait · read · transcribe · comment</text>
         <rect x="770" y="232" width="260" height="56" rx="10" fill="var(--surface)" stroke="var(--ai-line)"/>
-        <text x="786" y="256" font-size="13" font-weight="600" fill="var(--ink)">Reads image + guess</text>
+        <text x="786" y="256" font-size="13" font-weight="600" fill="var(--ink)">Reads the image itself</text>
         <text x="786" y="275" font-size="12" fill="var(--muted)">decides what to say, if anything</text>
         <rect x="770" y="298" width="260" height="56" rx="10" fill="var(--surface)" stroke="var(--ai-line)"/>
         <text x="786" y="322" font-size="13" font-weight="600" fill="var(--ink)">Can't edit ink</text>
@@ -321,7 +321,7 @@
         <button class="step" role="tab" aria-selected="false" data-step="1"><span class="n">2</span><span><b>Approve what it can see</b><small>pick notebooks and switches</small></span></button>
         <button class="step" role="tab" aria-selected="false" data-step="2"><span class="n">3</span><span><b>Turn on AI access</b><small>per notebook, off by default</small></span></button>
         <button class="step" role="tab" aria-selected="false" data-step="3"><span class="n">4</span><span><b>Write; pause; it's sent</b><small>after 6 s of pen rest</small></span></button>
-        <button class="step" role="tab" aria-selected="false" data-step="4"><span class="n">5</span><span><b>The agent comments</b><small>a card next to your line</small></span></button>
+        <button class="step" role="tab" aria-selected="false" data-step="4"><span class="n">5</span><span><b>The agent comments</b><small>a card next to your ink</small></span></button>
         <button class="step" role="tab" aria-selected="false" data-step="5"><span class="n">6</span><span><b>Reply in the thread</b><small>it hears you at once</small></span></button>
         <button class="step" role="tab" aria-selected="false" data-step="6"><span class="n">7</span><span><b>Ask about a selection</b><small>lasso, then Ask</small></span></button>
         <button class="step" role="tab" aria-selected="false" data-step="7"><span class="n">8</span><span><b>Pause or stop anytime</b><small>from the pill</small></span></button>
@@ -354,8 +354,8 @@
           <div class="rows" style="margin-top:14px">
             <div class="row"><div class="t"><b>Notebooks and folders</b><small>only these are visible to Claude</small>
               <div style="margin-top:6px"><span class="chip sel">✓ Calculus II</span><span class="chip sel">✓ Folder: Physics</span><span class="chip">Journal</span><span class="chip">Recipes · AI access off</span></div></div></div>
-            <div class="row"><div class="t"><b>Leave comments</b><small>pins notes next to your lines</small></div><span class="toggle on"></span></div>
-            <div class="row"><div class="t"><b>Save transcriptions</b><small>stores its reading of a line; you can edit it</small></div><span class="toggle on"></span></div>
+            <div class="row"><div class="t"><b>Leave comments</b><small>pins notes next to your ink</small></div><span class="toggle on"></span></div>
+            <div class="row"><div class="t"><b>Save transcriptions</b><small>stores what it reads in your handwriting; you can edit it</small></div><span class="toggle on"></span></div>
             <div class="row"><div class="btnrow" style="width:100%"><span class="btn">Deny</span><span class="btn primary">Allow</span></div></div>
           </div>
           <p class="note">Notebooks with AI access off are marked, and they stay hidden from the agent until you switch AI access on, even if granted here. Trashed notebooks never show.</p>
@@ -400,7 +400,7 @@
               </div>
             </div>
           </div>
-          <p class="note">The agent's <code>wait</code> call is open the whole time. When you pause, it returns with only what changed: three new lines, each as a small picture plus your device's text guess.</p>
+          <p class="note">The agent's <code>wait</code> call is open the whole time. When you pause, it returns with only what changed: one region with your new writing in black and the lines around it in grey.</p>
         </div>
 
         <!-- step 5 -->
@@ -425,7 +425,7 @@
                 <circle cx="300" cy="202" r="7" fill="var(--ai)"/><circle cx="300" cy="202" r="2.6" fill="#fff"/>
               </svg></div>
               <div class="margin">
-                <div class="mcard" style="margin-top:34%"><div class="h">Claude <span class="lbl">C1 · L5</span></div>Close! Check the sign of the second term: ∫ x²/3 dx = x³/9, and it's subtracted.</div>
+                <div class="mcard" style="margin-top:34%"><div class="h">Claude <span class="lbl">C1</span></div>Close! Check the sign of the second term: ∫ x²/3 dx = x³/9, and it's subtracted.</div>
               </div>
             </div>
           </div>
@@ -451,7 +451,7 @@
                 <circle cx="300" cy="202" r="7" fill="var(--ai)"/><circle cx="300" cy="202" r="2.6" fill="#fff"/>
               </svg></div>
               <div class="margin">
-                <div class="mcard" style="margin-top:28%"><div class="h">Claude <span class="lbl">C1 · L5</span></div>Close! Check the sign of the second term: ∫ x²/3 dx = x³/9, and it's subtracted.
+                <div class="mcard" style="margin-top:28%"><div class="h">Claude <span class="lbl">C1</span></div>Close! Check the sign of the second term: ∫ x²/3 dx = x³/9, and it's subtracted.
                   <div class="reply"><b style="color:var(--accent)">You</b> · why x²/3 and not x³/3?</div>
                   <div class="reply"><b style="color:var(--ai)">Claude</b> · Because du = (1/x)dx, so x³/3 · 1/x = x²/3.</div>
                 </div>
@@ -463,7 +463,7 @@
 
         <!-- step 7 -->
         <div class="panel" data-panel="6" hidden>
-          <div class="who"><span class="tag">You lasso, tap Ask</span><span class="tag ai">ask C6 p3:L4-5 [3]</span></div>
+          <div class="who"><span class="tag">You lasso, tap Ask</span><span class="tag ai">ask C6 R9 [1]</span></div>
           <div class="device">
             <div class="bar">
               <span class="title"><b>Calculus II</b><small>Page 3 of 12</small></span>
@@ -488,7 +488,7 @@
               <div class="btnrow"><span class="btn">Comment instead</span><span class="btn ai">Send to Claude</span></div>
             </div>
           </div>
-          <p class="note">An Ask about a selection is sent immediately. The agent gets the selected lines as images (even ones it already read), plus a crop of anything that isn't whole lines, like your sketch. Its answer is anchored to the selection, and the thread follows the ink if you move it. While you wait, the thread shows <span class="thinking">Thinking<span class="dots"><i></i><i></i><i></i></span></span></p>
+          <p class="note">An Ask about a selection is sent immediately. The agent gets the selection as one image row (even ink it already read), in black, with the ink around it in grey. Its answer is anchored to the selection, and the thread follows the ink if you move it. While you wait, the thread shows <span class="thinking">Thinking<span class="dots"><i></i><i></i><i></i></span></span></p>
         </div>
 
         <!-- step 8 -->
@@ -533,9 +533,9 @@
         <p class="small muted" style="margin:0">Shows while an agent is actively waiting on this notebook (or called in the last minute). Tap for what it can do, plus Pause and Stop.</p>
       </div>
       <div class="card">
-        <div class="mcard" style="margin-bottom:10px"><div class="h">Claude <span class="lbl">C3 · L7</span></div>Nice, that's correct.</div>
+        <div class="mcard" style="margin-bottom:10px"><div class="h">Claude <span class="lbl">C3</span></div>Nice, that's correct.</div>
         <h3>Margin cards and pins</h3>
-        <p class="small muted" style="margin:0">Comments sit beside their line, follow the ink if you move it, and say "Ink removed" if you delete it. Tap one to open its thread.</p>
+        <p class="small muted" style="margin:0">Comments sit beside their ink, follow it if you move it, and say "Ink removed" if you delete it. Tap one to open its thread.</p>
       </div>
       <div class="card">
         <div style="display:flex;gap:6px;margin-bottom:10px"><span class="btn" style="flex:none">Open</span><span class="btn" style="flex:none;color:var(--ai)">AI</span><span class="btn" style="flex:none">Resolved</span></div>
@@ -559,26 +559,25 @@
       </div>
     </div>
     <div class="card" style="margin-top:16px">
-      <h3>Readings <span class="tag soon">Building now</span></h3>
-      <p class="small muted" style="margin:0">Select a line and tap "Reading" to see the saved text: your device's guess or the agent's transcription. Edit it to fix it. Your edit is marked as yours, and agents can never overwrite it; they're told to leave a comment instead.</p>
+      <h3>Readings</h3>
+      <p class="small muted" style="margin:0">Select some ink and tap "Reading" to see what the agent read there (marked "stale" if you changed the ink since). Edit it to fix it. Your edit is marked as yours, and agents can never overwrite it; they're told to leave a comment instead.</p>
     </div>
   </section>
 
   <!-- 4. WHAT THE AGENT SEES -->
   <section id="agent">
     <h2>What the agent actually receives</h2>
-    <p class="sub">Not screenshots of whole pages. Each update is a few lines of plain text ("Q-ink Live"), plus one small image strip with only the lines that changed. That's why it's accurate and cheap.</p>
+    <p class="sub">Not screenshots of whole pages. Each update is a few lines of plain text ("Q-ink Live"), plus one small image with only the ink that changed (and the ink around it). That's why it's accurate and cheap.</p>
     <div class="grid g2">
       <div>
         <div class="code"><span class="c"># one update, after a 6 s pause</span>
-<span class="k">#q</span> s=calc2 r=431 p3 <span class="s">"Q3 ∫x^2 ln x dx"</span>
- L3 v=x^3/3
-<span class="g">+L4</span> <span class="b">[1]</span> ~<span class="s">"=x3/3 lnx - ∫x3/3 1/x dx"</span>
-<span class="g">+L5</span> <span class="b">[2]</span> ~<span class="s">"=x3/3lnx-x3/9"</span>
-<span class="r">-L6</span>
+<span class="k">#q</span> s=calc2 r=431 p3 1000x1415
+<span class="g">R7</span> <span class="b">[1]</span> p3 @120,300 610x80 +24 <span class="r">-2</span> (was R5)
+<span class="g">R8</span> <span class="b">[2]</span> p3 @120,520 420x40 +11
+R4 p3 @120,180 300x40 <span class="s">"v = x^3/3"</span>
 re C1 <span class="s">"why x²/3 and not x³/3?"</span>
-note C7 p3:L5 <span class="s">"same as the book?"</span>
-ask <span class="s">"is L5 right?"</span></div>
+note C7 p3@120,520,420,40 <span class="s">"same as the book?"</span>
+ask <span class="s">"is R8 right?"</span></div>
         <div class="strip" style="margin-top:12px">
           <svg viewBox="0 0 520 120" aria-label="Image strip: row 1 and row 2">
             <rect width="520" height="120" fill="#fff"/>
@@ -593,25 +592,23 @@ ask <span class="s">"is L5 right?"</span></div>
             </g>
           </svg>
         </div>
-        <p class="note">The image is rendered on the server from your strokes, in black on white with row numbers, so the agent can read handwriting the on-device guess got wrong (like "x3" that is really x³).</p>
+        <p class="note">The image is rendered on the server from your strokes, on white with row numbers: new ink black, the ink around it grey, erased strokes faint red. The agent reads it with its own vision, exponents and integral signs included.</p>
       </div>
       <div class="card tablewrap">
         <table>
           <thead><tr><th>Element</th><th>Meaning</th></tr></thead>
           <tbody>
-            <tr><td><code>#q s= r= p3 "…"</code></td><td>Header: session, revision, current page and its first line</td></tr>
-            <tr><td><code>&nbsp;L3</code></td><td>One unchanged line above the change, for context</td></tr>
-            <tr><td><code>+L4</code> <code>~L4</code> <code>-L6</code></td><td>Added, changed, removed line. Labels are stable per page; drawings are <code>D1</code>, <code>D2</code>…</td></tr>
-            <tr><td><code>[1]</code></td><td>This line is row 1 of the attached image</td></tr>
-            <tr><td><code>~"…"</code></td><td>Your device's guess at the text (ML Kit on iPad and Android; none on desktop yet)</td></tr>
-            <tr><td><code>"…"</code> (no <code>~</code>)</td><td>Trusted text already saved with <code>transcribe</code>: sent as text, no image</td></tr>
+            <tr><td><code>#q s= r= p3 1000x1415</code></td><td>Header: session, revision, current page and its size on a 0–1000 grid</td></tr>
+            <tr><td><code>R7 [1] p3 @x,y wxh +24 -2</code></td><td>Region R7 is row 1 of the image: where it is, how many strokes were added and erased. Labels are never reused</td></tr>
+            <tr><td><code>(was R5)</code></td><td>R7 replaces a region the agent was sent before</td></tr>
+            <tr><td><code>R4 … "…"</code></td><td>A region the agent already read (with <code>transcribe</code>): sent as text, no image</td></tr>
             <tr><td><code>ask "…"</code></td><td>You tapped Ask, with your question</td></tr>
-            <tr><td><code>ask C6 p3:L4-5 [3] "…"</code></td><td>Ask about a selection: answer in thread C6; <code>[3]</code> is a crop of the part that isn't whole lines</td></tr>
-            <tr><td><code>note C7 p3:L5 "…"</code></td><td>You started thread C7 on a line</td></tr>
+            <tr><td><code>ask C6 R9 [3] "…"</code></td><td>Ask about a selection: answer in thread C6; region R9 is your selection (black) and the ink around it (grey)</td></tr>
+            <tr><td><code>note C7 p3@x,y,w,h "…"</code></td><td>You started thread C7 on the ink in that box</td></tr>
             <tr><td><code>re C1 "…"</code></td><td>You replied in thread C1</td></tr>
           </tbody>
         </table>
-        <p class="note" style="padding:0 10px">Updates are self-contained, so the agent's app can trim old ones. <span class="tag soon">Coming</span> When an agent first opens a page it gets only the open threads, each with its latest message, not the whole history.</p>
+        <p class="note" style="padding:0 10px">Updates are self-contained, so the agent's app can trim old ones. When an agent first opens a page it gets the page's ink as regions and only the open threads, each with its latest message, not the whole history.</p>
       </div>
     </div>
   </section>
@@ -625,9 +622,9 @@ ask <span class="s">"is L5 right?"</span></div>
         <thead><tr><th>Tool</th><th>Arguments</th><th>What it does</th><th>Example</th></tr></thead>
         <tbody>
           <tr><td><code>wait</code></td><td><code>s?</code></td><td>Waits for the next update (long-poll). Without <code>s</code>, lists the live sessions it can see.</td><td><code>wait(s:"calc2")</code> → the update above</td></tr>
-          <tr><td><code>read</code></td><td><code>ref</code></td><td>Reads anything on demand, as text plus an image strip where needed.</td><td><code>read("p3:L2-9")</code>, <code>read("outline")</code>, <code>read("pdf:p2")</code></td></tr>
-          <tr><td><code>transcribe</code></td><td><code>ref</code>, <code>text</code></td><td>Saves its reading of a line, so later updates send text instead of an image. Refused if you wrote that line's text yourself.</td><td><code>transcribe("p3:L5", "x^3/3 ln x - x^3/9")</code></td></tr>
-          <tr><td><code>comment</code></td><td><code>ref</code> or <code>thread</code>, <code>text</code>, <code>resolve?</code></td><td>Starts a thread next to a line, or replies in one. Never changes ink.</td><td><code>comment(thread:"C1", "Because du = …")</code></td></tr>
+          <tr><td><code>read</code></td><td><code>ref</code></td><td>Reads anything on demand, as text plus an image where needed.</td><td><code>read("R7")</code>, <code>read("p3@120,300,610,80")</code>, <code>read("p3")</code>, <code>read("outline")</code>, <code>read("pdf:p2")</code></td></tr>
+          <tr><td><code>transcribe</code></td><td><code>ref</code>, <code>text</code></td><td>Saves its reading of a region, so later updates send text instead of an image until you change that ink. Refused where you wrote your own reading.</td><td><code>transcribe("R8", "x^3/3 ln x - x^3/9")</code></td></tr>
+          <tr><td><code>comment</code></td><td><code>ref</code> or <code>thread</code>, <code>text</code>, <code>resolve?</code></td><td>Starts a thread on a region, a box or a page (it follows the ink), or replies in one. Never changes ink.</td><td><code>comment(thread:"C1", "Because du = …")</code></td></tr>
         </tbody>
       </table>
     </div>
