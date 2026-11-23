@@ -139,6 +139,36 @@ function cleanBox(b: BBox): BBox {
   return [Math.min(v[0]!, v[2]!), Math.min(v[1]!, v[3]!), Math.max(v[0]!, v[2]!), Math.max(v[1]!, v[3]!)];
 }
 
+const isBox = (b: unknown): b is BBox => Array.isArray(b) && b.length === 4 && b.every((x) => typeof x === 'number');
+
+/**
+ * An Ask as the encoder can use it, or null if it can't be used at all. Asks are client-written Yjs data, so
+ * nothing about their shape is trusted: a bad `sel` or `commentId` is dropped, a missing `text` becomes ''.
+ * `onBad` hears what was wrong (for the server's log).
+ */
+export function cleanAsk(raw: unknown, onBad?: (why: string) => void): QinkAsk | null {
+  if (!raw || typeof raw !== 'object') {
+    onBad?.('not an object');
+    return null;
+  }
+  const a = raw as Record<string, unknown>;
+  if (typeof a.pageId !== 'string' || !a.pageId) {
+    onBad?.('no pageId');
+    return null;
+  }
+  if (a.text !== undefined && typeof a.text !== 'string') onBad?.('text is not a string');
+  const out: QinkAsk = { pageId: a.pageId, text: typeof a.text === 'string' ? a.text : '' };
+  if (a.sel !== undefined) {
+    const sel = a.sel as Record<string, unknown> | null;
+    const itemIds = sel && typeof sel === 'object' ? sel.itemIds : undefined;
+    if (Array.isArray(itemIds) && itemIds.every((x) => typeof x === 'string') && isBox(sel!.bbox)) out.sel = { itemIds, bbox: sel!.bbox };
+    else onBad?.('bad sel (dropped)');
+  }
+  if (typeof a.commentId === 'string' && a.commentId) out.commentId = a.commentId;
+  else if (a.commentId !== undefined) onBad?.('bad commentId (dropped)');
+  return out;
+}
+
 class Rows {
   readonly keys: (string | BBox)[] = [];
   readonly labels: string[] = [];
@@ -167,6 +197,8 @@ export function encodeQinkUpdate(
 ): { text: string; image: QinkImage | null; snapshot: QinkSnapshot; seen: QinkSeen } {
   const threads = opts.threads ?? emptyThreads();
   const seen: QinkSeen = { ...opts.seen };
+  // One malformed ask must never make the whole update throw (every later wait would fail too).
+  const asks = (opts.asks ?? []).map((a) => cleanAsk(a)).filter((a): a is QinkAsk => !!a);
   const pos = new Map(nb.pages().map((p, i) => [p.id, i + 1]));
   const snapshot: QinkSnapshot = { ...prev };
   const all: Section[] = [];
@@ -193,11 +225,10 @@ export function encodeQinkUpdate(
   }
 
   const changedSections = all.filter((s) => s.changed.length || s.removed.length);
-  const askPage = opts.asks?.length ? opts.asks[opts.asks.length - 1]!.pageId : undefined;
+  const askPage = asks.length ? asks[asks.length - 1]!.pageId : undefined;
   const current = all.find((s) => s.pageId === askPage) ?? changedSections[changedSections.length - 1] ?? all[0];
 
   // Selection asks on the current page: their lines always go into the image (even unchanged or trusted ones).
-  const asks = opts.asks ?? [];
   const selected = new Set<string>();
   if (current) {
     for (const a of asks) {
@@ -242,8 +273,19 @@ export function encodeQinkUpdate(
   // The student's new comments and replies, on every page in this update.
   for (const s of all) {
     const byKey = labels[s.pageId]!.byKey;
+    const firstLook = !(s.pageId in prev);
     for (const c of pages[s.pageId]!.comments()) {
       const entries = [{ author: c.author, text: c.text }, ...c.replies];
+      if (firstLook && seen[c.id] === undefined) {
+        // A page this agent has never had an update for: no replay of its history. Only the open threads, each with
+        // its latest message; resolved ones are skipped. The whole thread is a `read` away (qink-live.md §2).
+        seen[c.id] = entries.length;
+        if (c.resolved) continue;
+        const last = entries[entries.length - 1]!;
+        const label = threadLabel(threads, c.id, s.pageId);
+        out.push(`open ${label} ${threadRef(s.pos, c, s.sorted, byKey)} ${who(last.author)} ${quote(clip(last.text))}`);
+        continue;
+      }
       const from = Math.max(seen[c.id] ?? 0, c.ask ? 1 : 0);
       for (let i = from; i < entries.length; i++) {
         const e = entries[i]!;
@@ -278,6 +320,26 @@ export function encodeQinkUpdate(
     snapshot,
     seen,
   };
+}
+
+const who = (a: Comment['author']) => (a.kind === 'agent' ? 'agent' : 'student');
+
+/** `read C5`: the whole thread, oldest entry first, each marked `student` or `agent`. */
+export function encodeQinkThread(nb: Notebook, pages: Record<string, Page>, labels: QinkLabels, threads: QinkThreads, ref: string): string {
+  const { pageId, commentId } = resolveThread(threads, ref);
+  const label = threads.byId[commentId]!.label;
+  const n = nb.pages().findIndex((p) => p.id === pageId) + 1;
+  const page = pages[pageId];
+  if (!n) throw new Error(`Thread ${label} was on a deleted page`);
+  if (!page) throw new Error(`Page p${n} is not loaded`);
+  const c = page.comments().find((x) => x.id === commentId);
+  if (!c) throw new Error(`Thread ${label} was deleted`);
+  const lines = page.lines();
+  assignLabels(labels, pageId, lines);
+  const sorted = [...lines].sort(readingOrder);
+  const out = [`#q ${label} ${threadRef(n, c, sorted, labels[pageId]!.byKey)}${c.resolved ? ' resolved' : ''}`];
+  for (const e of [{ author: c.author, text: c.text }, ...c.replies]) out.push(`${who(e.author)} ${quote(clip(e.text))}`);
+  return out.join('\n');
 }
 
 const PAGE_REF = /^p(\d+)(?::([LD])(\d+)(?:-[LD]?(\d+))?)?$/;

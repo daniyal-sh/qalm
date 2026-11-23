@@ -5,6 +5,8 @@ import {
   emptyThreads,
   encodeQinkUpdate,
   encodeQinkRead,
+  encodeQinkThread,
+  cleanAsk,
   resolveRef,
   resolveThread,
   renderLinesStripSvg,
@@ -13,6 +15,7 @@ import {
   type QinkSnapshot,
   type QinkImage,
   type QinkSeen,
+  type QinkAsk,
   type QinkThreads,
 } from '@qalm/core';
 import type { Env } from './env';
@@ -231,7 +234,11 @@ export class AgentHub {
     const st = this.state(clientId);
     const nb = this.nb();
     const allAsks = nb.asks();
-    const asks = allAsks.slice(st.askCount);
+    // Asks are client-written: a malformed one is logged and skipped (askCount still moves past it below).
+    const asks = allAsks.slice(st.askCount).flatMap((a, i) => {
+      const c = cleanAsk(a, (why) => console.warn(`qalm agent: notebook ${this.notebookId} ask #${st.askCount + i}: ${why}`));
+      return c ? [c] : [];
+    }) satisfies QinkAsk[];
     const live = new Set(nb.pages().map((p) => p.id));
     const changedIds = Object.entries(this.changed)
       .filter(([id, at]) => at > st.deliveredAt && live.has(id))
@@ -268,11 +275,20 @@ export class AgentHub {
     return { text: u.text, svg: this.stripSvg(pages, u.image), changed: true };
   }
 
-  /** `outline`, `p3`, `p3:L2-9`, `pdf:p2`. */
+  /** `outline`, `p3`, `p3:L2-9`, `pdf:p2`, or a whole thread `C5`. */
   async read(ref: string, who: AgentWho): Promise<AgentResult> {
     this.touch(who);
     this.requireAccess();
     const nb = this.nb();
+    if (/^c\d+$/i.test(ref.trim())) {
+      const threads = this.threads();
+      const pages = await this.loadPages([resolveThread(threads, ref).pageId].filter((id) => nb.pages().some((p) => p.id === id)));
+      this.requireAccess();
+      const labels = this.labels();
+      const text = encodeQinkThread(nb, pages, labels, threads, ref);
+      this.r.kvPut('labels', labels);
+      return { text, svg: null, changed: false };
+    }
     const infos = nb.pages();
     let ids: string[] = [];
     if (ref === 'outline') ids = infos.map((p) => p.id);

@@ -1,6 +1,6 @@
 # Q-ink Live: live notes for AI agents
 
-Status: draft v0.3 (comment threads, Ask about a selection) · Owner: qalm-core / mcp server
+Status: draft v0.4 (comment threads, Ask about a selection, open threads on a first look) · Owner: qalm-core / mcp server
 
 Goal: an agent anywhere can follow a live note-taking session accurately with few tokens.
 Keep it simple. There's no server-side AI, no analyzers and no memory store.
@@ -51,6 +51,7 @@ ask "is L5 right?"
 | `ask C6 p3:L4-6 [n] "…"` | an Ask about a selection: its thread (`C6`: answer there), the lines it covers, and `[n]`, a crop of the selected region, only when the selection isn't whole lines (part of a line, a text box, a picture). With no ink lines selected the ref is just `p3` |
 | `note C5 p3:L4 "…"` | the student started thread `C5` on L4 (`p3:L4-6` for a selection, `p3` when it covers no ink line) |
 | `re C3 "…"` | the student replied in thread `C3` |
+| `open C2 p3:L4 student "…"` | an unresolved thread the agent hasn't been sent before, on a page it is seeing for the first time, with only its latest message (`student` or `agent` says who wrote it). `read C2` gives the whole thread |
 
 The **image** is a single strip of every line marked `[n]`, rendered from the strokes in black on white with row numbers.
 There's one image per update.
@@ -72,12 +73,32 @@ Drawings that aren't lines are numbered `D1` and also go into the image strip.
 are sent (each entry once per agent); the agent's own comments never come back to it. Comment text is cut at 1000
 characters.
 
+**A new agent gets no replay of history.** Asks from before it connected are not sent. The first time a page is in one
+of its updates (it changed, or has an Ask), that page's threads are not replayed either: each **unresolved** thread goes
+out once as `open C2 p3:L4 student "latest message"`, and resolved threads are skipped. After that the page works as
+above (only new entries). Anything else is a `read` away: `p3` for the ink, `C2` for a whole thread.
+
+**Malformed Asks.** Asks are written by clients, so the server checks each one. A bad selection or thread id is dropped
+(the Ask goes out as a plain `ask`), an Ask with no page is skipped, and either is logged. One bad Ask never stops
+updates.
+
+A thread read lists every entry, oldest first:
+
+```
+#q C5 p3:L4
+student "is this right?"
+agent "Check the sign"
+student "which sign?"
+```
+
+The header ends in ` resolved` for a resolved thread.
+
 ## 3. MCP tools (4)
 
 | Tool | Args | Does |
 |---|---|---|
 | `wait` | `s?` | waits for the next update (long-poll). With no `s`, it lists the live sessions the agent can see |
-| `read` | `ref` | anything on demand: `p3`, `p3:L2-9`, `outline` or `pdf:p2`, as text plus an image strip where needed |
+| `read` | `ref` | anything on demand: `p3`, `p3:L2-9`, `outline`, `pdf:p2` or a thread `C5`, as text plus an image strip where needed |
 | `transcribe` | `ref`, `text` | saves the agent's reading of a line. The student can edit it |
 | `comment` | `ref` or `thread`, `text`, `resolve?` | with `ref` (`p3:L4`) starts a thread next to a line and says its label (`as thread C8`); with `thread` (`C3`) replies in it. `resolve` also marks the thread resolved: use it only when the thread is trivially done. Never changes ink |
 

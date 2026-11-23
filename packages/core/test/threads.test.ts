@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { anchorInkRemoved, emptyThreads, encodeQinkUpdate, labelList, LOCAL_ORIGIN, renderLinesStripSvg, resolveThread, threadBox, threadLabel } from '../src';
+import { anchorInkRemoved, cleanAsk, emptyThreads, encodeQinkThread, encodeQinkUpdate, labelList, LOCAL_ORIGIN, renderLinesStripSvg, resolveThread, threadBox, threadLabel } from '../src';
 import type { QinkLabels, TextItem } from '../src';
 import { newNotebook, newPage, stroke } from './helpers';
 
@@ -122,5 +122,74 @@ describe('Q-ink threads', () => {
     const c = page.comments()[0]!;
     expect(threadBox(c, page.items(), page.lines())).toEqual([1, 2, 3, 4]);
     expect(anchorInkRemoved(c, page.items())).toBe(false);
+  });
+
+  it('a malformed ask is skipped or loses its bad selection; the rest of the update still goes out', () => {
+    const { nb, pid, page, labels, threads, u0 } = setup();
+    page.addItem(stroke('k5', 50, 300, 150, 320));
+    const bad = [
+      { pageId: pid, text: 'no box', sel: { itemIds: ['k1'] } },
+      { pageId: pid, text: 'ids not an array', sel: { itemIds: 'k1', bbox: [0, 0, 1, 1] } },
+      { text: 'no page' },
+      null,
+      { pageId: pid, text: 42, commentId: 7 },
+      { pageId: pid, text: 'fine', sel: { itemIds: ['k1'], bbox: [50, 100, 150, 120] } },
+    ] as never[];
+    const u = encodeQinkUpdate(nb, { [pid]: page }, labels, u0.snapshot, { session: 's', rev: 2, asks: bad, threads, seen: u0.seen });
+    expect(u.text.split('\n')).toEqual([
+      '#q s=s r=2 p1 "y=2"',
+      ' L4',
+      '+L5 [1]',
+      ' L1 [2]',
+      'ask "no box"', // the bad selection is dropped: a plain ask
+      'ask "ids not an array"',
+      'ask ""',
+      'ask p1:L1 "fine"',
+    ]);
+    const why: string[] = [];
+    expect(cleanAsk({ pageId: pid, sel: { itemIds: ['x'] } }, (w) => why.push(w))).toEqual({ pageId: pid, text: '' });
+    expect(why).toEqual(['bad sel (dropped)']);
+  });
+
+  it("an agent's first look at a page sends only its open threads, each with the latest message", () => {
+    const nb = newNotebook();
+    const pid = nb.pages()[0]!.id;
+    const page = newPage();
+    page.addItem(stroke('k1', 50, 100, 150, 120));
+    page.addItem(stroke('k2', 50, 140, 150, 160));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1000);
+    const done = page.addComment({ lineKey: 'k1', author: you, text: 'old comment from last week' });
+    page.replyToComment(done, tutor, 'answered');
+    page.resolveComment(done);
+    vi.setSystemTime(2000);
+    const open = page.addComment({ lineKey: 'k2', author: you, text: 'is this right?' });
+    page.replyToComment(open, tutor, 'Check the sign');
+    page.replyToComment(open, you, 'which sign?');
+    vi.setSystemTime(3000);
+    page.addComment({ lineKey: 'k1', author: tutor, text: 'nice' });
+
+    const labels: QinkLabels = {};
+    const threads = emptyThreads();
+    const u = encodeQinkUpdate(nb, { [pid]: page }, labels, {}, { session: 's', rev: 1, threads });
+    const notes = u.text.split('\n').filter((l) => /^(open|note|re) /.test(l));
+    expect(notes).toEqual(['open C1 p1:L2 student "which sign?"', 'open C2 p1:L1 agent "nice"']);
+    expect(u.text).not.toContain('old comment');
+
+    // After that, only new entries, as before.
+    const again = encodeQinkUpdate(nb, { [pid]: page }, labels, u.snapshot, { session: 's', rev: 2, threads, seen: u.seen });
+    expect(again.text).toBe('#q s=s r=2 p1');
+    page.replyToComment(open, you, 'the minus?');
+    page.replyToComment(done, you, 'one more thing');
+    const later = encodeQinkUpdate(nb, { [pid]: page }, labels, again.snapshot, { session: 's', rev: 3, threads, seen: again.seen });
+    expect(later.text.split('\n').slice(1)).toEqual(['re C3 "one more thing"', 're C1 "the minus?"']);
+
+    // The whole thread, on demand.
+    expect(encodeQinkThread(nb, { [pid]: page }, labels, threads, 'c1')).toBe(
+      ['#q C1 p1:L2', 'student "is this right?"', 'agent "Check the sign"', 'student "which sign?"', 'student "the minus?"'].join('\n'),
+    );
+    page.resolveComment(open);
+    expect(encodeQinkThread(nb, { [pid]: page }, labels, threads, 'C1').split('\n')[0]).toBe('#q C1 p1:L2 resolved');
+    expect(() => encodeQinkThread(nb, { [pid]: page }, labels, threads, 'C9')).toThrow('No thread C9');
   });
 });
