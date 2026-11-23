@@ -112,6 +112,7 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
   }, [items, drag, sel, selSet, editing]);
   const selBox = React.useMemo(() => (sel ? unionBBox(shown.filter((i) => selSet.has(i.id)).map(itemBBox)) : null), [shown, sel, selSet]);
 
+  const rootRef = React.useRef<React.ComponentRef<typeof View>>(null);
   const pageRef = React.useRef(page);
   pageRef.current = page;
   const selRef = React.useRef(sel);
@@ -176,7 +177,7 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
   };
 
   return (
-    <View style={{ width, height }}>
+    <View ref={rootRef} style={{ width, height }}>
       <PageCanvas
         info={info}
         items={shown}
@@ -214,7 +215,11 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
         <Pressable
           accessibilityLabel={`Add text on page ${index + 1}`}
           style={StyleSheet.absoluteFill}
-          onPress={(e) => tapText(e.nativeEvent.locationX / scale, e.nativeEvent.locationY / scale)}
+          onPress={(e) => {
+            // locationX/Y are relative to whatever child was hit (unreliable on web); measure the page instead.
+            const { pageX, pageY } = e.nativeEvent;
+            rootRef.current?.measureInWindow((x, y) => tapText((pageX - x) / scale, (pageY - y) / scale));
+          }}
         />
       ) : null}
       {selBox && t.tool === 'lasso' ? (
