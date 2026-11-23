@@ -51,7 +51,9 @@ describe('clipboard', () => {
     const fresh2 = await import('../src/editor/clipboard');
     expect(fresh2.getClip()).toBeNull();
     await fresh2.persistClip(store);
-    expect(fresh2.getClip()).toEqual({ items: [img], assets: [asset], pageId: 'p1', pastes: 1 });
+    expect(fresh2.getClip()).toEqual({ items: [img], assets: [asset], pageId: 'p1', id: expect.any(String), pastes: 1 });
+    // Restored clips count as older than any system clipboard change (paste from other apps).
+    expect(fresh2.clipSetAt()).toBe(0);
     const next = fresh2.pasteItems(fresh2.getClip()!, 'p1', fresh)[0] as ImageItem;
     expect(next.x).toBe(2 * PASTE_STEP);
 
