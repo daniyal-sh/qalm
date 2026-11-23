@@ -103,21 +103,28 @@ export function penButtonTool(gesture: 'eraser' | 'last' | 'none', tool: ToolId,
 }
 
 export interface Anchor {
+  /** the line's key, or the comment's id for a thread on a selection */
   lineKey: string;
   bbox: BBox;
   active: boolean;
 }
 
-/** Comment pins for a page: one per line with an open comment (plus the active comment's line, even if resolved). */
+/**
+ * Comment pins for a page: one per line with an open comment, one per open thread on a selection (at its box),
+ * plus the active comment's, even if resolved.
+ */
 export function commentAnchors(lines: Line[], comments: Comment[], activeCommentId: string | null): Anchor[] {
   const byKey = new Map(lines.map((l) => [l.key, l]));
-  const activeKey = comments.find((c) => c.id === activeCommentId)?.lineKey;
+  const keyOf = (c: Comment) => (c.anchor ? c.id : c.lineKey);
+  const active = comments.find((c) => c.id === activeCommentId);
+  const activeKey = active ? keyOf(active) : undefined;
   const out = new Map<string, Anchor>();
   for (const c of comments) {
     if (c.resolved && c.id !== activeCommentId) continue;
-    const l = byKey.get(c.lineKey);
-    if (!l) continue;
-    out.set(l.key, { lineKey: l.key, bbox: l.bbox, active: activeKey === l.key });
+    const bbox = c.anchor ?? byKey.get(c.lineKey)?.bbox;
+    if (!bbox) continue;
+    const key = keyOf(c);
+    out.set(key, { lineKey: key, bbox, active: activeKey === key });
   }
   return [...out.values()];
 }

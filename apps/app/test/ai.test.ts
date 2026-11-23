@@ -104,3 +104,15 @@ describe('live agent logic', () => {
     expect(presenceCan(p.agents)).toBe('Read and comment');
   });
 });
+
+describe('selection threads', () => {
+  it('pin at their selection box, keyed by comment id', async () => {
+    const { commentAnchors } = await import('../src/editor/view');
+    const lines = [line('a', 100)];
+    const anchors = commentAnchors(lines, [comment('c1', 'a'), comment('s1', 'a', { anchor: [300, 300, 340, 330] }), comment('s2', '', { anchor: [10, 10, 20, 20], resolved: true })], 's1');
+    expect(anchors).toEqual([
+      { lineKey: 'a', bbox: [50, 100, 200, 120], active: false },
+      { lineKey: 's1', bbox: [300, 300, 340, 330], active: true },
+    ]);
+  });
+});
