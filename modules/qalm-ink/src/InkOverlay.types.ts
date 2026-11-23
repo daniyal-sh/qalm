@@ -43,6 +43,10 @@ export interface EraseEvent {
   path: { x: number; y: number }[];
 }
 export interface LassoEvent {
+  /**
+   * Every point of the lasso drag (page units), also for a tap (1 or 2 points): the app treats a lasso that hardly
+   * moved as a tap. With `lassoMode: 'rect'` the rectangle runs from the first point to the last.
+   */
   polygon: { x: number; y: number }[];
 }
 export interface PenButtonEvent {
@@ -63,6 +67,8 @@ export interface InkOverlayProps {
   penStyle?: InkPenStyle;
   /** pen only; default 0 (none) */
   smoothing?: InkSmoothing;
+  /** lasso only: a freeform loop (default) or a rectangle from where the drag started to where it is now */
+  lassoMode?: 'free' | 'rect';
   input: InkInputSettings;
   /**
    * Stroke ids already drawn by PageCanvas: pass the newest ids from PageCanvas's `onDrawn`, not the page's items (Skia

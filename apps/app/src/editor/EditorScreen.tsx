@@ -51,6 +51,7 @@ const DEFAULT_TOOLS: ToolState = {
   hlWidth: HIGHLIGHTER_WIDTH,
   eraserRadius: 10,
   snapShapes: true,
+  lassoMode: 'free',
 };
 
 type MenuState = { items: MenuItem[]; anchor?: { x: number; y: number; align?: 'left' | 'right' } } | null;

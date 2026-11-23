@@ -121,10 +121,10 @@ describe('PDF import', () => {
 describe('selection transforms', () => {
   it('moves and scales items about an origin', () => {
     const s = stroke(10, 10, 30, 10);
-    const t = transformItem(s, { dx: 5, dy: 0, s: 2, ox: 10, oy: 10 });
+    const t = transformItem(s, { dx: 5, dy: 0, s: 2, r: 0, ox: 10, oy: 10 });
     expect(t.type === 'stroke' && t.points[t.points.length - 1]!.x).toBe(55);
     expect(t.type === 'stroke' && t.width).toBeCloseTo(3.6);
-    const img = transformItem({ id: 'i', type: 'image', assetId: 'a', x: 0, y: 0, w: 10, h: 20 }, { dx: 1, dy: 2, s: 0.5, ox: 0, oy: 0 });
+    const img = transformItem({ id: 'i', type: 'image', assetId: 'a', x: 0, y: 0, w: 10, h: 20 }, { dx: 1, dy: 2, s: 0.5, r: 0, ox: 0, oy: 0 });
     expect(itemBBox(img)).toEqual([1, 2, 6, 12]);
     expect(transformItem(s, IDENTITY)).toEqual(s);
   });

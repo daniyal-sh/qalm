@@ -1,0 +1,250 @@
+import {
+  frameCorners,
+  mapFrame,
+  moveBy,
+  resizeSim,
+  rotateSim,
+  selectionFrame,
+  textWidthPatch,
+  type Frame,
+  type Item,
+  type Sim,
+  type TextItem,
+} from '@qalm/core';
+import * as React from 'react';
+import { PanResponder, Platform, StyleSheet, View, type GestureResponderEvent, type PanResponderGestureState } from 'react-native';
+
+import { Icon } from '../ui/Icon';
+
+const ACCENT = '#4338ca'; // paper stays light: brand accent (light)
+/** px between the ink and the frame line */
+const PAD = 6;
+/** px hit target of a handle (brand: 44 px touch targets) */
+const HIT = 44;
+/** px from the frame's top edge to the rotate handle */
+const ROT_OFF = 30;
+/** px of movement below which a press on the frame is a tap */
+const TAP_SLOP = 4;
+
+type P = [number, number];
+
+/** A selection edit in progress: a transform of every selected item, or a text box's new width. */
+export type LiveEdit = { kind: 'sim'; sim: Sim } | { kind: 'text'; id: string; patch: Pick<TextItem, 'x' | 'y' | 'w'> };
+
+export interface SelectionFrameProps {
+  /** The selected items as they are on the page (not the live edit). */
+  items: Item[];
+  /** px per page unit */
+  scale: number;
+  live: LiveEdit | null;
+  onLive(edit: LiveEdit | null): void;
+  onCommit(edit: LiveEdit): void;
+  /** A tap (no drag) inside the frame, at a window point (pageX/pageY). */
+  onTap(windowX: number, windowY: number): void;
+}
+
+const cursor = (c: string) => (Platform.OS === 'web' ? ({ cursor: c } as object) : null);
+
+interface DragHandlers {
+  start?(g: PanResponderGestureState, e: GestureResponderEvent): void;
+  move(dx: number, dy: number): void;
+  end(dx: number, dy: number, g: PanResponderGestureState): void;
+}
+
+/** A PanResponder that owns the gesture until it ends (the page must not scroll or draw meanwhile). */
+function useDrag(h: DragHandlers, onCancel: () => void) {
+  const ref = React.useRef({ h, onCancel });
+  ref.current = { h, onCancel };
+  return React.useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: (e, g) => ref.current.h.start?.(g, e),
+        onPanResponderMove: (_e, g) => ref.current.h.move(g.dx, g.dy),
+        onPanResponderRelease: (_e, g) => ref.current.h.end(g.dx, g.dy, g),
+        onPanResponderTerminate: () => ref.current.onCancel(),
+      }).panHandlers,
+    [],
+  );
+}
+
+/** The frame shown for the selection: its items' frame, with the live edit applied. */
+export function liveFrame(items: Item[], live: LiveEdit | null): Frame | null {
+  if (live?.kind === 'text') return selectionFrame(items.map((it) => (it.id === live.id ? ({ ...it, ...live.patch } as Item) : it)));
+  const f = selectionFrame(items);
+  return f && live?.kind === 'sim' ? mapFrame(f, live.sim) : f;
+}
+
+/**
+ * The selection's frame on the page: drag inside to move, corner handles to resize (uniform, so images keep their
+ * aspect), the round handle above to rotate. A single text box gets edge handles instead of corners: they change its
+ * width (the text reflows) and never its font size.
+ */
+export function SelectionFrame({ items, scale, live, onLive, onCommit, onTap }: SelectionFrameProps) {
+  const base = React.useMemo(() => selectionFrame(items), [items]);
+  const frame = liveFrame(items, live);
+  const single = items.length === 1 ? items[0]! : null;
+  const textOnly = single?.type === 'text' ? single : null;
+
+  // Everything a gesture needs is captured when it starts.
+  const g0 = React.useRef<{ frame: Frame; at: P; text?: TextItem } | null>(null);
+  const liveRef = React.useRef(live);
+  liveRef.current = live;
+  const cancel = () => {
+    g0.current = null;
+    onLive(null);
+  };
+  const finish = () => {
+    const l = liveRef.current;
+    g0.current = null;
+    onLive(null);
+    if (l) onCommit(l);
+  };
+  const k = 1 / scale;
+
+  const body = useDrag(
+    {
+      start: (g) => base && (g0.current = { frame: base, at: [g.x0, g.y0] }),
+      move: (dx, dy) => g0.current && (Math.abs(dx) > TAP_SLOP || Math.abs(dy) > TAP_SLOP || liveRef.current) && onLive({ kind: 'sim', sim: moveBy(dx * k, dy * k) }),
+      end: (dx, dy) => {
+        const at = g0.current?.at;
+        if (!liveRef.current && at && Math.abs(dx) <= TAP_SLOP && Math.abs(dy) <= TAP_SLOP) {
+          cancel();
+          onTap(at[0], at[1]);
+        } else finish();
+      },
+    },
+    cancel,
+  );
+
+  const corner = (i: number) => ({
+    start: () => base && (g0.current = { frame: base, at: frameCorners(base)[i]! }),
+    move: (dx: number, dy: number) => {
+      const s = g0.current;
+      if (s) onLive({ kind: 'sim', sim: resizeSim(s.frame, i, [s.at[0] + dx * k, s.at[1] + dy * k]) });
+    },
+    end: finish,
+  });
+  const c0 = useDrag(corner(0), cancel);
+  const c1 = useDrag(corner(1), cancel);
+  const c2 = useDrag(corner(2), cancel);
+  const c3 = useDrag(corner(3), cancel);
+
+  const rotate = useDrag(
+    {
+      start: () => {
+        if (!base) return;
+        const up = base.h / 2 + (PAD + ROT_OFF) * k;
+        g0.current = { frame: base, at: [base.cx + Math.sin(base.rot) * up, base.cy - Math.cos(base.rot) * up] };
+      },
+      move: (dx, dy) => {
+        const s = g0.current;
+        if (s) onLive({ kind: 'sim', sim: rotateSim(s.frame, s.at, [s.at[0] + dx * k, s.at[1] + dy * k]) });
+      },
+      end: finish,
+    },
+    cancel,
+  );
+
+  const side = (which: 'left' | 'right') => ({
+    start: () => {
+      if (!base || !textOnly) return;
+      const [tl, tr] = frameCorners(base);
+      const [bl, br] = [frameCorners(base)[3]!, frameCorners(base)[2]!];
+      const at: P = which === 'left' ? [(tl![0] + bl[0]) / 2, (tl![1] + bl[1]) / 2] : [(tr![0] + br[0]) / 2, (tr![1] + br[1]) / 2];
+      g0.current = { frame: base, at, text: textOnly };
+    },
+    move: (dx: number, dy: number) => {
+      const s = g0.current;
+      if (!s?.text) return;
+      // The edge handle sits PAD px outside the box: aim at the box edge itself.
+      const out = which === 'left' ? -PAD * k : PAD * k;
+      const r = s.text.rot ?? 0;
+      const p: P = [s.at[0] + dx * k - Math.cos(r) * out, s.at[1] + dy * k - Math.sin(r) * out];
+      onLive({ kind: 'text', id: s.text.id, patch: textWidthPatch(s.text, which, p) });
+    },
+    end: finish,
+  });
+  const left = useDrag(side('left'), cancel);
+  const right = useDrag(side('right'), cancel);
+
+  if (!frame) return null;
+  // px: the frame box (with PAD), and a margin around it big enough for the handles, so they stay inside this view
+  // (Android only delivers touches inside a view's bounds).
+  const bw = Math.max(12, frame.w * scale + PAD * 2);
+  const bh = Math.max(12, frame.h * scale + PAD * 2);
+  const m = HIT / 2;
+  const top = ROT_OFF + HIT / 2;
+  const W = bw + m * 2;
+  const H = bh + m + top;
+
+  const handle = (key: string, x: number, y: number, pan: object, label: string, cur: string, shape: 'square' | 'bar' | 'round') => (
+    <View
+      key={key}
+      {...pan}
+      accessibilityLabel={label}
+      style={[styles.hit, { left: x - HIT / 2, top: y - HIT / 2 }, cursor(cur)]}
+    >
+      {shape === 'round' ? (
+        <View style={[styles.knob, styles.round]}>
+          <Icon name="rotate-cw" size={11} color={ACCENT} />
+        </View>
+      ) : (
+        <View style={[styles.knob, shape === 'bar' ? styles.bar : styles.square]} />
+      )}
+    </View>
+  );
+
+  const deg = (frame.rot * 180) / Math.PI;
+  const resizeCursor = (i: number) => {
+    // nwse for the top-left/bottom-right diagonal, turned with the frame.
+    const a = ((deg + (i % 2 ? 90 : 0)) % 180 + 180) % 180;
+    return a < 22.5 || a >= 157.5 ? 'nwse-resize' : a < 67.5 ? 'ns-resize' : a < 112.5 ? 'nesw-resize' : 'ew-resize';
+  };
+
+  return (
+    <View
+      pointerEvents="box-none"
+      style={{
+        position: 'absolute',
+        left: frame.cx * scale - bw / 2 - m,
+        top: frame.cy * scale - bh / 2 - top,
+        width: W,
+        height: H,
+        transform: frame.rot ? [{ rotate: `${deg}deg` }] : undefined,
+        // Turn about the frame's centre, not this view's (it has the rotate handle's room on top).
+        transformOrigin: `${m + bw / 2}px ${top + bh / 2}px`,
+      }}
+    >
+      {/* the rotate handle's stem */}
+      <View pointerEvents="none" style={[styles.stem, { left: m + bw / 2 - 0.5, top: top - ROT_OFF + 8, height: ROT_OFF - 8 }]} />
+      <View {...body} accessibilityLabel="Move selection" style={[styles.box, { left: m, top, width: bw, height: bh }, cursor('move')]} />
+      {textOnly ? (
+        <>
+          {handle('l', m, top + bh / 2, left, 'Text box width', resizeCursor(1), 'bar')}
+          {handle('r', m + bw, top + bh / 2, right, 'Text box width', resizeCursor(1), 'bar')}
+        </>
+      ) : (
+        <>
+          {handle('c0', m, top, c0, 'Resize selection', resizeCursor(0), 'square')}
+          {handle('c1', m + bw, top, c1, 'Resize selection', resizeCursor(1), 'square')}
+          {handle('c2', m + bw, top + bh, c2, 'Resize selection', resizeCursor(0), 'square')}
+          {handle('c3', m, top + bh, c3, 'Resize selection', resizeCursor(1), 'square')}
+        </>
+      )}
+      {handle('rot', m + bw / 2, top - ROT_OFF, rotate, 'Rotate selection', 'grab', 'round')}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  box: { position: 'absolute', borderWidth: 1.5, borderColor: ACCENT, borderStyle: 'dashed', borderRadius: 2 },
+  stem: { position: 'absolute', width: 1, backgroundColor: ACCENT },
+  hit: { position: 'absolute', width: HIT, height: HIT, alignItems: 'center', justifyContent: 'center' },
+  knob: { backgroundColor: '#ffffff', borderColor: ACCENT, borderWidth: 1.5 },
+  square: { width: 12, height: 12, borderRadius: 3 },
+  bar: { width: 8, height: 22, borderRadius: 4 },
+  round: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+});

@@ -16,6 +16,8 @@ export interface ToolState {
   eraserRadius: number;
   /** Hold the pen still at the end of a stroke to snap it to a shape. */
   snapShapes: boolean;
+  /** Lasso: draw a loop around things, or drag a rectangle over them. Tapping selects either way. */
+  lassoMode: 'free' | 'rect';
 }
 
 export interface Selection {

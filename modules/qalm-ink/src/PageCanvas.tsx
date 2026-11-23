@@ -1,5 +1,5 @@
 import type { BBox, ImageItem, Item, PageInfo, ShapeItem, StrokeItem, TextItem } from '@qalm/core';
-import { paperPattern, strokeOutline } from '@qalm/core';
+import { itemBBox, paperPattern, shapePolylines, strokeOutline } from '@qalm/core';
 import {
   Canvas,
   Circle,
@@ -45,6 +45,20 @@ export interface PageCanvasProps {
    * view. Feed the newest ones to InkOverlay's `committedIds` so the live stroke stays until Skia shows it.
    */
   onDrawn?: (ids: string[]) => void;
+  /**
+   * Draws these items moved / scaled / turned while a selection is being dragged, without rebuilding their paths:
+   * p' = o + s·R(r)·(p − o) + d (the same as core's `Sim`).
+   */
+  live?: { ids: string[]; transform: LiveTransform };
+}
+
+export interface LiveTransform {
+  s: number;
+  r: number;
+  ox: number;
+  oy: number;
+  dx: number;
+  dy: number;
 }
 
 // Brand tokens (docs/brand.md). Paper stays light, so the light tokens apply except on night paper.
@@ -66,54 +80,39 @@ function outlineToPath(outline: [number, number][]): SkPath {
 function shapePath(s: ShapeItem): SkPath {
   const b = Skia.PathBuilder.Make();
   const pts = s.pts;
-  const p0 = pts[0];
-  if (!p0) return b.detach();
-  const xs = pts.map((p) => p[0]);
-  const ys = pts.map((p) => p[1]);
-  const box = Skia.XYWHRect(Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
-  switch (s.kind) {
-    case 'ellipse':
-      b.addOval(box);
-      break;
-    case 'rect':
-      if (pts.length === 2) b.addRect(box);
-      else b.addPoly(pts.map(([x, y]) => ({ x, y })), true);
-      break;
-    case 'triangle':
-      b.addPoly(pts.map(([x, y]) => ({ x, y })), true);
-      break;
-    case 'line':
-    case 'arrow': {
-      const p1 = pts[pts.length - 1]!;
-      b.moveTo(p0[0], p0[1]).lineTo(p1[0], p1[1]);
-      if (s.kind === 'arrow') {
-        const a = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]);
-        const len = Math.max(8, s.width * 5);
-        for (const da of [Math.PI * 0.85, -Math.PI * 0.85]) {
-          b.moveTo(p1[0], p1[1]).lineTo(p1[0] + len * Math.cos(a + da), p1[1] + len * Math.sin(a + da));
-        }
-      }
-      break;
-    }
+  if (!pts[0]) return b.detach();
+  if (s.kind === 'ellipse' && pts.length === 2) {
+    // Older upright ellipses: their box.
+    const a = pts[0];
+    const c = pts[1] ?? a;
+    b.addOval(Skia.XYWHRect(Math.min(a[0], c[0]), Math.min(a[1], c[1]), Math.abs(c[0] - a[0]), Math.abs(c[1] - a[1])));
+    return b.detach();
+  }
+  // Same outlines as the PDF and SVG export (core's shapePolylines), so turned shapes draw alike everywhere.
+  for (const pl of shapePolylines(s)) {
+    pl.forEach(([x, y], i) => (i ? b.lineTo(x, y) : b.moveTo(x, y)));
+    const first = pl[0];
+    const last = pl[pl.length - 1];
+    if (pl.length > 2 && first && last && first[0] === last[0] && first[1] === last[1]) b.close();
   }
   return b.detach();
 }
 
-function itemBBox(it: Item): BBox {
-  switch (it.type) {
-    case 'stroke':
-      return it.bbox;
-    case 'image':
-      return [it.x, it.y, it.x + it.w, it.y + it.h];
-    case 'text':
-      return [it.x, it.y, it.x + it.w, it.y + it.fontSize * 1.25 * Math.max(1, it.text.split('\n').length)];
-    case 'shape': {
-      const xs = it.pts.map((p) => p[0]);
-      const ys = it.pts.map((p) => p[1]);
-      const r = it.width / 2;
-      return [Math.min(...xs) - r, Math.min(...ys) - r, Math.max(...xs) + r, Math.max(...ys) + r];
-    }
-  }
+/** Turns a text box or image about its top-left corner (`rot`, radians). */
+function turned(x: number, y: number, rot: number | undefined) {
+  return rot ? [{ translateX: x }, { translateY: y }, { rotate: rot }, { translateX: -x }, { translateY: -y }] : undefined;
+}
+
+/** A live selection transform (move, scale, rotate about an origin), as Skia transforms. */
+function liveTransform(f: LiveTransform) {
+  return [
+    { translateX: f.ox + f.dx },
+    { translateY: f.oy + f.dy },
+    { rotate: f.r },
+    { scale: f.s },
+    { translateX: -f.ox },
+    { translateY: -f.oy },
+  ];
 }
 
 /** Caches stroke paths across renders; a stroke is rebuilt only when its geometry changes. */
@@ -165,20 +164,24 @@ function TextNode({ item, fonts }: { item: TextItem; fonts: SkTypefaceFontProvid
     p.layout(item.w);
     return p;
   }, [item.color, item.fontSize, item.text, item.w, fonts]);
-  return <Paragraph paragraph={paragraph} x={item.x} y={item.y} width={item.w} />;
+  const t = turned(item.x, item.y, item.rot);
+  const node = <Paragraph paragraph={paragraph} x={item.x} y={item.y} width={item.w} />;
+  return t ? <Group transform={t}>{node}</Group> : node;
 }
 
 function ImageNode({ item, uri }: { item: ImageItem; uri: string }) {
   const image = useImage(uri);
   if (!image) return null;
-  return <Image image={image} x={item.x} y={item.y} width={item.w} height={item.h} fit="fill" />;
+  const node = <Image image={image} x={item.x} y={item.y} width={item.w} height={item.h} fit="fill" />;
+  const t = turned(item.x, item.y, item.rot);
+  return t ? <Group transform={t}>{node}</Group> : node;
 }
 
 /**
  * The one renderer for finished page content (tech-spec §3): paper, PDF background, items in z-order,
  * selection outline and comment anchors. Runs on iOS/Android (Skia) and web/Electron (CanvasKit).
  */
-export function PageCanvas({ info, items, selection, anchors, pdfImage, width, assetUri, onDrawn }: PageCanvasProps) {
+export function PageCanvas({ info, items, selection, anchors, pdfImage, width, assetUri, onDrawn, live }: PageCanvasProps) {
   const { w: pageW, h: pageH } = info.size;
   const scale = width / pageW;
   const height = Math.round(pageH * scale);
@@ -197,6 +200,25 @@ export function PageCanvas({ info, items, selection, anchors, pdfImage, width, a
 
   const anchorColors = info.paperColor === 'night' ? ANCHOR.night : ANCHOR.light;
   const hairline = 1 / scale; // 1 px in page units
+
+  const liveIds = React.useMemo(() => (live?.ids.length ? new Set(live.ids) : null), [live?.ids]);
+  const liveMatrix = live ? liveTransform(live.transform) : undefined;
+  const itemNode = (it: Item): React.ReactElement | null => {
+    switch (it.type) {
+      case 'stroke': {
+        const path = strokePaths.get(it.id);
+        return path ? <StrokeNode key={it.id} item={it} path={path} /> : null;
+      }
+      case 'shape':
+        return <Path key={it.id} path={shapePath(it)} color={it.color} style="stroke" strokeWidth={it.width} strokeCap="round" strokeJoin="round" />;
+      case 'text':
+        return fonts ? <TextNode key={it.id} item={it} fonts={fonts} /> : null;
+      case 'image': {
+        const uri = assetUri?.(it.assetId);
+        return uri ? <ImageNode key={it.id} item={it} uri={uri} /> : null;
+      }
+    }
+  };
 
   const selectionBox = React.useMemo(() => {
     if (!selection?.length) return null;
@@ -229,30 +251,14 @@ export function PageCanvas({ info, items, selection, anchors, pdfImage, width, a
         })}
 
         {items.map((it) => {
-          switch (it.type) {
-            case 'stroke': {
-              const path = strokePaths.get(it.id);
-              return path ? <StrokeNode key={it.id} item={it} path={path} /> : null;
-            }
-            case 'shape':
-              return (
-                <Path
-                  key={it.id}
-                  path={shapePath(it)}
-                  color={it.color}
-                  style="stroke"
-                  strokeWidth={it.width}
-                  strokeCap="round"
-                  strokeJoin="round"
-                />
-              );
-            case 'text':
-              return fonts ? <TextNode key={it.id} item={it} fonts={fonts} /> : null;
-            case 'image': {
-              const uri = assetUri?.(it.assetId);
-              return uri ? <ImageNode key={it.id} item={it} uri={uri} /> : null;
-            }
-          }
+          const node = itemNode(it);
+          return node && liveIds?.has(it.id) ? (
+            <Group key={it.id} transform={liveMatrix}>
+              {node}
+            </Group>
+          ) : (
+            node
+          );
         })}
 
         {selectionBox ? (

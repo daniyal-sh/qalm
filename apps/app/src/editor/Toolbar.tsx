@@ -158,9 +158,13 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
           </>
         ) : null}
         {t === 'lasso' ? (
-          <Text variant="meta" style={{ paddingHorizontal: 8 }}>
-            Circle ink to select it, then drag to move
-          </Text>
+          <>
+            <StyleOption icon="lasso" label="Freeform lasso" selected={tools.lassoMode !== 'rect'} onPress={() => onChange({ lassoMode: 'free' })} />
+            <StyleOption icon="selection-drag" label="Rectangle select" selected={tools.lassoMode === 'rect'} onPress={() => onChange({ lassoMode: 'rect' })} />
+            <Text variant="meta" style={{ paddingHorizontal: 8 }}>
+              {tools.lassoMode === 'rect' ? 'Tap or drag a box to select' : 'Tap or circle to select'}
+            </Text>
+          </>
         ) : null}
         <Sep />
         <IconButton icon="zoom-out" label="Zoom out" size={40} onPress={() => onZoom(-1)} />
