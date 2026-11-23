@@ -4,21 +4,13 @@ import { StyleSheet, View } from 'react-native';
 
 import { liveOutline } from './freehand';
 import {
-  PALM_MAJOR_MM,
-  PEN_LOCKOUT_MS,
   type InkOverlayProps,
   type InkPenStyle,
   type InkPoint,
   type InkSmoothing,
 } from './InkOverlay.types';
 import { traceOutline } from './outlinePath';
-
-/** CSS px → mm (tech-spec §3). */
-const MM_PER_PX = 0.2646;
-/** A touch on the hand side of the pen is rejected while the pen was seen within this window. */
-const HAND_SIDE_WINDOW_MS = 3000; // same as iOS and Android
-/** "Beside or below" = no more than this far on the other side of / above the pen tip. */
-const HAND_SIDE_MARGIN_MM = 10;
+import { MM_PER_CSS_PX as MM_PER_PX, palmVerdict, pointerContact, touchContact } from './palm';
 /** Movement smaller than this counts as holding still (heldMs). */
 const HOLD_MOVE_MM = 1;
 const LASSO_COLOR = '#4338ca'; // brand accent
@@ -32,6 +24,8 @@ const PENDING_FALLBACK_MS = 4000;
 const HANDOFF_FRAMES = 2;
 
 type Kind = 'ink' | 'erase' | 'lasso';
+
+const NO_PEN = { x: 0, y: 0, t: -Infinity };
 
 interface Live {
   pointerId: number;
@@ -217,25 +211,23 @@ export function InkOverlay(props: InkOverlayProps) {
 
     const reject = (reason: string) => propsRef.current.onRejectedTouch?.({ nativeEvent: { reason } });
 
-    const penButtonPressed = (ev: PointerEvent) => ev.pointerType === 'pen' && (ev.button === 5 || (ev.buttons & (2 | 32)) !== 0);
+    // The pen's barrel button (Windows reports it as the right button) or its eraser end.
+    const penButtonPressed = (ev: PointerEvent) => ev.pointerType === 'pen' && (ev.button === 2 || ev.button === 5 || (ev.buttons & (2 | 32)) !== 0);
+    // Held while the pen (or the mouse's right button) drags: that stroke erases, whatever the tool.
+    const erasesWhileHeld = (ev: PointerEvent) => penButtonPressed(ev) || (ev.pointerType === 'mouse' && ev.button === 2);
 
-    const firePenButton = (ev: PointerEvent) => {
+    /**
+     * The pen button pressed while the pen hovers is the shortcut (onPenButton: eraser or last tool, per Settings).
+     * Pressed while touching, it only makes that stroke erase: toggling the tool as well left the eraser on after the
+     * button was released.
+     */
+    const firePenButton = (ev: PointerEvent, touching: boolean) => {
       const pressed = penButtonPressed(ev);
-      if (pressed && !s.buttonDown) propsRef.current.onPenButton?.({ nativeEvent: { kind: 'button' } });
+      if (pressed && !s.buttonDown && !touching) propsRef.current.onPenButton?.({ nativeEvent: { kind: 'button' } });
       s.buttonDown = pressed;
     };
 
-    const handSide = (ev: PointerEvent) => {
-      if (ev.timeStamp - s.lastPen.t > HAND_SIDE_WINDOW_MS) return false;
-      const margin = HAND_SIDE_MARGIN_MM / MM_PER_PX;
-      const dx = ev.clientX - s.lastPen.x;
-      const dy = ev.clientY - s.lastPen.y;
-      const beside = propsRef.current.input.hand === 'right' ? dx > -margin : dx < margin;
-      return beside && dy > -margin;
-    };
-
-    const palmSizeExceeded = (ev: PointerEvent) =>
-      Math.max(ev.width, ev.height) * MM_PER_PX > PALM_MAJOR_MM[propsRef.current.input.palm];
+    const palmSizeExceeded = (ev: PointerEvent) => palmVerdict(pointerContact(ev), NO_PEN, propsRef.current.input) === 'palm-size';
 
     const notePen = (ev: PointerEvent) => {
       s.lastPen = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp };
@@ -264,7 +256,7 @@ export function InkOverlay(props: InkOverlayProps) {
 
     const start = (ev: PointerEvent, isPen: boolean) => {
       const P = propsRef.current;
-      const eraserOverride = penButtonPressed(ev);
+      const eraserOverride = erasesWhileHeld(ev);
       const tool = eraserOverride ? 'eraser' : P.tool;
       if (tool === 'none') return;
       const kind: Kind = tool === 'eraser' ? 'erase' : tool === 'lasso' ? 'lasso' : 'ink';
@@ -345,7 +337,7 @@ export function InkOverlay(props: InkOverlayProps) {
       if (ev.pointerType === 'pen') {
         s.penPointers.add(ev.pointerId);
         notePen(ev);
-        firePenButton(ev);
+        firePenButton(ev, true);
         if (s.live && !s.live.isPen) {
           retract(); // the palm got there first
           reject('pen-took-over');
@@ -354,10 +346,10 @@ export function InkOverlay(props: InkOverlayProps) {
         return;
       }
       if (ev.pointerType === 'touch') {
-        if (P.input.drawWith === 'pen') return reject('pen-only'); // fingers scroll and zoom
-        if (palmSizeExceeded(ev)) return reject('palm-size');
-        if (ev.timeStamp - s.lastPen.t < PEN_LOCKOUT_MS) return reject('pen-lockout');
-        if (handSide(ev)) return reject('hand-side');
+        const palm = palmVerdict(pointerContact(ev), s.lastPen, P.input);
+        // Pen only: fingers scroll and zoom. A palm is still reported as one (and onTouchStart keeps it from scrolling).
+        if (P.input.drawWith === 'pen') return reject(palm ?? 'pen-only');
+        if (palm) return reject(palm);
         if (s.live?.isPen) return reject('pen-active');
         if (s.live) {
           // A second finger: this is a scroll / zoom, not ink.
@@ -368,13 +360,13 @@ export function InkOverlay(props: InkOverlayProps) {
         start(ev, false);
         return;
       }
-      if (ev.button === 0 && !s.live) start(ev, false); // mouse
+      if ((ev.button === 0 || ev.button === 2) && !s.live) start(ev, false); // mouse: the right button erases
     };
 
     const onMove = (ev: PointerEvent) => {
       if (ev.pointerType === 'pen') {
         notePen(ev);
-        firePenButton(ev);
+        firePenButton(ev, s.penPointers.has(ev.pointerId));
       }
       const live = s.live;
       if (live && ev.pointerId === live.pointerId) {
@@ -432,10 +424,19 @@ export function InkOverlay(props: InkOverlayProps) {
       if (ev.pointerType === 'pen') canvas.style.touchAction = 'none';
     };
 
-    // Chromium may still turn a pen drag into a pan: cancel the compatibility touch events of pen contacts.
+    // Chromium may still turn a pen drag into a pan: cancel the compatibility touch events of pen contacts. With
+    // "pen only", fingers pan and zoom (touch-action), but a palm, or a hand resting by the pen, never scrolls.
     const onTouchStart = (ev: TouchEvent) => {
-      if (s.penPointers.size > 0 || s.live?.isPen) ev.preventDefault();
+      if (s.penPointers.size > 0 || s.live?.isPen) return ev.preventDefault();
+      const P = propsRef.current;
+      if (P.input.drawWith !== 'pen') return; // touch-action: none, so nothing scrolls
+      for (const t of Array.from(ev.changedTouches)) {
+        if (palmVerdict(touchContact(t, ev.timeStamp), s.lastPen, P.input)) return ev.preventDefault();
+      }
     };
+
+    // No context menu on the page: the right button and the pen's barrel button erase.
+    const onContextMenu = (ev: Event) => ev.preventDefault();
 
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('pointermove', onMove);
@@ -444,6 +445,7 @@ export function InkOverlay(props: InkOverlayProps) {
     canvas.addEventListener('pointerleave', onLeave);
     canvas.addEventListener('pointerover', onOver);
     canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('contextmenu', onContextMenu);
     const ro = new ResizeObserver(draw);
     ro.observe(canvas);
     draw();
@@ -455,6 +457,7 @@ export function InkOverlay(props: InkOverlayProps) {
       canvas.removeEventListener('pointerleave', onLeave);
       canvas.removeEventListener('pointerover', onOver);
       canvas.removeEventListener('touchstart', onTouchStart);
+      canvas.removeEventListener('contextmenu', onContextMenu);
       ro.disconnect();
       s.draw = () => {};
     };
