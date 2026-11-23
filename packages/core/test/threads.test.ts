@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { anchorInkRemoved, cleanAsk, emptyThreads, encodeQinkThread, encodeQinkUpdate, labelList, LOCAL_ORIGIN, renderLinesStripSvg, resolveThread, threadBox, threadLabel } from '../src';
+import { anchorInkRemoved, cleanAsk, emptyThreads, encodeQinkThread, encodeQinkUpdate, labelList, LOCAL_ORIGIN, renderLinesStripSvg, resolveThread, threadBox, threadLabel, summarizeThreads, SUMMARY_TEXT, agentEntriesAfter, THREADS_ORIGIN } from '../src';
 import type { QinkLabels, TextItem } from '../src';
 import { newNotebook, newPage, stroke } from './helpers';
 
@@ -191,5 +191,46 @@ describe('Q-ink threads', () => {
     page.resolveComment(open);
     expect(encodeQinkThread(nb, { [pid]: page }, labels, threads, 'C1').split('\n')[0]).toBe('#q C1 p1:L2 resolved');
     expect(() => encodeQinkThread(nb, { [pid]: page }, labels, threads, 'C9')).toThrow('No thread C9');
+  });
+});
+
+describe('thread index', () => {
+  it('summarizes threads and never rolls an entry back', () => {
+    const nb = newNotebook();
+    const pid = nb.pages()[0]!.id;
+    const page = newPage();
+    page.addItem(stroke('q1', 50, 100, 150, 120));
+    page.setLineText('q1', 'x+1', 'agent');
+    const id = page.addComment({ lineKey: 'q1', author: tutor, text: 'a'.repeat(400) });
+    const stale = summarizeThreads(pid, page.comments(), page.lines());
+    expect(stale[0]).toMatchObject({ id, pageId: pid, quote: 'x+1', kinds: 'a', resolved: false, lastAgent: { name: 'Tutor' } });
+    expect(stale[0]!.text).toHaveLength(SUMMARY_TEXT);
+    expect(nb.putThreads(stale)).toBe(true);
+    expect(nb.putThreads(stale)).toBe(false); // unchanged: no write
+
+    page.replyToComment(id, you, 'why?');
+    page.resolveComment(id);
+    const fresh = summarizeThreads(pid, page.comments(), page.lines());
+    expect(nb.putThreads(fresh)).toBe(true);
+    expect(nb.threads()[0]).toMatchObject({ kinds: 'au', resolved: true, last: { author: you, text: 'why?' } });
+    // An older copy of the page (fewer entries) can't undo that.
+    expect(nb.putThreads(stale)).toBe(false);
+    // Same entries but not resolved: stays resolved (only a new entry reopens a thread).
+    expect(nb.putThreads([{ ...fresh[0]!, resolved: false }])).toBe(false);
+    expect(nb.threads()[0]!.resolved).toBe(true);
+    page.replyToComment(id, you, 'reopen');
+    expect(nb.putThreads(summarizeThreads(pid, page.comments(), page.lines()))).toBe(true);
+    expect(nb.threads()[0]).toMatchObject({ kinds: 'auu', resolved: false });
+    expect(agentEntriesAfter(nb.threads()[0]!, 0)).toBe(1);
+    expect(agentEntriesAfter(nb.threads()[0]!, 1)).toBe(0);
+  });
+
+  it('is written outside undo and marks new notebooks as indexed', () => {
+    const nb = newNotebook();
+    expect(nb.threadsIndexed()).toBe(true);
+    const updates: unknown[] = [];
+    nb.doc.on('update', (_u: Uint8Array, origin: unknown) => updates.push(origin));
+    nb.putThreads(summarizeThreads('p', [{ id: 'c', lineKey: '', author: you, text: 'hi', createdAt: 1, resolved: false, replies: [] }]));
+    expect(updates).toEqual([THREADS_ORIGIN]);
   });
 });

@@ -62,6 +62,37 @@ describe('comment threads and selection asks', () => {
     n.pgc.close();
   });
 
+  it('mirrors every thread into the notebook index doc (agent comments and replies, student notes and replies)', async () => {
+    const t = await signIn('threadindex@example.com');
+    const n = await notebook(t, 'idxnb', 'Index');
+    const token = await connectAgent('threadindex@example.com', { notebooks: ['idxnb'], comment: true, transcribe: false });
+    const s = sessionOf('idxnb');
+    const first = tool(token, 'wait', { s });
+    await pause(50);
+    n.page.addItem(stroke('i1', 50, 100, 200, 120));
+    await first;
+    const byText = (text: string) => n.nb.threads().find((x) => x.text === text);
+
+    // An agent's comment reaches the index (and so every device) without the page doc being open there.
+    await tool(token, 'comment', { ref: 'p1:L1', text: 'Nice start' });
+    await until(() => !!byText('Nice start'));
+    expect(byText('Nice start')).toMatchObject({ pageId: n.pageId, lineKey: 'i1', kinds: 'a', resolved: false, lastAgent: { name: 'Tutor' } });
+
+    // A student's reply and a new student thread are mirrored by the page room.
+    const id = byText('Nice start')!.id;
+    n.page.replyToComment(id, you, 'thanks');
+    n.page.addComment({ lineKey: 'i1', author: you, text: 'mine' });
+    await until(() => byText('Nice start')?.kinds === 'au' && !!byText('mine'));
+    expect(byText('Nice start')!.last).toMatchObject({ author: you, text: 'thanks' });
+
+    // An agent reply that resolves the thread.
+    await tool(token, 'comment', { thread: 'C1', text: 'Done', resolve: true });
+    await until(() => byText('Nice start')?.kinds === 'aua');
+    expect(byText('Nice start')).toMatchObject({ resolved: true, last: { text: 'Done' } });
+    n.nbc.close();
+    n.pgc.close();
+  });
+
   it('an Ask about a selection sends its lines (or a crop) and is answered in its thread', async () => {
     const t = await signIn('selask@example.com');
     const n = await notebook(t, 'selnb', 'Selection');

@@ -1,4 +1,4 @@
-import { exportPdf, LOCAL_ORIGIN, Notebook, packQalm, Page, unpackQalm, createNotebookDoc } from '@qalm/core';
+import { exportPdf, LOCAL_ORIGIN, Notebook, packQalm, Page, summarizeThreads, unpackQalm, createNotebookDoc } from '@qalm/core';
 import type { Asset, ExportPdfOptions, NotebookInit, NotebookMeta, Size } from '@qalm/core';
 import { PDFDocument } from 'pdf-lib';
 import * as Y from 'yjs';
@@ -104,6 +104,14 @@ export async function restoreQalm(
     const doc = b.pages.get(oldPage);
     if (doc) await writeDoc(docIds.page(id, newPage), Y.encodeStateAsUpdate(doc));
   }
+  // The thread index, rebuilt from the restored pages (the backup's own may be missing or stale).
+  for (const [oldPage, newPage] of pageIds) {
+    const doc = b.pages.get(oldPage);
+    if (!doc) continue;
+    const page = new Page(doc);
+    nb.putThreads(summarizeThreads(newPage, page.comments(), page.lines()));
+  }
+  index.transact(() => index.getMap('meta').set('threadsIndexed', true), LOCAL_ORIGIN);
   await writeDoc(docIds.notebook(id), Y.encodeStateAsUpdate(index));
   return nb.meta();
 }
