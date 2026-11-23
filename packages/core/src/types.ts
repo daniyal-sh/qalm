@@ -56,34 +56,37 @@ export type ShapeKind =
 export interface ShapeItem { id: string; type: 'shape'; kind: ShapeKind; pts: [number, number][]; color: string; width: number }
 export type Item = StrokeItem | TextItem | ImageItem | ShapeItem;
 
-export type TextSrc = 'device' | 'agent' | 'user';
-export interface Line {
-  /** id of the line's first item; globally unique */
-  key: string;
-  kind: 'line' | 'drawing';
-  itemIds: string[];
-  bbox: BBox;
-  text?: string;
-  textSrc?: TextSrc;
-  conf?: number;
-  /** Who saved an agent reading (the connected agent's name). */
+/** Who saved a reading: an agent (`transcribe`) or the student (the Reading sheet). */
+export type ReadingSrc = 'agent' | 'user';
+/**
+ * Someone's reading of some strokes (tech-spec §2, readings). Stored per page. A reading is **stale** once strokes were
+ * added to or erased from what it reads; it is kept (and shown as stale) until someone reads it again.
+ */
+export interface Reading {
+  id: string;
+  /** The strokes (and shapes) it reads. */
+  ids: string[];
+  text: string;
+  src: ReadingSrc;
+  /** The agent that saved it (src 'agent'). */
   by?: string;
+  stale?: boolean;
+  updatedAt: number;
 }
 
 export interface Author { kind: 'agent' | 'user'; name: string }
 export interface Comment {
   id: string;
-  lineKey: string;
   author: Author;
   text: string;
   createdAt: number;
   resolved: boolean;
   replies: { author: Author; text: string; at: number }[];
-  /** Page-space box of the selection a thread is about (a student's comment or Ask on a selection). */
+  /** Page-space box the thread is about: the fallback position (no strokes, or threads made before `anchorIds`). */
   anchor?: BBox;
   /**
-   * The selected item ids a thread is about. The pin box and the agent's line labels are derived from these items
-   * live (`threadBox`), so the thread follows its ink; `anchor` stays as the fallback for threads made before this.
+   * The strokes (or other items) a thread is about. Its pin box and the agent's box ref are derived from these items
+   * live (`threadBox`), so the thread follows its ink. A thread with neither is about the whole page.
    */
   anchorIds?: string[];
   /** The thread was started by an Ask: its question reaches agents as the `ask`, not as a `note`. */
