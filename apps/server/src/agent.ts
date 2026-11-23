@@ -201,10 +201,16 @@ export class AgentHub {
     if (!this.r.kvGet(agentKey(clientId))) this.r.kvPut(agentKey(clientId), this.state(clientId));
     this.touch(who);
     this.waiting.set(clientId, (this.waiting.get(clientId) ?? 0) + 1);
+    // Only a delivered update counts as a call when the wait ends. A wait that times out doesn't: an agent that
+    // went away mid-wait (its wait runs on here until the timeout) drops out a minute after it started that wait.
+    let delivered = false;
     try {
       for (;;) {
         const r = await this.tryDeliver(clientId, session, cfg);
-        if ('text' in r) return r;
+        if ('text' in r) {
+          delivered = r.changed;
+          return r;
+        }
         const t = Date.now();
         if (t >= deadline) return { text: `#q s=${session} ${this.paused() ? 'paused' : 'no changes'}`, svg: null, changed: false };
         await this.sleep(Math.min(r.retryAt, deadline) - t);
@@ -213,7 +219,7 @@ export class AgentHub {
       const n = (this.waiting.get(clientId) ?? 1) - 1;
       if (n > 0) this.waiting.set(clientId, n);
       else this.waiting.delete(clientId);
-      this.touch(who);
+      if (delivered) this.touch(who);
     }
   }
 

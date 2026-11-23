@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 
 import { getPresence, presenceCan, presenceNames } from '../src/api/ai';
-import { agentEntryCount, markAllSeen, marginCards, newestAgentEntry, stillThinking, THINKING_MS, unreadCount } from '../src/editor/ai.logic';
+import { agentEntryCount, markAllSeen, marginCards, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount } from '../src/editor/ai.logic';
 import type { PageData } from '../src/editor/context';
 
 const agent = { kind: 'agent' as const, name: 'Claude' };
@@ -62,12 +62,31 @@ describe('live agent logic', () => {
     ]);
   });
 
-  it('thinking ends when an agent entry arrives or after a timeout', () => {
-    const t = { baseline: 3, at: 1000 };
-    expect(stillThinking(t, 3, 2000)).toBe(true);
-    expect(stillThinking(t, 4, 2000)).toBe(false);
-    expect(stillThinking(t, 3, 1000 + THINKING_MS)).toBe(false);
-    expect(stillThinking(null, 0, 0)).toBe(false);
+  it('keeps margin cards on their page: a stack running past the bottom is pulled back up', () => {
+    const lines = [line('a', 380), line('b', 390), line('c', 395)];
+    const cards = marginCards(lines, [comment('c1', 'a'), comment('c2', 'b'), comment('c3', 'c')], 1, 64, 8, null, 420);
+    expect(cards.map((c) => c.top)).toEqual([212, 284, 356]);
+    // A stack taller than the page keeps its order and overflows instead of overlapping.
+    expect(marginCards(lines, [comment('c1', 'a'), comment('c2', 'b'), comment('c3', 'c')], 1, 64, 8, null, 200).map((c) => c.top)).toEqual([376, 448, 520]);
+  });
+
+  it('thinking ends when an agent writes on a page loaded at the Ask, or after a timeout', () => {
+    let a = '';
+    const p1 = pageWith((p) => {
+      a = p.addComment({ lineKey: 'k', author: agent, text: 'earlier answer' });
+    });
+    const t = startThinking(new Map([['p1', p1]]), 1000);
+    expect(stillThinking(t, new Map([['p1', p1]]), 2000)).toBe(true);
+    // Scrolling: a page with old agent comments mounts, and the asked page unmounts. Neither ends it.
+    const p2 = pageWith((p) => p.addComment({ lineKey: 'k', author: agent, text: 'old' }));
+    expect(stillThinking(t, new Map([['p2', p2]]), 2000)).toBe(true);
+    // The answer arrives as a reply on the page loaded at the Ask, even with other pages mounted around it.
+    p1.page.replyToComment(a, agent, 'the answer');
+    const p1b = { ...p1, comments: p1.page.comments() };
+    expect(stillThinking(t, new Map([['p1', p1b], ['p2', p2]]), 2000)).toBe(false);
+    expect(stillThinking(t, new Map([['p1', p1]]), 1000 + THINKING_MS)).toBe(false);
+    expect(stillThinking(null, new Map(), 0)).toBe(false);
+    expect(startThinking(new Map(), 5, 'c9')).toEqual({ before: {}, at: 5, commentId: 'c9' });
   });
 
   it('reads presence and names agents', async () => {

@@ -21,7 +21,7 @@ import { EmptyState, Menu, Row, Sheet, useToast, type MenuItem } from '../ui/lay
 import { Text } from '../ui/Text';
 import { CommentsPanel } from './CommentsPanel';
 import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence } from './ai';
-import { agentEntryCount, markAllSeen, marginCards, newestAgentEntry, stillThinking, THINKING_MS, unreadCount, type SeenThreads, type Thinking } from './ai.logic';
+import { markAllSeen, marginCards, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
 import { cloneItems } from './items';
 import { PageView } from './PageView';
@@ -128,8 +128,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     void kvGet<SeenThreads>(seenKey).then((v) => v && setSeen((cur) => ({ ...v, ...cur })));
   }, [seenKey]);
   const [thinking, setThinking] = React.useState<Thinking | null>(null);
-  const agentEntries = agentEntryCount(pageData.values());
-  const isThinking = stillThinking(thinking, agentEntries, Date.now());
+  const isThinking = stillThinking(thinking, pageData, Date.now());
   React.useEffect(() => {
     if (!thinking) return;
     if (!isThinking) return setThinking(null);
@@ -385,7 +384,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     notebook.addAsk(lastPage.current ?? currentPageId ?? pages[0]!.id, askText.trim());
     setAskText('');
     setAskOpen(false);
-    if (meta?.aiAccess && agents.length && !meta.aiPaused) setThinking({ baseline: agentEntries, at: Date.now() });
+    if (meta?.aiAccess && agents.length && !meta.aiPaused) setThinking(startThinking(pageData, Date.now()));
     else showToast(!meta?.aiAccess ? 'Saved. Turn on AI access so agents can see it' : meta.aiPaused ? 'Saved. Sharing is paused' : 'Sent. No agent is following right now');
   };
 
@@ -523,7 +522,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                       const info = pages[i]!;
                       const left = (contentW - slot.width) / 2;
                       const data = i >= first && i <= last ? pageData.get(info.id) : undefined;
-                      const cards = wideMargin && data ? marginCards(data.lines, data.comments, slot.width / info.size.w, MARGIN_CARD_H, 8, activeCommentId) : [];
+                      const cards = wideMargin && data ? marginCards(data.lines, data.comments, slot.width / info.size.w, MARGIN_CARD_H, 8, activeCommentId, slot.height) : [];
                       return (
                         <React.Fragment key={slot.id}>
                           <View style={[styles.page, { left, top: slot.top, width: slot.width, height: slot.height, borderColor: c.line }]}>
@@ -550,7 +549,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                                   width={marginW}
                                   active={m.comment.id === activeCommentId}
                                   seen={seen}
-                                  thinking={isThinking && !!m.comment.ask && !m.comment.replies.length}
+                                  thinking={isThinking && thinking?.commentId === m.comment.id}
                                   onPress={() => edCtx.setActiveComment(m.comment.id)}
                                 />
                               ))}

@@ -68,9 +68,18 @@ export interface MarginCard {
 
 /**
  * Open threads for the page margin, top to bottom next to their line, pushed down so they never overlap
- * (`height` px each plus `gap`). Threads whose line is gone are left to the panel.
+ * (`height` px each plus `gap`). With `pageH` (px), cards that would run past the page's bottom are pulled back up
+ * (when they all fit), so they don't spill onto the next page's cards. Threads whose line is gone are left to the panel.
  */
-export function marginCards(lines: Line[], comments: Comment[], scale: number, height: number, gap = 8, activeId: string | null = null): MarginCard[] {
+export function marginCards(
+  lines: Line[],
+  comments: Comment[],
+  scale: number,
+  height: number,
+  gap = 8,
+  activeId: string | null = null,
+  pageH?: number,
+): MarginCard[] {
   const placed = comments
     .filter((c) => !c.resolved || c.id === activeId)
     .map((c) => ({ c, box: threadBox(c, lines) }))
@@ -83,6 +92,13 @@ export function marginCards(lines: Line[], comments: Comment[], scale: number, h
     out.push({ comment: c, top });
     next = top + height + gap;
   }
+  if (pageH !== undefined && out.length * (height + gap) - gap <= pageH) {
+    let limit = pageH;
+    for (let i = out.length - 1; i >= 0 && out[i]!.top + height > limit; i--) {
+      out[i]!.top = limit - height;
+      limit = out[i]!.top - gap;
+    }
+  }
   return out;
 }
 
@@ -90,11 +106,32 @@ export function marginCards(lines: Line[], comments: Comment[], scale: number, h
 export const THINKING_MS = 90_000;
 
 export interface Thinking {
-  /** agentEntryCount when the Ask was sent */
-  baseline: number;
+  /** Pages loaded when the Ask was sent: page id -> comment id -> agent entries in that thread. */
+  before: Record<string, Record<string, number>>;
   at: number;
+  /** The thread the answer goes in (an Ask about a selection); its margin card shows "Thinking…". */
+  commentId?: string;
 }
 
-export function stillThinking(t: Thinking | null, agentEntries: number, now: number): boolean {
-  return !!t && agentEntries <= t.baseline && now - t.at < THINKING_MS;
+const agentEntries = (c: Comment) => entries(c).filter((e) => e.author.kind === 'agent').length;
+
+/** Snapshot of the loaded pages (page id -> data) when an Ask is sent. */
+export function startThinking(pages: ReadonlyMap<string, PageData>, at: number, commentId?: string): Thinking {
+  const before: Thinking['before'] = {};
+  for (const [id, d] of pages) before[id] = Object.fromEntries(d.comments.map((c) => [c.id, agentEntries(c)]));
+  return commentId ? { before, at, commentId } : { before, at };
+}
+
+/**
+ * Still thinking until an agent writes on a page that was loaded when the Ask went out (comparing per thread, so
+ * pages mounting or unmounting while scrolling neither end it nor keep it going), or after THINKING_MS.
+ */
+export function stillThinking(t: Thinking | null, pages: ReadonlyMap<string, PageData>, now: number): boolean {
+  if (!t || now - t.at >= THINKING_MS) return false;
+  for (const [id, d] of pages) {
+    const was = t.before[id];
+    if (!was) continue;
+    for (const c of d.comments) if (agentEntries(c) > (was[c.id] ?? 0)) return false;
+  }
+  return true;
 }
