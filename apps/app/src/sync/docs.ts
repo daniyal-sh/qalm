@@ -96,6 +96,13 @@ export class DocManager {
     return (this.entries.get(docId)?.refs ?? 0) > 0;
   }
 
+  /** How many docs are held open and how many idle ones are cached (benchmarks, tests). */
+  stats(): { open: number; cached: number } {
+    let open = 0;
+    for (const e of this.entries.values()) if (e.refs > 0) open++;
+    return { open, cached: this.entries.size - open };
+  }
+
   /** Is the doc in memory (open or cached)? */
   has(docId: string): boolean {
     return this.entries.has(docId);

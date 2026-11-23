@@ -6,6 +6,7 @@ import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, useWindowDi
 import { GestureDetector, usePinchGesture } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { mark } from '../bench/hook';
 import { exportNotebook, updateNotebookMeta } from '../library/ops';
 import { NameSheet } from '../library/components';
 import { newId } from '../lib/id';
@@ -71,6 +72,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const meta = React.useMemo(() => notebook?.meta() ?? null, [notebook, ver]);
   const sync = useSyncStatus(h);
   const win = useWindowDimensions();
+  React.useEffect(() => mark('qalm:editor-mount'), []);
 
   // ---- tools ----
   const [tools, setTools] = React.useState<ToolState>(DEFAULT_TOOLS);
@@ -203,6 +205,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const commitZoom = React.useCallback(
     (next: number) => {
       const z = clampZoom(next);
+      mark('qalm:zoom-commit', z);
       setLiveScale(1);
       setZoom((prev) => {
         if (Math.abs(z - prev) < 1e-3) return prev;

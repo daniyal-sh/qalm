@@ -3,6 +3,7 @@ import { InkOverlay, PageCanvas, QalmInk, type InkOverlayProps } from 'qalm-ink'
 import * as React from 'react';
 import { PixelRatio, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
+import { mark } from '../bench/hook';
 import { newId } from '../lib/id';
 import { docIds } from '../sync/docs';
 import { useDoc, useSession, useVersion } from '../state/session';
@@ -133,6 +134,9 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
   React.useEffect(() => () => ed.reportPage(info.id, null), [info.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pdf = usePdfBackground(info, width, zoom);
+  React.useEffect(() => {
+    if (pdf) mark('qalm:pdf-ready', { index });
+  }, [pdf]); // eslint-disable-line react-hooks/exhaustive-deps
   const imageIds = React.useMemo(() => items.filter((i) => i.type === 'image').map((i) => (i as { assetId: string }).assetId), [items]);
   const imageUris = useAssetUris(imageIds);
 
@@ -238,7 +242,10 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
         anchors={anchors}
         pdfImage={pdf}
         assetUri={(id) => imageUris.get(id)}
-        onDrawn={drawn.set}
+        onDrawn={(ids) => {
+          drawn.set(ids);
+          mark('qalm:page-drawn', { index, items: ids.length });
+        }}
       />
       <HandoffInkOverlay
         drawn={drawn}

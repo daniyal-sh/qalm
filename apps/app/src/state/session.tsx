@@ -8,6 +8,7 @@ import * as React from 'react';
 import { AssetService } from '../assets/assetService';
 import { decodeJwt, TokenManager, type Tokens, type User } from '../auth/tokens';
 import { tokenStore } from '../auth/tokenStore';
+import { installBenchHook } from '../bench/hook';
 import { config } from '../config';
 import { kvGet, kvSet } from '../lib/kv';
 import { DocManager, docIds, openLoaded, type DocHandle, type RemoteFactory } from '../sync/docs';
@@ -74,6 +75,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [library, setLibrary] = React.useState<Library | null>(null);
   const [localOffer, setLocalOffer] = React.useState(0);
   tmRef.current = tm;
+  const libraryRef = React.useRef<Library | null>(null);
+  libraryRef.current = library;
+  React.useEffect(() => installBenchHook(dm, assets, () => libraryRef.current), [dm, assets]);
 
   // Load tokens and prefs.
   React.useEffect(() => {
