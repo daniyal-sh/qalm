@@ -1,3 +1,4 @@
+import fontkit from '@pdf-lib/fontkit';
 import { BlendMode, LineCapStyle, PDFDocument, StandardFonts, degrees, rgb, type PDFEmbeddedPage, type PDFFont, type PDFImage, type RGB } from 'pdf-lib';
 import { strokeSvgPath } from '../geometry/stroke';
 import { inkPaint } from '../geometry/color';
@@ -7,6 +8,24 @@ import { shapeSvgPath } from '../render/svg';
 import { wrapText } from '../render/text';
 import type { Notebook } from '../model/notebook';
 import type { Page } from '../model/page';
+import { FIGTREE_REGULAR_B64 } from './figtreeFont';
+
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+function fromBase64(s: string): Uint8Array {
+  const out = new Uint8Array(Math.floor((s.length * 3) / 4) - (s.endsWith('==') ? 2 : s.endsWith('=') ? 1 : 0));
+  let j = 0;
+  for (let i = 0; i < s.length; i += 4) {
+    const n = (B64.indexOf(s[i]!) << 18) | (B64.indexOf(s[i + 1]!) << 12) | ((B64.indexOf(s[i + 2]!) & 63) << 6) | (B64.indexOf(s[i + 3]!) & 63);
+    if (j < out.length) out[j++] = (n >> 16) & 255;
+    if (j < out.length) out[j++] = (n >> 8) & 255;
+    if (j < out.length) out[j++] = n & 255;
+  }
+  return out;
+}
+
+let figtree: Uint8Array | undefined;
+/** The Figtree Regular bytes embedded into exported PDFs (the font text boxes use on screen). */
+export const figtreeBytes = (): Uint8Array => (figtree ??= fromBase64(FIGTREE_REGULAR_B64));
 
 export function parseColor(hex: string): RGB {
   let h = hex.trim().replace(/^#/, '');
@@ -16,31 +35,67 @@ export function parseColor(hex: string): RGB {
   return rgb(((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255);
 }
 
-function sanitize(font: PDFFont, s: string): string {
-  let out = '';
+/** A piece of a text row in one font. */
+interface Run { font: PDFFont; text: string }
+
+/**
+ * Splits text into runs: Figtree where it has the glyph (the font on screen), else PDF's built-in Symbol font
+ * (maths and Greek: ∫ √ π ∞ α …), else "?" (CJK, emoji).
+ */
+function textRuns(fonts: { font: PDFFont; has: Set<number> }[], s: string): Run[] {
+  const runs: Run[] = [];
   for (const ch of s) {
-    try {
-      font.widthOfTextAtSize(ch, 10);
-      out += ch;
-    } catch {
-      out += '?';
-    }
+    const cp = ch.codePointAt(0)!;
+    const hit = fonts.find((f) => f.has.has(cp));
+    const font = hit?.font ?? fonts[0]!.font;
+    const text = hit ? ch : '?';
+    const last = runs[runs.length - 1];
+    if (last?.font === font) last.text += text;
+    else runs.push({ font, text });
   }
-  return out;
+  return runs;
+}
+
+const runsWidth = (runs: Run[], size: number) => runs.reduce((w, r) => w + r.font.widthOfTextAtSize(r.text, size), 0);
+
+const isPng = (b: Uint8Array) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+const isJpg = (b: Uint8Array) => b[0] === 0xff && b[1] === 0xd8;
+
+export interface ExportPdfOptions {
+  /**
+   * Turns an image PDF can't hold (WebP, GIF, HEIC, …) into PNG, or null if it can't. PNG and JPEG go in as they
+   * are. The app does this with the platform's decoder.
+   */
+  toPng?: (bytes: Uint8Array) => Promise<Uint8Array | null>;
+  /** Called once for each image asset that still couldn't go in (it is left out of the PDF). */
+  onSkippedImage?: (assetId: string) => void;
 }
 
 /**
  * Exports a notebook as PDF: paper or the source PDF page as background, strokes and shapes as vector paths,
- * images (PNG/JPEG) and text boxes (Helvetica; characters it can't encode become "?").
+ * images (PNG and JPEG; others via `opts.toPng`) and text boxes (Figtree, subset, wrapped with its metrics like on
+ * screen; see `textRuns` for characters Figtree lacks).
  */
 export async function exportPdf(
   nb: Notebook,
   loadPage: (pageId: string) => Promise<Page>,
   getAsset: (id: string) => Promise<Uint8Array>,
+  opts: ExportPdfOptions = {},
 ): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   pdf.setTitle(nb.meta().title ?? '');
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  pdf.registerFontkit(fontkit);
+  // Embedded on first use, so a PDF without text boxes carries no fonts.
+  let fonts: { font: PDFFont; has: Set<number> }[] | undefined;
+  const textFonts = async () => {
+    if (!fonts) {
+      const fig = await pdf.embedFont(figtreeBytes(), { subset: true });
+      const sym = await pdf.embedFont(StandardFonts.Symbol);
+      // Symbol's character set includes Latin letters it draws as Greek: only use it for what Figtree lacks.
+      fonts = [fig, sym].map((font) => ({ font, has: new Set(font.getCharacterSet()) }));
+    }
+    return fonts;
+  };
   const sources = new Map<string, Promise<PDFDocument>>();
   const embedded = new Map<string, PDFEmbeddedPage>();
   const images = new Map<string, PDFImage | null>();
@@ -52,8 +107,10 @@ export async function exportPdf(
   };
   const image = async (assetId: string) => {
     if (!images.has(assetId)) {
-      const b = await getAsset(assetId);
-      const img = b[0] === 0x89 && b[1] === 0x50 ? await pdf.embedPng(b) : b[0] === 0xff && b[1] === 0xd8 ? await pdf.embedJpg(b) : null;
+      let b: Uint8Array | null = await getAsset(assetId);
+      if (!isPng(b) && !isJpg(b)) b = (await opts.toPng?.(b).catch(() => null)) ?? null;
+      const img = b && isPng(b) ? await pdf.embedPng(b) : b && isJpg(b) ? await pdf.embedJpg(b) : null;
+      if (!img) opts.onSkippedImage?.(assetId);
       images.set(assetId, img);
     }
     return images.get(assetId) ?? null;
@@ -110,15 +167,22 @@ export async function exportPdf(
           break;
         }
         case 'text': {
-          const rows = wrapText(sanitize(font, item.text), item.w, (s) => font.widthOfTextAtSize(s, item.fontSize));
+          const fs = await textFonts();
+          const size = item.fontSize;
+          const rows = wrapText(item.text, item.w, (s) => runsWidth(textRuns(fs, s), size));
           const color = parseColor(item.color);
           const rot = item.rot ?? 0;
-          rows.forEach((r, i) => {
-            if (!r) return;
-            const down = item.fontSize + i * item.fontSize * TEXT_LINE_HEIGHT; // baseline below the top-left corner
-            const x = item.x - down * Math.sin(rot);
-            const y = item.y + down * Math.cos(rot);
-            out.drawText(r, { x, y: H - y, size: item.fontSize, font, color, ...(rot ? { rotate: degrees((-rot * 180) / Math.PI) } : {}) });
+          const [cos, sin] = [Math.cos(rot), Math.sin(rot)];
+          rows.forEach((row, i) => {
+            const down = size + i * size * TEXT_LINE_HEIGHT; // baseline below the top-left corner
+            let along = 0; // along the baseline, from the box's left edge
+            for (const r of textRuns(fs, row)) {
+              // Page space (y down): left edge + along·(cos, sin) + down·(−sin, cos).
+              const x = item.x + along * cos - down * sin;
+              const y = item.y + along * sin + down * cos;
+              if (r.text.trim()) out.drawText(r.text, { x, y: H - y, size, font: r.font, color, ...(rot ? { rotate: degrees((-rot * 180) / Math.PI) } : {}) });
+              along += r.font.widthOfTextAtSize(r.text, size);
+            }
           });
           break;
         }
