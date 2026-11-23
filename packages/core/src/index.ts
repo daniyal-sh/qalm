@@ -18,7 +18,7 @@ export {
   HIGHLIGHTER_WIDTH,
   HIGHLIGHTER_ALPHA,
 } from './geometry/stroke';
-export { snapShape } from './geometry/shape';
+export { snapShape, SNAP_HOLD_MS } from './geometry/shape';
 export { hitTestErase, lassoSelect } from './geometry/hit';
 export { itemBBox, unionBBox, textHeight, boxCorners, TEXT_LINE_HEIGHT } from './geometry/bbox';
 export { shapePolylines, ellipseAxes } from './geometry/shape';
