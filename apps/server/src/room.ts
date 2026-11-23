@@ -284,18 +284,35 @@ export class DocRoom extends DurableObject<Env> {
     return this.agents().wait(clientId, session, cfg);
   }
 
-  agentRead(docId: string, ref: string): Promise<AgentResult> {
+  async agentRead(docId: string, ref: string): Promise<AgentResult> {
     this.setDocId(docId);
-    return this.agents().read(ref);
+    try {
+      return await this.agents().read(ref);
+    } catch (e) {
+      return { text: e instanceof Error ? e.message : String(e), svg: null, changed: false, error: true };
+    }
   }
 
-  agentEdit(docId: string, edit: AgentEdit): Promise<string> {
+  /** Expected failures (bad ref, line gone) come back as `{ ok: false }` rather than RPC exceptions. */
+  async agentEdit(docId: string, edit: AgentEdit): Promise<{ ok: boolean; text: string }> {
     this.setDocId(docId);
-    return this.agents().edit(edit);
+    try {
+      return { ok: true, text: await this.agents().edit(edit) };
+    } catch (e) {
+      return { ok: false, text: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   /** Notebook room → page room: an agent's transcription or comment. Agents never touch ink. */
-  applyAgentEdit(docId: string, edit: AgentEdit & { lineKey: string }): string {
+  applyAgentEdit(docId: string, edit: AgentEdit & { lineKey: string }): { ok: boolean; text: string } {
+    try {
+      return { ok: true, text: this.applyAgentEditOrThrow(docId, edit) };
+    } catch (e) {
+      return { ok: false, text: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  private applyAgentEditOrThrow(docId: string, edit: AgentEdit & { lineKey: string }): string {
     this.setDocId(docId);
     if (this.ref?.kind !== 'pg') throw new Error('Not a page room');
     const page = new Page(this.doc);

@@ -6,7 +6,7 @@ import type { DocRoom } from './room';
 
 export interface AgentConfig { idleMs: number; minIntervalMs: number; timeoutMs: number }
 /** Q-ink text plus, when lines need one, the strip image as SVG (the worker turns it into PNG). */
-export interface AgentResult { text: string; svg: string | null; changed: boolean }
+export interface AgentResult { text: string; svg: string | null; changed: boolean; error?: boolean }
 export type AgentEdit =
   | { op: 'transcribe'; ref: string; text: string }
   | { op: 'comment'; ref: string; text: string; agentName: string };
@@ -180,6 +180,8 @@ export class AgentHub {
   async edit(edit: AgentEdit): Promise<string> {
     const { pageId, lineKey } = resolveRef(this.labels(), this.nb(), edit.ref);
     const docId = pgDocId(this.notebookId, pageId);
-    return room(this.env, docId).applyAgentEdit(docId, { ...edit, lineKey });
+    const r = await room(this.env, docId).applyAgentEdit(docId, { ...edit, lineKey });
+    if (!r.ok) throw new Error(r.text);
+    return r.text;
   }
 }

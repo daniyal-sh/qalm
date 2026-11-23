@@ -173,17 +173,24 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
   const text = str(args.text, 'text');
   if (name === 'transcribe') {
     if (!g.can_transcribe) throw new ToolError('This connection may not save transcriptions. The student can turn this on in Settings → AI access.');
-    const msg = await stub.agentEdit(docId, { op: 'transcribe', ref, text });
+    const msg = await edited(stub.agentEdit(docId, { op: 'transcribe', ref, text }));
     await log(env, g, 'transcribe', `${nb.title} ${ref}`, text, null);
     return { content: [{ type: 'text', text: msg }] };
   }
   if (!g.can_comment) throw new ToolError('This connection may not leave comments. The student can turn this on in Settings → AI access.');
-  const msg = await stub.agentEdit(docId, { op: 'comment', ref, text, agentName: g.client_name });
+  const msg = await edited(stub.agentEdit(docId, { op: 'comment', ref, text, agentName: g.client_name }));
   await log(env, g, 'comment', `${nb.title} ${ref}`, text, null);
   return { content: [{ type: 'text', text: msg }] };
 }
 
+async function edited(p: Promise<{ ok: boolean; text: string }>): Promise<string> {
+  const r = await p;
+  if (!r.ok) throw new ToolError(r.text);
+  return r.text;
+}
+
 async function result(env: Env, g: GrantRow, tool: string, targetLabel: string, r: AgentResult): Promise<ToolResult> {
+  if (r.error) throw new ToolError(r.text);
   const content: Content[] = [{ type: 'text', text: r.text }];
   let img: { width: number; height: number } | null = null;
   if (r.svg) {
