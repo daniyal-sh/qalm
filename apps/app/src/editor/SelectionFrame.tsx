@@ -7,7 +7,8 @@ import { liveFrame, type LiveEdit } from './selection.logic';
 
 export type { LiveEdit } from './selection.logic';
 
-const ACCENT = '#4338ca'; // paper stays light: brand accent (light)
+/** Frame colours: the brand accent on light paper; a lighter indigo (and dark knobs) on night paper. */
+export const PAPER_ACCENT = { light: { line: '#4338ca', knob: '#ffffff' }, night: { line: '#a5b4fc', knob: '#1f1f23' } } as const;
 /** px between the ink and the frame line */
 const PAD = 6;
 /** px hit target of a handle (brand: 44 px touch targets) */
@@ -29,6 +30,8 @@ export interface SelectionFrameProps {
   onCommit(edit: LiveEdit): void;
   /** A tap (no drag) inside the frame, at a window point (pageX/pageY). */
   onTap(windowX: number, windowY: number): void;
+  /** On night paper the frame uses a lighter accent. */
+  night?: boolean;
 }
 
 const cursor = (c: string) => (Platform.OS === 'web' ? ({ cursor: c } as object) : null);
@@ -63,7 +66,10 @@ function useDrag(h: DragHandlers, onCancel: () => void) {
  * aspect), the round handle above to rotate. A single text box gets edge handles instead of corners: they change its
  * width (the text reflows) and never its font size.
  */
-export function SelectionFrame({ items, scale, live, onLive, onCommit, onTap }: SelectionFrameProps) {
+export function SelectionFrame({ items, scale, live, onLive, onCommit, onTap, night }: SelectionFrameProps) {
+  const accent = night ? PAPER_ACCENT.night : PAPER_ACCENT.light;
+  const line = { borderColor: accent.line };
+  const knob = { borderColor: accent.line, backgroundColor: accent.knob };
   const base = React.useMemo(() => selectionFrame(items), [items]);
   const frame = liveFrame(items, live);
   const single = items.length === 1 ? items[0]! : null;
@@ -169,11 +175,11 @@ export function SelectionFrame({ items, scale, live, onLive, onCommit, onTap }: 
       style={[styles.hit, { left: x - HIT / 2, top: y - HIT / 2 }, cursor(cur)]}
     >
       {shape === 'round' ? (
-        <View style={[styles.knob, styles.round]}>
-          <Icon name="rotate-cw" size={11} color={ACCENT} />
+        <View style={[styles.knob, knob, styles.round]}>
+          <Icon name="rotate-cw" size={11} color={accent.line} />
         </View>
       ) : (
-        <View style={[styles.knob, shape === 'bar' ? styles.bar : styles.square]} />
+        <View style={[styles.knob, knob, shape === 'bar' ? styles.bar : styles.square]} />
       )}
     </View>
   );
@@ -200,8 +206,8 @@ export function SelectionFrame({ items, scale, live, onLive, onCommit, onTap }: 
       }}
     >
       {/* the rotate handle's stem */}
-      <View pointerEvents="none" style={[styles.stem, { left: m + bw / 2 - 0.5, top: top - ROT_OFF + 8, height: ROT_OFF - 8 }]} />
-      <View {...body} accessibilityLabel="Move selection" style={[styles.box, { left: m, top, width: bw, height: bh }, cursor('move')]} />
+      <View pointerEvents="none" style={[styles.stem, { backgroundColor: accent.line, left: m + bw / 2 - 0.5, top: top - ROT_OFF + 8, height: ROT_OFF - 8 }]} />
+      <View {...body} accessibilityLabel="Move selection" style={[styles.box, line, { left: m, top, width: bw, height: bh }, cursor('move')]} />
       {textOnly ? (
         <>
           {handle('l', m, top + bh / 2, left, 'Text box width', resizeCursor(1), 'bar')}
@@ -221,10 +227,10 @@ export function SelectionFrame({ items, scale, live, onLive, onCommit, onTap }: 
 }
 
 const styles = StyleSheet.create({
-  box: { position: 'absolute', borderWidth: 1.5, borderColor: ACCENT, borderStyle: 'dashed', borderRadius: 2 },
-  stem: { position: 'absolute', width: 1, backgroundColor: ACCENT },
+  box: { position: 'absolute', borderWidth: 1.5, borderStyle: 'dashed', borderRadius: 2 },
+  stem: { position: 'absolute', width: 1 },
   hit: { position: 'absolute', width: HIT, height: HIT, alignItems: 'center', justifyContent: 'center' },
-  knob: { backgroundColor: '#ffffff', borderColor: ACCENT, borderWidth: 1.5 },
+  knob: { borderWidth: 1.5 },
   square: { width: 12, height: 12, borderRadius: 3 },
   bar: { width: 8, height: 22, borderRadius: 4 },
   round: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },

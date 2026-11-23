@@ -151,3 +151,31 @@ describe('paperPattern', () => {
     expect(paperPattern('weekly', 'white', size).lines).toHaveLength(6);
   });
 });
+
+describe('text measure and night ink (F1, F17)', () => {
+  it('uses an installed text measure, never below one row', async () => {
+    const { itemBBox, setTextMeasure, textHeight } = await import('../src');
+    const t = { id: 't', type: 'text' as const, x: 0, y: 0, w: 100, text: 'WWWWWWWWWWWWWWWW', fontSize: 10, color: '#000000' };
+    const estimated = textHeight(t);
+    setTextMeasure(() => 52);
+    try {
+      expect(textHeight(t)).toBe(52);
+      expect(itemBBox(t)[3]).toBe(52);
+      setTextMeasure(() => 2);
+      expect(textHeight(t)).toBe(13);
+      setTextMeasure(() => null);
+      expect(textHeight(t)).toBe(estimated);
+    } finally {
+      setTextMeasure(null);
+    }
+  });
+
+  it('maps graphite to night ink and back', async () => {
+    const { inkOnPaper, swatchOfInk } = await import('../src');
+    expect(inkOnPaper('#27272a', 'night')).toBe('#e4e4e7');
+    expect(inkOnPaper('#27272a', 'white')).toBe('#27272a');
+    expect(inkOnPaper('#b91c1c', 'night')).toBe('#b91c1c');
+    expect(swatchOfInk('#e4e4e7', 'night')).toBe('#27272a');
+    expect(swatchOfInk('#e4e4e7', 'cream')).toBe('#e4e4e7');
+  });
+});

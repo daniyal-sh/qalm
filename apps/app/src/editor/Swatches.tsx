@@ -1,4 +1,4 @@
-import { DEFAULT_SWATCHES, HIGHLIGHTER_ALPHA, splitAlpha, type SwatchTool } from '@qalm/core';
+import { DEFAULT_SWATCHES, HIGHLIGHTER_ALPHA, splitAlpha, type PaperColor, type SwatchTool } from '@qalm/core';
 import * as React from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { GestureDetector, useExclusiveGestures, usePanGesture, useTapGesture } from 'react-native-gesture-handler';
@@ -145,13 +145,15 @@ export interface SwatchStripProps {
   onDragging?(on: boolean): void;
   /** Label prefix for the selection bar ("Recolour"). */
   verb?: string;
+  /** The page's paper: the picker previews the ink as it will look there (graphite is light on night paper). */
+  paper?: PaperColor;
 }
 
 /**
  * The tool's saved colours, then "+" (the picker). Tap to use; hold and drag to reorder; hold (or right-click) for
  * Remove / Move. The current colour has an ink ring and a check (tech-spec §5).
  */
-export function SwatchStrip({ tool, current, onSelect, onDragging, verb }: SwatchStripProps) {
+export function SwatchStrip({ tool, current, onSelect, onDragging, verb, paper }: SwatchStripProps) {
   const { c } = useTheme();
   const sw = useSwatches(tool);
   const [drag, setDrag] = React.useState<{ color: string; from: number; dx: number } | null>(null);
@@ -224,6 +226,7 @@ export function SwatchStrip({ tool, current, onSelect, onDragging, verb }: Swatc
       <ColorPicker
         visible={!!picker}
         tool={tool}
+        paper={paper}
         initial={current}
         saved={list}
         anchor={picker ?? undefined}

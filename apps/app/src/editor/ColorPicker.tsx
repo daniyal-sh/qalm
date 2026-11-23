@@ -1,4 +1,4 @@
-import { HIGHLIGHTER_ALPHA, MAX_SWATCHES, normalizeColor, splitAlpha, withAlpha, type SwatchTool } from '@qalm/core';
+import { HIGHLIGHTER_ALPHA, inkOnPaper, MAX_SWATCHES, normalizeColor, PAPER_BG, splitAlpha, withAlpha, type PaperColor, type SwatchTool } from '@qalm/core';
 import * as React from 'react';
 import { Modal, Pressable, StyleSheet, useWindowDimensions, View, type GestureResponderEvent, type ViewStyle } from 'react-native';
 
@@ -58,6 +58,8 @@ export interface ColorPickerProps {
   tool: SwatchTool;
   /** The colour to start from (the tool's current colour). */
   initial: string;
+  /** The page's paper, for the preview tile (pen ink only; highlights preview on white). */
+  paper?: PaperColor;
   /** Saved colours; "Add" is disabled when full. */
   saved: string[];
   /** Window point to open next to (a "+" button); centred / docked when missing or on narrow screens. */
@@ -71,7 +73,7 @@ export interface ColorPickerProps {
  * The colour picker popover: a hue slider over a grid of solid tones for that hue, a hex field and, for the
  * highlighter, an opacity slider. "Add" saves the colour as a swatch and uses it; picking a saved colour just uses it.
  */
-export function ColorPicker({ visible, tool, initial: given, saved, anchor, onClose, onPick }: ColorPickerProps) {
+export function ColorPicker({ visible, tool, initial: given, saved, anchor, onClose, onPick, paper }: ColorPickerProps) {
   // The recolour bar passes '' when the selection has mixed colours.
   const initial = normalizeColor(given) ?? '#27272a';
   const { c } = useTheme();
@@ -97,6 +99,7 @@ export function ColorPicker({ visible, tool, initial: given, saved, anchor, onCl
     setHexText(hex);
   };
   // Highlighters at the default opacity stay plain #rrggbb (the same as every highlight made before this).
+  const onNight = !hl && paper === 'night';
   const result = hl && Math.abs(alpha - HIGHLIGHTER_ALPHA) > 0.005 ? withAlpha(rgb, alpha) : rgb;
   const isSaved = saved.some((s) => sameColor(s, result));
   const full = !isSaved && saved.length >= MAX_SWATCHES;
@@ -176,8 +179,13 @@ export function ColorPicker({ visible, tool, initial: given, saved, anchor, onCl
           ) : null}
 
           <View style={styles.foot}>
-            <View accessibilityLabel={`Preview ${result}`} style={[styles.preview, { borderColor: c.line, backgroundColor: '#ffffff' }]}>
-              <View style={[StyleSheet.absoluteFill, { backgroundColor: rgb, opacity: hl ? alpha : 1 }]} />
+            <View accessibilityLabel={`Preview ${result}`} style={[styles.preview, { borderColor: c.line, backgroundColor: onNight ? PAPER_BG.night : '#ffffff' }]}>
+              {/* On night paper, pen ink previews as a dot on the paper, as it will be drawn there. */}
+              {!onNight ? (
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: rgb, opacity: hl ? alpha : 1 }]} />
+              ) : (
+                <View style={[styles.previewInk, { backgroundColor: inkOnPaper(rgb, 'night') }]} />
+              )}
             </View>
             <TextField
               accessibilityLabel="Hex colour"
@@ -217,5 +225,6 @@ const styles = StyleSheet.create({
   thumb: { position: 'absolute', top: 11, width: 22, height: 22, borderRadius: 11, borderWidth: 3, outlineWidth: 1.5, outlineStyle: 'solid' } as ViewStyle,
   tile: { width: TILE, height: TILE, borderRadius: radius.control, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
   foot: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  preview: { width: 44, height: 44, borderRadius: radius.control, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  preview: { width: 44, height: 44, borderRadius: radius.control, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  previewInk: { width: 26, height: 26, borderRadius: 13 },
 });
