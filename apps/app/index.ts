@@ -7,8 +7,14 @@ if (Platform.OS === 'web') {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { LoadSkiaWeb } = require('@shopify/react-native-skia/lib/module/web') as typeof import('@shopify/react-native-skia/lib/module/web');
   // Next to index.html (found from our own script URL), so deep links like /notebook/x and Electron's file:// both work.
+  // The dev server (`expo start --web`) serves its bundle from elsewhere, and the wasm from the site root: there,
+  // document.baseURI would be /notebook/ on a reload of a notebook URL.
   const script = [...document.scripts].find((s) => s.src.includes('/_expo/static/'))?.src;
-  const base = script ? script.slice(0, script.indexOf('_expo/static/')) : document.baseURI;
+  const base = script
+    ? script.slice(0, script.indexOf('_expo/static/'))
+    : /^https?:$/.test(location.protocol)
+      ? `${location.origin}/`
+      : document.baseURI;
   void LoadSkiaWeb({ locateFile: (file: string) => new URL(file, base).href }).then(() => {
     require('expo-router/entry');
   });

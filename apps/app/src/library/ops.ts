@@ -1,10 +1,12 @@
 /** Library operations that touch docs, assets and files (wrapping the pure helpers in actions.ts and export/). */
 import { Notebook, type Library, type NotebookMeta } from '@qalm/core';
+import { Alert, Platform } from 'react-native';
 import * as Y from 'yjs';
 
 import type { AssetService } from '../assets/assetService';
 import { buildPdf, buildPdfNotebook, buildQalm, exportFileName, pdfPageSizes, restoreQalm, type NotebookSource } from '../export/notebookExport';
 import { saveFile } from '../export/save';
+import { toPng } from '../export/toPng';
 import { newId } from '../lib/id';
 import { stripExt, type PickedFile } from '../lib/mime';
 import { docIds, openLoaded, type DocManager } from '../sync/docs';
@@ -114,13 +116,28 @@ export function notebookSource(ctx: Pick<Ctx, 'dm' | 'assets'>, notebook: Notebo
   };
 }
 
+/** A plain message: the browser dialog on web, an Alert on native. */
+function notice(title: string, body: string): void {
+  if (Platform.OS === 'web') (globalThis as { alert?: (m: string) => void }).alert?.(`${title}\n\n${body}`);
+  else Alert.alert(title, body);
+}
+
 export async function exportNotebook(ctx: Pick<Ctx, 'dm' | 'assets'>, id: string, kind: 'pdf' | 'qalm'): Promise<void> {
   const h = await openLoaded(ctx.dm, docIds.notebook(id), 3000);
   try {
     const nb = new Notebook(h.doc);
     const src = notebookSource(ctx, nb);
-    const bytes = kind === 'pdf' ? await buildPdf(src) : await buildQalm(src);
+    const skipped: string[] = [];
+    const bytes = kind === 'pdf' ? await buildPdf(src, { toPng, onSkippedImage: (id) => skipped.push(id) }) : await buildQalm(src);
     await saveFile(exportFileName(nb.meta().title, kind), kind === 'pdf' ? 'application/pdf' : 'application/x-qalm', bytes);
+    if (skipped.length) {
+      const names = skipped.map((id) => nb.asset(id)?.name ?? 'image');
+      const n = skipped.length;
+      notice(
+        n === 1 ? 'An image was left out of the PDF' : `${n} images were left out of the PDF`,
+        `${names.join(', ')}: this device can’t convert ${n === 1 ? 'its format' : 'their format'} for PDF. The .qalm backup keeps ${n === 1 ? 'it' : 'them'}.`,
+      );
+    }
   } finally {
     h.release();
   }

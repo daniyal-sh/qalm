@@ -48,7 +48,7 @@ export {
 export { paperPattern, type PaperPattern } from './geometry/paper';
 export { renderPageSvg } from './render/svg';
 export { renderLinesStripSvg } from './render/strip';
-export { exportPdf } from './export/pdf';
+export { exportPdf, type ExportPdfOptions } from './export/pdf';
 export { packQalm, unpackQalm, type QalmBundle } from './export/qalm';
 export {
   assignLabels,

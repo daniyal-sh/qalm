@@ -1,5 +1,5 @@
 import { exportPdf, LOCAL_ORIGIN, Notebook, packQalm, Page, unpackQalm, createNotebookDoc } from '@qalm/core';
-import type { Asset, NotebookInit, NotebookMeta, Size } from '@qalm/core';
+import type { Asset, ExportPdfOptions, NotebookInit, NotebookMeta, Size } from '@qalm/core';
 import { PDFDocument } from 'pdf-lib';
 import * as Y from 'yjs';
 
@@ -30,8 +30,8 @@ function assetGetter(src: NotebookSource) {
   };
 }
 
-/** PDF with ink flattened (core `exportPdf`). */
-export function buildPdf(src: NotebookSource): Promise<Uint8Array> {
+/** PDF with ink flattened (core `exportPdf`). `opts`: converting images PDF can't hold, and hearing which still failed. */
+export function buildPdf(src: NotebookSource, opts?: ExportPdfOptions): Promise<Uint8Array> {
   return withPages(src, (pages) =>
     exportPdf(
       src.notebook,
@@ -40,6 +40,7 @@ export function buildPdf(src: NotebookSource): Promise<Uint8Array> {
         return new Page(d ?? new Y.Doc());
       },
       assetGetter(src),
+      opts,
     ),
   );
 }
