@@ -74,17 +74,18 @@ const stopChrome = () => {
 process.on('exit', stopChrome);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function targets() {
-  for (let i = 0; i < 50; i++) {
+/** The first page target: /json can answer before Chrome has opened its page. */
+async function firstPage() {
+  for (let i = 0; i < 100; i++) {
     try {
-      return await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json();
-    } catch {
-      await sleep(200);
-    }
+      const page = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page');
+      if (page) return page;
+    } catch {}
+    await sleep(200);
   }
   throw new Error('Chrome did not start');
 }
-const page = (await targets()).find((t) => t.type === 'page');
+const page = await firstPage();
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((r) => ws.addEventListener('open', r, { once: true }));
 let nextId = 1;
