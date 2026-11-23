@@ -14,12 +14,17 @@ const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05
 
 const INSTRUCTIONS =
   'qalm notebooks in Q-ink Live format. Call wait() to list sessions, then wait(s) in a loop to follow live writing. ' +
-  'Lines marked [n] are row n of the attached image; ~"…" is the device guess. Save your reading of a line with transcribe, ' +
-  'pin feedback with comment. "note C5 …", "re C3 …" and "ask C6 …" are the student writing to you: answer with comment(thread). ' +
-  '"open C2 …" is a thread from before you joined, with its latest message; read("C2") shows all of it. ' +
-  'You can never change ink.';
+  'Each update lists regions: "R7 [1] p6 @120,300 260x80 +5 -1" is region R7, row [1] of the attached image, on page 6 at ' +
+  'x,y with width x height on a 0-1000 grid across the page width (the header gives the page size). In the image, new ink is ' +
+  'black, the ink around it grey (context) and erased strokes faint red dashed; read the handwriting yourself. "(was R3)" ' +
+  'means R7 replaces R3. A region with a quoted text instead of a row has a saved reading. Save your reading of a region with ' +
+  'transcribe(R7, text) and later updates send that text instead of an image. Comment on a region, a box "p6@120,300,260,80" ' +
+  'or a page "p6" with comment; the comment follows the ink. "note C5 …", "re C3 …" and "ask C6 R9 …" are the student writing ' +
+  'to you: answer with comment(thread). "open C2 …" is a thread from before you joined, with its latest message; read("C2") ' +
+  'shows all of it. You can never change ink.';
 
 const sArg = { type: 'string', description: 'Session (from wait with no arguments). Defaults to the last session you waited on.' };
+const REF = 'a region "R7", a box "p6@120,300,260,80" (x,y,w,h on the 0-1000 grid)';
 const TOOLS = [
   {
     name: 'wait',
@@ -29,24 +34,28 @@ const TOOLS = [
   },
   {
     name: 'read',
-    description: 'Reads on demand: "outline", a page "p3", lines "p3:L2-9", the PDF behind a page "pdf:p2", or a whole comment thread "C5". Text plus an image strip where needed.',
+    description:
+      `Reads on demand: "outline", a page "p3" (all its ink as regions), ${REF} (a crop), the PDF behind a page "pdf:p2", ` +
+      'or a whole comment thread "C5". Text plus an image where needed.',
     inputSchema: { type: 'object', properties: { ref: { type: 'string' }, s: sArg }, required: ['ref'], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: 'transcribe',
-    description: "Saves your reading of a line (e.g. ref \"p3:L4\"). It is then sent as trusted text. The student can edit it.",
+    description:
+      `Saves your reading of the strokes in ${REF}, e.g. "u = x^2". While they are unchanged, updates send this text instead of an image; ` +
+      'if the student adds to or erases them, the reading is marked stale and you get an image again. Refused where the student wrote their own reading.',
     inputSchema: { type: 'object', properties: { ref: { type: 'string' }, text: { type: 'string' }, s: sArg }, required: ['ref', 'text'], additionalProperties: false },
   },
   {
     name: 'comment',
     description:
-      'Starts a comment thread next to a line (ref "p3:L4"), or replies in a thread (thread "C3", e.g. to answer a note, re or ask). ' +
+      `Starts a comment thread on ${REF} or a page "p3" (it follows the ink when moved), or replies in a thread (thread "C3", e.g. to answer a note, re or ask). ` +
       'Set resolve only when the thread is trivially done (e.g. the student said thanks). Never changes ink.',
     inputSchema: {
       type: 'object',
       properties: {
-        ref: { type: 'string', description: 'Line to start a thread on, e.g. "p3:L4" or "p3:D1"' },
+        ref: { type: 'string', description: 'What to start a thread on: "R7", "p3@120,300,260,80" or "p3"' },
         thread: { type: 'string', description: 'Thread to reply in, e.g. "C3" (instead of ref)' },
         text: { type: 'string' },
         resolve: { type: 'boolean', description: 'With thread: also mark it resolved' },

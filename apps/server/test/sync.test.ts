@@ -19,7 +19,7 @@ describe('sync', () => {
     pa.addItem(stroke('s1', 50, 100, 150, 120));
     pb.addItem(stroke('s2', 50, 200, 150, 220));
     await until(() => pa.items().length === 2 && pb.items().length === 2);
-    expect(pa.lines().map((l) => l.key).sort()).toEqual(['s1', 's2']);
+    expect(pb.items().map((i) => i.id).sort()).toEqual(['s1', 's2']);
     expect(Y.encodeStateVector(a.doc)).toEqual(Y.encodeStateVector(b.doc));
 
     // After eviction, a late joiner gets everything from storage.

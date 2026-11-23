@@ -3,7 +3,7 @@ import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import { Notebook, Page, summarizeThreads, type ThreadSummary } from '@qalm/core';
+import { Notebook, Page, inkInBox, migratePage, summarizeThreads, type ThreadSummary } from '@qalm/core';
 import type { Env } from './env';
 import { parseDocId, nbDocId, pgDocId, room, type DocRef } from './docs';
 import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit, type AgentWho, type PageEdit, type Presence } from './agent';
@@ -348,7 +348,7 @@ export class DocRoom extends DurableObject<Env> {
   /** Page room: the summaries of this page's threads, for the notebook's thread index. */
   private threadSummaries(pageId: string): ThreadSummary[] {
     const page = new Page(this.doc);
-    return summarizeThreads(pageId, page.comments(), page.lines());
+    return summarizeThreads(pageId, page.comments(), page.readings());
   }
 
   lastClientUpdateAt(docId: string): number {
@@ -408,20 +408,27 @@ export class DocRoom extends DurableObject<Env> {
   private applyAgentEditOrThrow(docId: string, edit: PageEdit): { text: string; id?: string; threads?: ThreadSummary[] } {
     this.setDocId(docId);
     if (this.ref?.kind !== 'pg') throw new Error('Not a page room');
+    migratePage(this.doc); // a page nobody has opened since regions (the app migrates on load too)
     const page = new Page(this.doc);
     if (edit.op === 'reply') {
       if (!page.replyToComment(edit.commentId, { kind: 'agent', name: edit.agentName }, edit.text)) throw new Error(`Thread ${edit.ref} no longer exists`);
       if (edit.resolve) page.resolveComment(edit.commentId);
       return { text: `Replied in ${edit.ref}${edit.resolve ? ' and resolved it' : ''}`, threads: this.threadSummaries(this.ref.pageId) };
     }
-    const line = page.lines().find((l) => l.key === edit.lineKey);
-    if (!line) throw new Error(`Line ${edit.ref} no longer exists`);
+    const items = page.items();
+    const onPage = new Set(items.map((i) => i.id));
+    // A region's strokes still on the page, or the ink in a box.
+    const ids = edit.ids ? edit.ids.filter((id) => onPage.has(id)) : edit.box ? inkInBox(items, edit.box) : [];
     if (edit.op === 'transcribe') {
-      if (line.textSrc === 'user') throw new Error(`The student typed ${edit.ref} themselves; leave a comment instead`);
-      page.setLineText(edit.lineKey, edit.text, 'agent', undefined, edit.agentName);
+      if (!ids.length) throw new Error(`There is no ink in ${edit.ref} any more; read the page for what is there now`);
+      if (page.readings().some((r) => r.src === 'user' && r.ids.some((id) => ids.includes(id)))) {
+        throw new Error(`The student wrote their own reading of ${edit.ref}; leave a comment instead`);
+      }
+      page.setReading(ids, edit.text, 'agent', edit.agentName);
       return { text: `Saved ${edit.ref}` };
     }
-    const id = page.addComment({ lineKey: edit.lineKey, author: { kind: 'agent', name: edit.agentName }, text: edit.text });
+    // A thread on strokes follows them; the box is where it sits if they are all erased (or there were none).
+    const id = page.addComment({ author: { kind: 'agent', name: edit.agentName }, text: edit.text, ...(ids.length ? { anchorIds: ids } : {}), ...(edit.box ? { anchor: edit.box } : {}) });
     return { text: `Commented on ${edit.ref}`, id, threads: this.threadSummaries(this.ref.pageId) };
   }
 }

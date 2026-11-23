@@ -34,38 +34,35 @@ describe('mcp', () => {
     expect(sessions).toContain(`s=${s} "Calc 2"`);
     expect(sessions).not.toContain('Diary');
 
-    // The first wait registers the agent; then the student writes two lines and pauses.
+    // The first wait registers the agent; then the student writes two rows far apart and pauses.
     const waiting = tool(token, 'wait', { s });
     await new Promise((r) => setTimeout(r, 50));
     n.page.addItem(stroke('s1', 50, 100, 200, 120));
     n.page.addItem(stroke('s2', 50, 200, 200, 220));
     const up = await waiting;
     const text = textOf(up);
-    expect(text).toMatch(new RegExp(`^#q s=${s} r=1 p1`));
-    expect(text).toContain('+L1 [1]');
-    expect(text).toContain('+L2 [2]');
+    // The agent's first update for the page: a first look, one region per cluster, each a row of the image.
+    expect(text).toBe([`#q s=${s} r=1 p1 1000x1415 first look`, 'R1 [1] p1 @84,168 253x34', 'R2 [2] p1 @84,336 253x34'].join('\n'));
     const img = up.content.find((c) => c.type === 'image') as { data: string; mimeType: string } | undefined;
     expect(img?.mimeType).toBe('image/png');
     const png = Uint8Array.from(atob(img!.data), (c) => c.charCodeAt(0));
     expect([...png.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
 
     const before = inkOf(n.page);
-    // transcribe makes the line trusted text.
-    const tr = await tool(token, 'transcribe', { ref: 'p1:L1', text: 'x^3/3' });
-    expect(tr.isError).toBeFalsy();
-    await until(() => n.page.lines().find((l) => l.key === 's1')?.text === 'x^3/3');
-    expect(n.page.lines().find((l) => l.key === 's1')?.textSrc).toBe('agent');
-    expect(n.page.lines().find((l) => l.key === 's1')?.by).toBe('Tutor'); // the agent's name, shown with the reading
+    // transcribe saves a reading of the region's strokes.
+    const tr = await tool(token, 'transcribe', { ref: 'R1', text: 'x^3/3' });
+    expect(textOf(tr)).toBe('Saved R1');
+    await until(() => n.page.readings().some((r) => r.text === 'x^3/3'));
+    expect(n.page.readings()[0]).toMatchObject({ ids: ['s1'], src: 'agent', by: 'Tutor' }); // the agent's name, shown with the reading
     const read = textOf(await tool(token, 'read', { ref: 'p1', s }));
-    expect(read).toContain('L1 "x^3/3"');
-    expect(read).toContain('L2 [1]');
+    expect(read).toBe(['#q p1 1000x1415', 'R1 p1 @84,168 253x34 "x^3/3"', 'R2 [1] p1 @84,336 253x34'].join('\n'));
 
-    // comment pins a Comment on the line.
-    const cm = await tool(token, 'comment', { ref: 'p1:L2', text: 'Check the sign' });
-    expect(cm.isError).toBeFalsy();
+    // comment starts a thread on the region's strokes.
+    const cm = await tool(token, 'comment', { ref: 'R2', text: 'Check the sign' });
+    expect(textOf(cm)).toBe('Commented on R2 as thread C1');
     await until(() => n.page.comments().length === 1);
     const c = n.page.comments()[0]!;
-    expect(c).toMatchObject({ lineKey: 's2', text: 'Check the sign', author: { kind: 'agent', name: 'Tutor' } });
+    expect(c).toMatchObject({ anchorIds: ['s2'], text: 'Check the sign', author: { kind: 'agent', name: 'Tutor' } });
 
     // No tool changed the ink.
     expect(inkOf(n.page)).toBe(before);
@@ -74,14 +71,16 @@ describe('mcp', () => {
     // An Ask wakes the agent at once, with the question.
     const asked = tool(token, 'wait', { s });
     await new Promise((r) => setTimeout(r, 50));
-    n.nb.addAsk(n.pageId, 'is L2 right?');
+    n.nb.addAsk(n.pageId, 'is R2 right?');
     const at = Date.now();
     const askText = textOf(await asked);
     expect(Date.now() - at).toBeLessThan(700);
-    expect(askText).toContain('ask "is L2 right?"');
+    expect(askText).toContain('ask "is R2 right?"');
 
     // Bad refs fail softly.
-    expect((await tool(token, 'comment', { ref: 'p1:L99', text: 'x' })).isError).toBe(true);
+    expect((await tool(token, 'comment', { ref: 'R99', text: 'x' })).isError).toBe(true);
+    expect((await tool(token, 'comment', { ref: 'p1:L2', text: 'x' })).isError).toBe(true);
+    expect((await tool(token, 'transcribe', { ref: 'p1', text: 'x' })).isError).toBe(true);
     expect((await tool(token, 'read', { ref: 'p9' })).isError).toBe(true);
     expect((await tool(token, 'read', { ref: 'nonsense' })).isError).toBe(true);
     // Another notebook is outside the grant.
@@ -101,7 +100,7 @@ describe('mcp', () => {
     const first = tool(token, 'wait', { s });
     await new Promise((r) => setTimeout(r, 50));
     n.page.addItem(stroke('a1', 50, 100, 200, 120));
-    expect(textOf(await first)).toContain('+L1 [1]');
+    expect(textOf(await first)).toContain('R1 [1] p1 @');
 
     // Written and erased between updates: it never appears.
     const t0 = Date.now();
@@ -112,9 +111,7 @@ describe('mcp', () => {
     const text = textOf(await second);
     // The test min interval is 800 ms.
     expect(Date.now() - t0).toBeGreaterThanOrEqual(700);
-    expect(text).toContain('+L2 [1]');
-    expect(text).not.toContain('L3');
-    expect(text).not.toMatch(/^[+~-]L1/m);
+    expect(text.split('\n').slice(1)).toEqual(['R2 [1] p1 @84,336 253x34 +1']); // no trace of the stroke written and erased
     n.nbc.close();
     n.pgc.close();
   });
@@ -125,14 +122,14 @@ describe('mcp', () => {
     n.page.addItem(stroke('k1', 50, 100, 200, 120));
     const token = await connectAgent('locked@example.com', { notebooks: ['locknb'], comment: false, transcribe: false }, 'Viewer');
     const s = sessionOf('locknb');
-    expect(textOf(await tool(token, 'read', { ref: 'p1', s }))).toContain('L1 [1]');
-    const tr = await tool(token, 'transcribe', { ref: 'p1:L1', text: 'hi' });
+    expect(textOf(await tool(token, 'read', { ref: 'p1', s }))).toContain('R1 [1]');
+    const tr = await tool(token, 'transcribe', { ref: 'R1', text: 'hi' });
     expect(tr.isError).toBe(true);
     expect(textOf(tr)).toContain('may not save transcriptions');
-    const cm = await tool(token, 'comment', { ref: 'p1:L1', text: 'hi' });
+    const cm = await tool(token, 'comment', { ref: 'R1', text: 'hi' });
     expect(cm.isError).toBe(true);
     expect(n.page.comments()).toHaveLength(0);
-    expect(n.page.lines()[0]!.text).toBeUndefined();
+    expect(n.page.readings()).toHaveLength(0);
 
     const grants = (await (await call('/ai/grants', { token: t.accessToken })).json()) as { grants: { id: string; clientName: string }[] };
     const g = grants.grants.find((x) => x.clientName === 'Viewer')!;
@@ -142,7 +139,7 @@ describe('mcp', () => {
     expect(patch.status).toBe(200);
     const pg = ((await patch.json()) as { grant: { canComment: boolean; canTranscribe: boolean; notebookIds: string[] } }).grant;
     expect(pg).toMatchObject({ canComment: true, canTranscribe: false, notebookIds: ['locknb'] });
-    expect((await tool(token, 'comment', { ref: 'p1:L1', text: 'now allowed' })).isError).toBeFalsy();
+    expect((await tool(token, 'comment', { ref: 'R1', text: 'now allowed' })).isError).toBeFalsy();
     const pre = await call('/ai/grants', { method: 'OPTIONS', headers: { Origin: 'null', 'Access-Control-Request-Method': 'PATCH' } });
     expect(pre.status).toBe(204);
     expect(pre.headers.get('Access-Control-Allow-Origin')).toBe('*');
@@ -159,21 +156,23 @@ describe('mcp', () => {
     const t = await signIn('typed@example.com');
     const n = await notebook(t, 'typednb', 'Typed');
     n.page.addItem(stroke('u1', 50, 100, 200, 120));
-    n.page.setLineText('u1', 'my words', 'user');
+    n.page.setReading(['u1'], 'my words', 'user');
     const token = await connectAgent('typed@example.com', { notebooks: ['typednb'], comment: true, transcribe: true });
     await until(async () => {
       const id = `pg:typednb:${n.pageId}`;
       const st = await env.DOC_ROOM.get(env.DOC_ROOM.idFromName(id)).getState(id);
       const d = new Y.Doc();
       Y.applyUpdate(d, st);
-      return new Page(d).lines()[0]?.textSrc === 'user';
+      return new Page(d).readings()[0]?.src === 'user';
     });
-    // Typed text goes out as trusted text.
-    expect(textOf(await tool(token, 'read', { ref: 'p1', s: sessionOf('typednb') }))).toContain('L1 "my words"');
-    const r = await tool(token, 'transcribe', { ref: 'p1:L1', text: 'agent words', s: sessionOf('typednb') });
+    // The student's reading goes out as text.
+    expect(textOf(await tool(token, 'read', { ref: 'p1', s: sessionOf('typednb') }))).toContain('R1 p1 @84,168 253x34 "my words"');
+    const r = await tool(token, 'transcribe', { ref: 'R1', text: 'agent words', s: sessionOf('typednb') });
     expect(r.isError).toBe(true);
-    expect(textOf(r)).toContain('typed p1:L1 themselves');
-    expect(n.page.lines()[0]!.text).toBe('my words');
+    expect(textOf(r)).toContain('wrote their own reading of R1');
+    const box = await tool(token, 'transcribe', { ref: 'p1@80,160,300,50', text: 'agent words', s: sessionOf('typednb') });
+    expect(box.isError).toBe(true);
+    expect(n.page.readings().map((x) => x.text)).toEqual(['my words']);
     n.nbc.close();
     n.pgc.close();
   });
@@ -197,7 +196,7 @@ describe('mcp', () => {
     const hidden = await tool(token, 'read', { ref: 'outline', s: sessionOf('aioffnb') });
     expect(hidden.isError).toBe(true);
     expect(textOf(hidden)).toContain('AI access is off');
-    expect(textOf(await tool(token, 'read', { ref: 'p1', s }))).toContain('L1 [1]');
+    expect(textOf(await tool(token, 'read', { ref: 'p1', s }))).toContain('R1 [1]');
 
     // A pending wait ends as soon as the switch goes off.
     const pending = tool(token, 'wait', { s });
@@ -212,8 +211,8 @@ describe('mcp', () => {
     const calls: [string, Record<string, unknown>][] = [
       ['wait', { s }],
       ['read', { ref: 'p1', s }],
-      ['transcribe', { ref: 'p1:L1', text: 'x', s }],
-      ['comment', { ref: 'p1:L1', text: 'x', s }],
+      ['transcribe', { ref: 'R1', text: 'x', s }],
+      ['comment', { ref: 'R1', text: 'x', s }],
     ];
     for (const [name, args] of calls) {
       const r = await tool(token, name, args);
@@ -221,7 +220,7 @@ describe('mcp', () => {
       expect(textOf(r), name).toContain('AI access is off');
     }
     expect(n.page.comments()).toHaveLength(0);
-    expect(n.page.lines()[0]!.text).toBeUndefined();
+    expect(n.page.readings()).toHaveLength(0);
     // The D1 mirror follows the switch.
     await until(async () => (await aiRow('ainb')) === 0);
 
@@ -229,8 +228,8 @@ describe('mcp', () => {
     n.nb.setMeta({ aiAccess: true });
     await serverAi('ainb', true);
     expect(textOf(await tool(token, 'wait'))).toContain(`s=${s} "Physics"`);
-    expect(textOf(await tool(token, 'read', { ref: 'p1', s }))).toContain('L1 [1]');
-    expect((await tool(token, 'comment', { ref: 'p1:L1', text: 'back', s })).isError).toBeFalsy();
+    expect(textOf(await tool(token, 'read', { ref: 'p1', s }))).toContain('R1 [1]');
+    expect((await tool(token, 'comment', { ref: 'R1', text: 'back', s })).isError).toBeFalsy();
     await until(() => n.page.comments().length === 1);
     await until(async () => (await aiRow('ainb')) === 1);
     for (const x of [n.nbc, n.pgc, off.nbc, off.pgc]) x.close();

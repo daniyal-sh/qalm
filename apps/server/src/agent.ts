@@ -2,18 +2,21 @@ import * as Y from 'yjs';
 import {
   Notebook,
   Page,
+  emptyRegions,
   emptyThreads,
   encodeQinkUpdate,
   encodeQinkRead,
   encodeQinkThread,
   cleanAsk,
-  resolveRef,
+  migratePage,
+  resolveTarget,
   resolveThread,
-  renderLinesStripSvg,
+  renderRegionsSvg,
   threadLabel,
-  type QinkLabels,
-  type QinkSnapshot,
+  type BBox,
+  type InkSeen,
   type QinkImage,
+  type QinkRegions,
   type QinkSeen,
   type QinkAsk,
   type QinkThreads,
@@ -23,21 +26,23 @@ import { pgDocId, room } from './docs';
 import type { DocRoom } from './room';
 
 export interface AgentConfig { idleMs: number; minIntervalMs: number; timeoutMs: number }
-/** Q-ink text plus, when lines need one, the strip image as SVG (the worker turns it into PNG). */
+/** Q-ink text plus, when regions need one, the image as SVG (the worker turns it into PNG). */
 export interface AgentResult { text: string; svg: string | null; changed: boolean; error?: boolean }
 export type AgentEdit =
+  /** `ref`: a region `R7` or a box `p3@120,300,260,80`. */
   | { op: 'transcribe'; ref: string; text: string }
   /** A new thread on `ref`, or a reply in `thread` (optionally resolving it). */
   | { op: 'comment'; ref?: string; thread?: string; text: string; agentName: string; resolve?: boolean };
 /** What the notebook room asks a page room to do. Agents never touch ink. */
 export type PageEdit =
-  | { op: 'transcribe'; ref: string; text: string; lineKey: string; agentName?: string }
-  | { op: 'comment'; ref: string; text: string; agentName: string; lineKey: string }
+  /** The strokes are `ids` (a region's, those still on the page) or the ink in `box` (a box ref). */
+  | { op: 'transcribe'; ref: string; text: string; ids?: string[]; box?: BBox; agentName?: string }
+  /** A thread on a region's strokes (`ids`), a box's ink (`box`), or the whole page (neither). */
+  | { op: 'comment'; ref: string; text: string; agentName: string; ids?: string[]; box?: BBox }
   | { op: 'reply'; ref: string; text: string; agentName: string; commentId: string; resolve?: boolean };
 
 /** What one agent (OAuth client) has been sent from this notebook. */
 interface AgentState {
-  snapshot: QinkSnapshot;
   rev: number;
   /** Page changes at or before this time have been delivered. */
   deliveredAt: number;
@@ -49,6 +54,8 @@ interface AgentState {
 }
 
 const agentKey = (clientId: string) => `agent:${clientId}`;
+/** The ink this agent last saw on a page (stroke id → signature), one key per page to keep rows small. */
+const inkKey = (clientId: string, pageId: string) => `ink:${clientId}:${pageId}`;
 
 export const AI_OFF = 'AI access is off for this notebook. The student can turn it on in the notebook.';
 export const PAUSED = 'The student paused sharing for this notebook. Keep calling wait: updates resume when they unpause.';
@@ -66,8 +73,9 @@ export interface Presence {
 
 /**
  * Lives in a notebook's DocRoom. Only this object assigns Q-ink labels, so they stay stable and unique.
- * Storage: `labels` (QinkLabels), `threads` (QinkThreads), `changed` (pageId → last client update),
- * `lastCommentAt` (the student's last comment or reply), `agent:{clientId}` (AgentState).
+ * Storage: `regions` (QinkRegions), `threads` (QinkThreads), `changed` (pageId → last client update),
+ * `lastCommentAt` (the student's last comment or reply), `agent:{clientId}` (AgentState) and
+ * `ink:{clientId}:{pageId}` (InkSeen: what the agent last saw of the page).
  */
 export class AgentHub {
   private waiters = new Set<() => void>();
@@ -81,8 +89,8 @@ export class AgentHub {
     return new Notebook(this.r.doc);
   }
 
-  private labels(): QinkLabels {
-    return this.r.kvGet<QinkLabels>('labels') ?? {};
+  private regions(): QinkRegions {
+    return this.r.kvGet<QinkRegions>('regions') ?? emptyRegions();
   }
 
   private threads(): QinkThreads {
@@ -175,23 +183,22 @@ export class AgentHub {
         const state = await room(this.env, docId).getState(docId);
         const doc = new Y.Doc();
         Y.applyUpdate(doc, state);
+        migratePage(doc); // a page not opened since regions: read it as the app will store it (not written back)
         out[id] = new Page(doc);
       }),
     );
     return out;
   }
 
-  private stripSvg(pages: Record<string, Page>, image: QinkImage | null): string | null {
-    if (!image) return null;
-    const page = pages[image.pageId];
-    return page ? renderLinesStripSvg(page, image.lineKeys, image.labels).svg : null;
+  private imageSvg(pages: Record<string, Page>, image: QinkImage | null): string | null {
+    return image?.rows.length ? renderRegionsSvg(pages, image.rows).svg : null;
   }
 
   private state(clientId: string): AgentState {
     const st = this.r.kvGet<AgentState>(agentKey(clientId));
     if (st) return st;
     // A new agent starts now: earlier asks are not replayed, and the first wake is not rate-limited.
-    return { snapshot: {}, rev: 0, deliveredAt: Date.now(), lastWakeAt: 0, askCount: this.nb().asks().length };
+    return { rev: 0, deliveredAt: Date.now(), lastWakeAt: 0, askCount: this.nb().asks().length };
   }
 
   /**
@@ -258,12 +265,17 @@ export class AgentHub {
     // Re-read after the await: another call may have delivered meanwhile.
     const cur = this.state(clientId);
     if (cur.rev !== st.rev || cur.askCount !== st.askCount) return { retryAt: 0 };
-    const labels = this.labels();
+    const regions = this.regions();
     const threads = this.threads();
-    const u = encodeQinkUpdate(nb, pages, labels, st.snapshot, { session, rev: st.rev + 1, asks, threads, seen: st.seen });
-    this.r.kvPut('labels', labels);
+    const prev: Record<string, InkSeen | undefined> = {};
+    for (const id of Object.keys(pages)) prev[id] = this.r.kvGet<InkSeen>(inkKey(clientId, id));
+    const u = encodeQinkUpdate(nb, pages, regions, prev, { session, rev: st.rev + 1, client: clientId, asks, threads, seen: st.seen });
+    this.r.kvPut('regions', regions);
     this.r.kvPut('threads', threads);
-    const next: AgentState = { ...st, snapshot: u.snapshot, seen: u.seen, deliveredAt: t0, askCount: allAsks.length };
+    for (const [id, ink] of Object.entries(u.ink)) this.r.kvPut(inkKey(clientId, id), ink);
+    // States saved before regions carry a line snapshot: drop it (pages without ink seen get a first look).
+    const { snapshot: _old, ...rest } = st as AgentState & { snapshot?: unknown };
+    const next: AgentState = { ...rest, seen: u.seen, deliveredAt: t0, askCount: allAsks.length };
     // Nothing the agent can see changed (e.g. only a comment was added): absorb it and keep waiting.
     if (!asks.length && !u.text.includes('\n')) {
       this.r.kvPut(agentKey(clientId), next);
@@ -272,37 +284,30 @@ export class AgentHub {
     next.rev = st.rev + 1;
     next.lastWakeAt = Date.now();
     this.r.kvPut(agentKey(clientId), next);
-    return { text: u.text, svg: this.stripSvg(pages, u.image), changed: true };
+    return { text: u.text, svg: this.imageSvg(pages, u.image), changed: true };
   }
 
-  /** `outline`, `p3`, `p3:L2-9`, `pdf:p2`, or a whole thread `C5`. */
+  /** `outline`, a page `p3`, a region `R7`, a box `p3@120,300,260,80`, `pdf:p2`, or a whole thread `C5`. */
   async read(ref: string, who: AgentWho): Promise<AgentResult> {
     this.touch(who);
     this.requireAccess();
     const nb = this.nb();
-    if (/^c\d+$/i.test(ref.trim())) {
+    const r0 = ref.trim();
+    if (/^c\d+$/i.test(r0)) {
       const threads = this.threads();
-      const pages = await this.loadPages([resolveThread(threads, ref).pageId].filter((id) => nb.pages().some((p) => p.id === id)));
+      const pages = await this.loadPages([resolveThread(threads, r0).pageId].filter((id) => nb.pages().some((p) => p.id === id)));
       this.requireAccess();
-      const labels = this.labels();
-      const text = encodeQinkThread(nb, pages, labels, threads, ref);
-      this.r.kvPut('labels', labels);
-      return { text, svg: null, changed: false };
+      return { text: encodeQinkThread(nb, pages, threads, r0), svg: null, changed: false };
     }
-    const infos = nb.pages();
     let ids: string[] = [];
-    if (ref === 'outline') ids = infos.map((p) => p.id);
-    else {
-      const m = /^p(\d+)(?::|$)/.exec(ref);
-      const info = m ? infos[Number(m[1]) - 1] : undefined;
-      if (info) ids = [info.id];
-    }
+    if (r0 === 'outline') ids = nb.pages().map((p) => p.id);
+    else if (!/^pdf:/i.test(r0)) ids = [resolveTarget(nb, this.regions(), r0).pageId];
     const pages = await this.loadPages(ids);
     this.requireAccess();
-    const labels = this.labels();
-    const r = encodeQinkRead(nb, pages, labels, ref);
-    this.r.kvPut('labels', labels);
-    return { text: r.text, svg: this.stripSvg(pages, r.image), changed: false };
+    const regions = this.regions();
+    const r = encodeQinkRead(nb, pages, regions, r0, who.clientId);
+    this.r.kvPut('regions', regions);
+    return { text: r.text, svg: this.imageSvg(pages, r.image), changed: false };
   }
 
   async edit(edit: AgentEdit, who: AgentWho): Promise<string> {
@@ -314,10 +319,15 @@ export class AgentHub {
       if (!this.nb().pages().some((p) => p.id === pageId)) throw new Error(`Thread ${ref} was on a deleted page`);
       return this.applyOn(pageId, { op: 'reply', ref, text: edit.text, agentName: edit.agentName, commentId, resolve: edit.resolve });
     }
-    if (!edit.ref) throw new Error('Pass ref (a line, e.g. "p3:L4") or thread (e.g. "C3")');
-    const { pageId, lineKey } = resolveRef(this.labels(), this.nb(), edit.ref);
-    if (edit.op === 'transcribe') return this.applyOn(pageId, { op: 'transcribe', ref: edit.ref, text: edit.text, lineKey, agentName: who.name });
-    return this.applyOn(pageId, { op: 'comment', ref: edit.ref, text: edit.text, agentName: edit.agentName, lineKey });
+    if (!edit.ref) throw new Error('Pass ref (a region "R7", a box "p3@120,300,260,80" or a page "p3") or thread (e.g. "C3")');
+    const t = resolveTarget(this.nb(), this.regions(), edit.ref);
+    const ref = t.kind === 'region' ? t.label : edit.ref.trim();
+    const where = t.kind === 'region' ? { ids: t.ids, box: t.box } : t.kind === 'box' ? { box: t.box } : {};
+    if (edit.op === 'transcribe') {
+      if (t.kind === 'page') throw new Error('transcribe needs a region ("R7") or a box ("p3@120,300,260,80"), not a whole page');
+      return this.applyOn(t.pageId, { op: 'transcribe', ref, text: edit.text, agentName: who.name, ...where });
+    }
+    return this.applyOn(t.pageId, { op: 'comment', ref, text: edit.text, agentName: edit.agentName, ...where });
   }
 
   /** Runs an edit in the page's room. A new thread gets its label here (only this room assigns labels). */

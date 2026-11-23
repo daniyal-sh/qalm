@@ -44,7 +44,7 @@ describe('agent presence and pause', () => {
     const resumed = tool(token, 'wait', { s });
     await pause(100);
     n.nb.setMeta({ aiPaused: false });
-    expect(textOf(await resumed)).toContain('+L1 [1]');
+    expect(textOf(await resumed)).toContain('R1 [1] p1 @');
 
     // Stop = AI access off: nobody is shown following.
     n.nb.setMeta({ aiAccess: false });
