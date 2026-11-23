@@ -242,6 +242,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
     if (!page || !sel) return;
     if (edit.kind === 'sim' && isIdentity(edit.sim)) return;
     ed.touchPage(info.id);
+    mark('qalm:commit-start', { items: sel.length });
     if (edit.kind === 'text') page.updateItem(edit.id, edit.patch as Partial<TextItem>);
     else
       page.updateItems(
@@ -250,6 +251,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
           return it ? [[id, transformPatch(it, edit.sim)] as const] : [];
         }),
       );
+    mark('qalm:commit-end', { items: sel.length });
   };
 
   /** A tap at a page point while the lasso tool is on: select what's there (Shift/Ctrl/Cmd: add or remove it). */

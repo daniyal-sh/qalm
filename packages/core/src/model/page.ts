@@ -24,14 +24,45 @@ interface LineIndex {
   next: number;
   /** Ids in `order` whose item is gone (left by concurrent edits). */
   ghosts: Set<string>;
-  /** Line key of every grouped item, and cached bboxes. */
-  lineOf: Map<string, string>;
+  /** The group of every grouped item (its line field is the group's key), and cached bboxes. */
+  lineOf: Map<string, Group>;
   bb: Map<string, BBox>;
   groups: Map<string, Group>;
+  /**
+   * Items' `line` fields are written when the outermost `Page` call ends, not at every step: a bulk move splits and
+   * re-merges each line item by item, which re-keyed every remaining item of the line per step (O(k²) map writes per
+   * line of k items, and as many deleted entries for sync and undo to carry), while only the final values matter.
+   * `dirty` groups write their key to their items; `pending` holds fields of items outside any group (null: delete).
+   * Unchanged fields are not written.
+   */
+  dirty: Set<Group>;
+  pending: Map<string, string | null>;
 }
 
 const indexes = new WeakMap<Y.Doc, LineIndex>();
+/** How deep each doc is in `Page` calls (pending line fields are written when it returns to 0). */
+const depths = new WeakMap<Y.Doc, number>();
 const watched = new WeakSet<Y.Doc>();
+
+/** Merges two id lists by z-position (callers pass lists already in z-order; `b` is sorted if it isn't). */
+function mergeByPos(a: string[], b: string[], pos: Map<string, number>): string[] {
+  const p = (id: string) => pos.get(id)!;
+  for (let i = 1; i < b.length; i++) {
+    if (p(b[i - 1]!) > p(b[i]!)) {
+      b = [...b].sort((x, y) => p(x) - p(y));
+      break;
+    }
+  }
+  if (!a.length) return b.slice();
+  if (p(a[a.length - 1]!) < p(b[0]!)) return a.concat(b);
+  const out: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) out.push(p(a[i]!) < p(b[j]!) ? a[i++]! : b[j++]!);
+  while (i < a.length) out.push(a[i++]!);
+  while (j < b.length) out.push(b[j++]!);
+  return out;
+}
 
 /** Keeps a doc's index across transactions that only `Page` methods made, and drops it after any other change. */
 function watch(doc: Y.Doc): void {
@@ -142,7 +173,16 @@ export class Page {
   }
 
   private tx(fn: () => void): void {
-    this.doc.transact(fn, LOCAL_ORIGIN);
+    this.doc.transact(() => {
+      const d = depths.get(this.doc) ?? 0;
+      depths.set(this.doc, d + 1);
+      try {
+        fn();
+      } finally {
+        depths.set(this.doc, d);
+        if (d === 0) this.flushLines();
+      }
+    }, LOCAL_ORIGIN);
   }
 
   private orderedIds(): string[] {
@@ -173,6 +213,7 @@ export class Page {
   addItem(item: Item): void {
     this.tx(() => {
       const replaced = this.itemMap.has(item.id);
+      if (replaced) this.dropIndex(); // writes pending fields to the map being replaced, as before
       const m = new Y.Map<unknown>();
       this.dirty();
       this.itemMap.set(item.id, m);
@@ -237,7 +278,7 @@ export class Page {
       const touched = new Set<string>();
       this.dirty();
       for (const id of ids) {
-        const key = this.itemMap.get(id)?.get('line');
+        const key = this.lineField(id);
         if (typeof key === 'string') touched.add(key);
         this.itemMap.delete(id);
       }
@@ -417,7 +458,7 @@ export class Page {
     const ix = this.peek();
     if (ix) return ix;
     const tx = this.doc._transaction;
-    const built: LineIndex = { tx, pos: new Map(), next: 0, ghosts: new Set(), lineOf: new Map(), bb: new Map(), groups: new Map() };
+    const built: LineIndex = { tx, pos: new Map(), next: 0, ghosts: new Set(), lineOf: new Map(), bb: new Map(), groups: new Map(), dirty: new Set(), pending: new Map() };
     for (const id of this.order.toArray()) {
       if (built.pos.has(id) || built.ghosts.has(id)) continue;
       const m = this.itemMap.get(id);
@@ -430,13 +471,13 @@ export class Page {
       const key = m.get('line');
       if (typeof key !== 'string') continue;
       const bb = itemBBox(readGeometry(m));
-      built.lineOf.set(id, key);
       built.bb.set(id, bb);
       let g = built.groups.get(key);
       if (!g) {
         g = { key, kind: 'line', ids: [], bbox: unionBBox(null, bb), first: idx };
         built.groups.set(key, g);
       }
+      built.lineOf.set(id, g);
       g.ids.push(id);
       g.bbox = unionBBox(g.bbox, bb);
     }
@@ -448,7 +489,41 @@ export class Page {
 
   /** Forgets the index (after a change it doesn't track); the next read rebuilds it from the doc. */
   private dropIndex(): void {
+    this.flushLines();
     indexes.delete(this.doc);
+  }
+
+  /** Writes items' changed `line` fields (inside the transaction). */
+  private flushLines(): void {
+    const ix = indexes.get(this.doc);
+    if (!ix || (!ix.pending.size && !ix.dirty.size)) return;
+    for (const [id, key] of ix.pending) {
+      const m = this.itemMap.get(id);
+      if (!m || ix.lineOf.has(id)) continue; // grouped since: its group writes it
+      if (key === null) {
+        if (m.has('line')) m.delete('line');
+      } else if (m.get('line') !== key) m.set('line', key);
+    }
+    for (const g of ix.dirty) {
+      if (ix.groups.get(g.key) !== g) continue; // emptied
+      for (const id of g.ids) {
+        const m = this.itemMap.get(id)!;
+        if (m.get('line') !== g.key) m.set('line', g.key);
+      }
+    }
+    ix.pending.clear();
+    ix.dirty.clear();
+  }
+
+  /** An item's `line` field, counting writes not flushed yet. */
+  private lineField(id: string): unknown {
+    const ix = this.peek();
+    if (ix) {
+      const g = ix.lineOf.get(id);
+      if (g) return g.key;
+      if (ix.pending.has(id)) return ix.pending.get(id) ?? undefined;
+    }
+    return this.itemMap.get(id)?.get('line');
   }
 
   /** Lines and drawings by key (unordered: sort by `first` for z-order). Live during a transaction: don't keep or mutate. */
@@ -468,34 +543,45 @@ export class Page {
     if (g) g.kind = this.kindOf(g);
   }
 
-  /** Recomputes a group's bbox, first item and kind after its items changed; drops it if empty. */
-  private regroup(ix: LineIndex, g: Group): void {
+  /**
+   * Updates a group's bbox, first item and kind after its items changed; drops it if empty. `gone` are the bboxes of
+   * items that left it (or their old bboxes) and `added` those of items that joined: when nothing that left touched an
+   * edge of the box, the other items still span it, so it only grows; otherwise it is recomputed from every item.
+   */
+  private regroup(ix: LineIndex, g: Group, gone: BBox[] | null, added: BBox[] = []): void {
     if (!g.ids.length) {
       ix.groups.delete(g.key);
       return;
     }
-    let bb: BBox | null = null;
-    for (const id of g.ids) bb = unionBBox(bb, this.cachedBBox(ix, id));
-    g.bbox = bb!;
+    const b = g.bbox;
+    if (gone && gone.every((o) => o[0] > b[0] && o[1] > b[1] && o[2] < b[2] && o[3] < b[3])) {
+      let bb = b;
+      for (const a of added) bb = unionBBox(bb, a);
+      g.bbox = bb;
+    } else {
+      let bb: BBox | null = null;
+      for (const id of g.ids) bb = unionBBox(bb, this.cachedBBox(ix, id));
+      g.bbox = bb!;
+    }
     g.first = ix.pos.get(g.ids[0]!)!;
     g.kind = this.kindOf(g);
   }
 
   /** Takes items out of their groups in the index. */
   private detach(ix: LineIndex, ids: Iterable<string>): void {
-    const from = new Map<string, Set<string>>();
+    const from = new Map<Group, { ids: Set<string>; boxes: BBox[] }>();
     for (const id of ids) {
-      const key = ix.lineOf.get(id);
-      if (key === undefined) continue;
+      const g = ix.lineOf.get(id);
+      if (!g) continue;
       ix.lineOf.delete(id);
-      let s = from.get(key);
-      if (!s) from.set(key, (s = new Set()));
-      s.add(id);
+      let s = from.get(g);
+      if (!s) from.set(g, (s = { ids: new Set(), boxes: [] }));
+      s.ids.add(id);
+      s.boxes.push(this.cachedBBox(ix, id));
     }
-    for (const [key, gone] of from) {
-      const g = ix.groups.get(key)!;
-      g.ids = g.ids.filter((id) => !gone.has(id));
-      this.regroup(ix, g);
+    for (const [g, gone] of from) {
+      g.ids = g.ids.filter((id) => !gone.ids.has(id));
+      this.regroup(ix, g, gone.boxes);
     }
   }
 
@@ -527,11 +613,11 @@ export class Page {
     if (!ix) return;
     const old = ix.bb.get(id);
     ix.bb.delete(id);
-    const key = ix.lineOf.get(id);
-    if (key === undefined) return;
+    const g = ix.lineOf.get(id);
+    if (!g) return;
     const bb = this.cachedBBox(ix, id);
     if (old && old[0] === bb[0] && old[1] === bb[1] && old[2] === bb[2] && old[3] === bb[3]) return;
-    this.regroup(ix, ix.groups.get(key)!);
+    this.regroup(ix, g, old ? [old] : null, [bb]);
   }
 
   /** Items were deleted (from `items` and every slot of `order`). */
@@ -543,6 +629,7 @@ export class Page {
       ix.pos.delete(id);
       ix.bb.delete(id);
       ix.ghosts.delete(id);
+      ix.pending.delete(id);
     }
   }
 
@@ -574,28 +661,61 @@ export class Page {
 
   /** Puts items in line `key`. */
   private setLines(ids: string[], key: string): void {
-    for (const id of ids) this.itemMap.get(id)!.set('line', key);
     const ix = this.peek();
-    if (!ix) return;
+    if (!ix) {
+      for (const id of ids) this.itemMap.get(id)!.set('line', key);
+      return;
+    }
     // Only ordered items are grouped (an item missing from `order` keeps its line field but is in no group).
-    const add = ids.filter((id) => ix.pos.has(id) && ix.lineOf.get(id) !== key);
+    const add: string[] = [];
+    for (const id of ids) {
+      if (!ix.pos.has(id)) ix.pending.set(id, key);
+      else if (ix.lineOf.get(id)?.key !== key) add.push(id);
+    }
     if (!add.length) return;
     this.detach(ix, add);
-    for (const id of add) ix.lineOf.set(id, key);
     let g = ix.groups.get(key);
+    const fresh = !g;
     if (!g) {
       g = { key, kind: 'line', ids: [], bbox: [0, 0, 0, 0], first: 0 };
       ix.groups.set(key, g);
     }
-    const pos = ix.pos;
-    g.ids = g.ids.concat(add).sort((a, b) => pos.get(a)! - pos.get(b)!);
-    this.regroup(ix, g);
+    for (const id of add) ix.lineOf.set(id, g);
+    ix.dirty.add(g);
+    g.ids = mergeByPos(g.ids, add, ix.pos);
+    this.regroup(ix, g, fresh ? null : [], add.map((id) => this.cachedBBox(ix, id)));
   }
 
   private unsetLine(id: string): void {
-    this.itemMap.get(id)!.delete('line');
     const ix = this.peek();
-    if (ix) this.detach(ix, [id]);
+    if (!ix) {
+      this.itemMap.get(id)!.delete('line');
+      return;
+    }
+    ix.pending.set(id, null);
+    this.detach(ix, [id]);
+  }
+
+  /**
+   * Same as `setLines(others, others[0])` when the key item `id` leaves its group, in O(1) per member: the group is
+   * renamed to `others[0]` (members point at their group, so their keys follow) and `id` gets a group of its own
+   * under the old key. False (nothing done) if a group under the new key exists already.
+   */
+  private splitOff(ix: LineIndex, g: Group, id: string, others: string[]): boolean {
+    const rest = others[0]!;
+    if (ix.groups.has(rest) || ix.lineOf.get(id) !== g) return false;
+    const key = g.key;
+    ix.groups.delete(key);
+    g.key = rest;
+    g.ids = others;
+    ix.groups.set(rest, g);
+    ix.dirty.add(g);
+    this.regroup(ix, g, [this.cachedBBox(ix, id)]);
+    const solo: Group = { key, kind: 'line', ids: [id], bbox: [0, 0, 0, 0], first: 0 };
+    ix.groups.set(key, solo);
+    ix.lineOf.set(id, solo);
+    this.regroup(ix, solo, null);
+    return true;
   }
 
   /** The best line for bbox `b`: smallest gap, then largest overlap, then smallest key. */
@@ -667,18 +787,25 @@ export class Page {
 
   /** The geometry of an assigned item changed (e.g. moved by lasso). */
   private relayout(id: string): void {
-    const m = this.itemMap.get(id)!;
-    const key = m.get('line');
+    const key = this.lineField(id);
     if (typeof key !== 'string') return this.assign(id);
     let groups = this.groups();
     const g = groups.get(key);
     if (!g) return this.assign(id);
-    const b = this.bboxOf(id);
+    const ix = this.ix();
+    const b = this.cachedBBox(ix, id);
     const others = g.ids.filter((x) => x !== id);
     if (others.length) {
-      let ob: BBox | null = null;
-      for (const o of others) ob = unionBBox(ob, this.bboxOf(o));
-      if (g.kind === 'line' ? fitsLine(b, ob!) : intersects(b, ob!)) return; // still belongs here
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const o of others) {
+        const q = this.cachedBBox(ix, o);
+        if (q[0] < x0) x0 = q[0];
+        if (q[1] < y0) y0 = q[1];
+        if (q[2] > x1) x1 = q[2];
+        if (q[3] > y1) y1 = q[3];
+      }
+      const ob: BBox = [x0, y0, x1, y1];
+      if (g.kind === 'line' ? fitsLine(b, ob) : intersects(b, ob)) return; // still belongs here
       if (id !== key) {
         this.unsetLine(id);
         this.touch(key);
@@ -687,7 +814,7 @@ export class Page {
       // The line follows its key item; the remaining items split off under their first item's id.
       const rest = others[0]!;
       this.newEntry(rest, g.kind);
-      this.setLines(others, rest);
+      if (!this.splitOff(ix, g, id, others)) this.setLines(others, rest);
       this.touch(key);
       groups = this.groups();
     }

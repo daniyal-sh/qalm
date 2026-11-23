@@ -1,5 +1,5 @@
 // Micro-benchmarks for big notebooks: `pnpm --filter @qalm/app bench:micro` (prints the median ms per call).
-import { LOCAL_ORIGIN, Notebook, Page, strokeOutline, type Item, type StrokeItem } from '@qalm/core';
+import { encodePoints, LOCAL_ORIGIN, Notebook, Page, strokeOutline, type Item, type StrokeItem } from '@qalm/core';
 import { describe, test } from 'vitest';
 import * as Y from 'yjs';
 
@@ -74,6 +74,23 @@ describe('selection commit (3000 strokes; page setup not timed)', () => {
   bench('move 3000 strokes', (pg) => {
     const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 5, dy: 3 };
     updateAll(pg, (it) => transformPatch(it, sim));
+  }, page3000);
+  bench('  floor: transformPatch x 3000 only', (pg) => {
+    const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 5, dy: 3 };
+    for (const it of pg.items()) transformPatch(it, sim);
+  }, page3000);
+  bench('  floor: same Yjs writes, no line assignment', (pg) => {
+    const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 5, dy: 3 };
+    const items = pg.doc.getMap<Y.Map<unknown>>('items');
+    pg.doc.transact(() => {
+      for (const it of pg.items()) {
+        const p = transformPatch(it, sim) as Partial<StrokeItem>;
+        const m = items.get(it.id)!;
+        m.set('points', encodePoints(p.points!));
+        m.set('width', p.width);
+        m.set('bbox', p.bbox);
+      }
+    }, LOCAL_ORIGIN);
   }, page3000);
   bench('move 3000 strokes far (every line splits)', (pg) => {
     const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 0, dy: 300 };
