@@ -11,6 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const electron = require('electron');
 const env = { ...process.env };
+delete env.ELECTRON_RUN_AS_NODE;
 
 if (process.argv.includes('--export')) {
   const r = spawnSync('pnpm', ['--filter', '@qalm/app', 'export:web'], {

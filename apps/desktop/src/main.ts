@@ -20,7 +20,7 @@ import {
 
 // Optional: point at the Expo web dev server (`pnpm --filter @qalm/app web`), e.g. http://localhost:8081.
 const DEV_URL = process.env.QALM_DEV_URL?.replace(/\/+$/, '') || null;
-const ORIGIN = DEV_URL ? new URL(DEV_URL).origin : APP_ORIGIN;
+const DEV_ORIGIN = DEV_URL ? new URL(DEV_URL).origin : null;
 
 function webRoot(): string {
   if (process.env.QALM_WEB_DIR) return path.resolve(process.env.QALM_WEB_DIR);
@@ -29,6 +29,8 @@ function webRoot(): string {
 }
 
 app.setName(BRAND.systemName);
+// Tests run against a throwaway profile.
+if (process.env.QALM_USER_DATA) app.setPath('userData', path.resolve(process.env.QALM_USER_DATA));
 if (process.platform === 'win32') app.setAppUserModelId(BRAND.appId);
 
 // Must run before `ready`: app:// behaves like https (fetch, workers, wasm streaming, storage, secure context).
@@ -210,7 +212,9 @@ function iconPath(): string | undefined {
 
 function isOwnUrl(url: string): boolean {
   try {
-    return new URL(url).origin === ORIGIN;
+    const u = new URL(url);
+    // Node's URL reports origin "null" for custom schemes, so compare scheme and host for app://.
+    return DEV_ORIGIN ? u.origin === DEV_ORIGIN : u.protocol === 'app:' && u.host === 'qalm';
   } catch {
     return false;
   }
