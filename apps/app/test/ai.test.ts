@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 
 import { getPresence, presenceCan, presenceNames } from '../src/api/ai';
-import { agentEntryCount, markAllSeen, marginCards, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount } from '../src/editor/ai.logic';
+import { agentEntryCount, marginCards, markSeen, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, unreadIds } from '../src/editor/ai.logic';
 import type { PageData } from '../src/editor/context';
 
 const agent = { kind: 'agent' as const, name: 'Claude' };
@@ -39,9 +39,18 @@ describe('live agent logic', () => {
     expect(agentEntryCount([d])).toBe(2);
     expect(unreadCount([d], {})).toBe(2);
     expect(unreadCount([d], { [a]: 2 })).toBe(1);
-    const seen = markAllSeen([d], {});
-    expect(unreadCount([d], seen)).toBe(0);
-    expect(markAllSeen([d], seen)).toBe(seen);
+    expect([...unreadIds([d], {})]).toEqual([a]);
+    // Only the threads that were read are marked (not every loaded thread).
+    const other = d.page.addComment({ lineKey: 'k', author: agent, text: 'later' });
+    d.comments = d.page.comments();
+    const seen = markSeen(d.comments.filter((x) => x.id === a), {});
+    expect(unreadCount([d], seen)).toBe(1);
+    expect([...unreadIds([d], seen)]).toEqual([other]);
+    expect(markSeen(d.comments.filter((x) => x.id === a), seen)).toBe(seen);
+    // A new reply in a read thread is unread again.
+    d.page.replyToComment(a, agent, 'one more');
+    d.comments = d.page.comments();
+    expect(unreadCount([d], seen)).toBe(2);
     expect(newestAgentEntry([d])?.name).toBe('Claude');
   });
 
