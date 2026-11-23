@@ -349,8 +349,11 @@ export async function handleAuth(req: Request, env: Env, path: string): Promise<
   if (path === '/auth/email/verify' && req.method === 'POST') {
     if ((req.headers.get('Content-Type') ?? '').startsWith('application/x-www-form-urlencoded')) {
       // The button on the consent sign-in page; only from our own origin.
+      // Browsers send `Origin: null` for a form on a page with a strict referrer policy, so fall back to Fetch
+      // Metadata: `Sec-Fetch-Site: same-origin` can't be set by another site.
       const o = req.headers.get('Origin');
-      if (o && o !== origin(req, env.PUBLIC_URL) && o !== new URL(req.url).origin) throw new HttpError(403, 'Forbidden');
+      const sameOrigin = !o || o === origin(req, env.PUBLIC_URL) || o === new URL(req.url).origin || (o === 'null' && req.headers.get('Sec-Fetch-Site') === 'same-origin');
+      if (!sameOrigin) throw new HttpError(403, 'Forbidden');
       const form = await req.formData();
       const link = await consumeConsentLink(env, String(form.get('token') ?? ''));
       if (!link?.return_to) throw new HttpError(400, BAD_LINK);

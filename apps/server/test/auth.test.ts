@@ -168,6 +168,11 @@ describe('auth', () => {
     // A cross-site form post can't use it, nor can the app API.
     const evil = await call('/auth/email/verify', { method: 'POST', headers: { Origin: 'https://evil.example' }, body: new URLSearchParams({ token }) });
     expect(evil.status).toBe(403);
+    // `Origin: null` (sandboxed or no-referrer pages) is only accepted when Fetch Metadata says same-origin.
+    const opaque = await call('/auth/email/verify', { method: 'POST', headers: { Origin: 'null', 'Sec-Fetch-Site': 'cross-site' }, body: new URLSearchParams({ token }) });
+    expect(opaque.status).toBe(403);
+    // The page itself no longer forces `Origin: null` on its own form.
+    expect((await call(`/auth/email/verify?token=${encodeURIComponent(token)}`)).headers.get('Referrer-Policy')).toBe('same-origin');
     expect((await verifyEmail({ token, confirm: true })).status).toBe(400);
     const back = await consentSignIn(link);
     expect(back.status).toBe(302);
@@ -175,6 +180,20 @@ describe('auth', () => {
     expect(back.headers.get('Set-Cookie')).toContain('qalm_web=');
     // Used up: the page now says so.
     expect((await call(`/auth/email/verify?token=${encodeURIComponent(token)}`)).status).toBe(400);
+  });
+
+  it('consent sign-in works when the browser sends Origin: null from our own page', async () => {
+    const link = await captureLink(() =>
+      call('/authorize/signin', { method: 'POST', body: new URLSearchParams({ email: 'opaque@example.com', return: '/authorize?y=2' }) }),
+    );
+    const res = await call('/auth/email/verify', {
+      method: 'POST',
+      headers: { Origin: 'null', 'Sec-Fetch-Site': 'same-origin' },
+      body: new URLSearchParams({ token: tokenOf(link) }),
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/authorize?y=2');
   });
 
   it('rejects bad emails and missing tokens', async () => {
