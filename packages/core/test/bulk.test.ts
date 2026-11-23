@@ -306,4 +306,37 @@ describe('bulk edits: undo and sync', () => {
       ['b', ['b']],
     ]);
   });
+
+  it('raw writes mixed with Page calls (one transaction or between) are seen', () => {
+    const p = pair(1);
+    for (const page of [p.now, p.old]) {
+      page.addItem(stroke('a', 50, 100, 60, 120));
+      page.addItem(stroke('b', 62, 100, 70, 120));
+      page.addItem(stroke('z', 50, 300, 60, 320));
+    }
+    expectSame(p, 'setup');
+    // Raw edits of the line fields and items, inside one transaction with Page calls before and after.
+    for (const page of [p.now, p.old]) {
+      const d = page.doc;
+      const items = d.getMap<Y.Map<unknown>>('items');
+      d.transact(() => {
+        page.addItem(stroke('c', 72, 100, 80, 120));
+        void page.lines();
+        items.get('b')!.set('line', 'z'); // b now claims z's line
+        items.get('c')!.delete('line');
+        page.addItem(stroke('y', 62, 300, 70, 320));
+        void page.lines();
+        items.get('z')!.set('bbox', [50, 500, 60, 520]); // moved without Page
+        page.updateItem('y', { color: '#b91c1c' });
+        page.updateItem('a', { bbox: [50, 300, 60, 320], points: pts([50, 300], [60, 320]) } as Partial<StrokeItem>);
+      }, LOCAL_ORIGIN);
+    }
+    expectSame(p, 'mixed transaction');
+    // Raw writes in their own transaction, then a Page read and edit.
+    for (const page of [p.now, p.old]) {
+      page.doc.getMap<Y.Map<unknown>>('items').get('a')!.set('line', 'b');
+      page.addItem(stroke('w', 74, 300, 80, 320));
+    }
+    expectSame(p, 'raw transaction');
+  });
 });

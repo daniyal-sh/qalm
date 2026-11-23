@@ -12,9 +12,9 @@ interface Group { key: string; kind: Line['kind']; ids: string[]; bbox: BBox; fi
 /**
  * A page doc's line grouping: what line assignment used to recompute from every item on each step, kept up to date
  * by the steps instead. Shared by every `Page` wrapping the doc. It is built from the doc on first use, followed
- * through each transaction in which `Page` methods ran, and dropped as soon as any other transaction changes the doc
- * (remote updates, undo, raw writes), so the next use rebuilds it. Don't mix raw writes to `items`, `order` or `lines`
- * with `Page` calls inside one transaction: the index wouldn't see them.
+ * through each transaction in which `Page` methods ran, and dropped as soon as anything else changes the doc: another
+ * transaction (remote updates, undo, raw writes), or, inside a transaction, a write between two `Page` calls (seen by
+ * a fingerprint of the doc taken when each call returns). The next use rebuilds it from the doc.
  */
 interface LineIndex {
   /** The transaction following it; null between transactions (still exact). */
@@ -37,6 +37,24 @@ interface LineIndex {
    */
   dirty: Set<Group>;
   pending: Map<string, string | null>;
+  /** `fingerprint` of the doc when the last `Page` call in `tx` returned (or the index was built). */
+  mark: number;
+}
+
+/**
+ * Changes whenever anything is written to the doc within one transaction: inserts advance a client's clock, deletes
+ * grow the transaction's delete set. O(clients).
+ */
+function fingerprint(doc: Y.Doc, tx: Y.Transaction | null): number {
+  let n = 0;
+  doc.store.clients.forEach((structs) => {
+    const last = structs[structs.length - 1];
+    if (last) n += last.id.clock + last.length;
+  });
+  tx?.deleteSet.clients.forEach((d) => {
+    n += d.length;
+  });
+  return n;
 }
 
 const indexes = new WeakMap<Y.Doc, LineIndex>();
@@ -173,14 +191,19 @@ export class Page {
   }
 
   private tx(fn: () => void): void {
-    this.doc.transact(() => {
+    this.doc.transact((tx) => {
       const d = depths.get(this.doc) ?? 0;
+      if (d === 0) this.peek(); // checks the index against writes made since the last Page call
       depths.set(this.doc, d + 1);
       try {
         fn();
       } finally {
         depths.set(this.doc, d);
-        if (d === 0) this.flushLines();
+        if (d === 0) {
+          this.flushLines();
+          const ix = indexes.get(this.doc);
+          if (ix?.tx === tx) ix.mark = fingerprint(this.doc, tx);
+        }
       }
     }, LOCAL_ORIGIN);
   }
@@ -449,6 +472,14 @@ export class Page {
     const ix = indexes.get(this.doc);
     if (!ix) return undefined;
     const tx = this.doc._transaction;
+    // Outside Page calls, inside a transaction: was anything written since the index last matched the doc?
+    if (tx && !depths.get(this.doc)) {
+      const stale = ix.tx === tx ? ix.mark !== fingerprint(this.doc, tx) : ix.tx !== null || tx.changed.size > 0;
+      if (stale) {
+        indexes.delete(this.doc);
+        return undefined;
+      }
+    }
     if (ix.tx === null) ix.tx = tx;
     return ix.tx === tx ? ix : undefined;
   }
@@ -458,7 +489,7 @@ export class Page {
     const ix = this.peek();
     if (ix) return ix;
     const tx = this.doc._transaction;
-    const built: LineIndex = { tx, pos: new Map(), next: 0, ghosts: new Set(), lineOf: new Map(), bb: new Map(), groups: new Map(), dirty: new Set(), pending: new Map() };
+    const built: LineIndex = { tx, pos: new Map(), next: 0, ghosts: new Set(), lineOf: new Map(), bb: new Map(), groups: new Map(), dirty: new Set(), pending: new Map(), mark: 0 };
     for (const id of this.order.toArray()) {
       if (built.pos.has(id) || built.ghosts.has(id)) continue;
       const m = this.itemMap.get(id);
@@ -482,6 +513,7 @@ export class Page {
       g.bbox = unionBBox(g.bbox, bb);
     }
     for (const g of built.groups.values()) g.kind = this.kindOf(g);
+    built.mark = fingerprint(this.doc, tx);
     watch(this.doc);
     indexes.set(this.doc, built);
     return built;
