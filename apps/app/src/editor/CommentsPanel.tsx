@@ -4,13 +4,17 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { relativeTime } from '../library/actions';
 import { useTheme } from '../theme/ThemeProvider';
-import { radius } from '../theme/tokens';
+import { indicatorStyleFor } from '../theme/scrollbars';
+import { PANEL_HEADER, radius } from '../theme/tokens';
 import { Avatar, Button, focusRing, IconButton, Segmented, TextField } from '../ui/controls';
 import { EmptyState } from '../ui/layout';
 import { Text } from '../ui/Text';
 import { filterFor, filterRows, rowsInView, type CommentFilter, type CommentRow, type RowBox } from './CommentsPanel.logic';
 import type { PageData } from './context';
 import { lineQuote } from './view';
+
+/** px width of the comments panel (docked or floating). */
+export const PANEL_W = 344;
 
 type PressState = { pressed: boolean; hovered?: boolean; focused?: boolean };
 
@@ -82,7 +86,7 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
               </Text>
             </View>
           ) : null}
-          <View style={[styles.actions, { flexDirection: 'row' }]}>
+          <View style={styles.actionRow}>
             <Button label={`Go to page ${row.index + 1}`} size="sm" variant="ghost" icon="arrow-right" onPress={onJump} />
           </View>
         </>
@@ -123,10 +127,15 @@ function Thread({ comment: cm, data, hasLine, onJump }: { comment: Comment; data
           </View>
         </View>
       ) : (
-        <View style={[styles.actions, { flexDirection: 'row', gap: 6, flexWrap: 'wrap' }]}>
+        // One row: Reply and Resolve on the left, Show on the right.
+        <View style={styles.actionRow}>
           <Button label="Reply" size="sm" variant="ghost" icon="corner-up-left" onPress={() => setReply('')} />
           {!cm.resolved ? <Button label="Resolve" size="sm" variant="ghost" icon="check" onPress={() => data.page.resolveComment(cm.id)} /> : null}
-          {hasLine ? <Button label="Show" accessibilityLabel="Show on page" size="sm" variant="ghost" icon="crosshair" onPress={onJump} /> : null}
+          {hasLine ? (
+            <View style={{ marginLeft: 'auto' }}>
+              <Button label="Show" accessibilityLabel="Show on page" size="sm" variant="ghost" icon="crosshair" onPress={onJump} />
+            </View>
+          ) : null}
         </View>
       )}
     </>
@@ -153,7 +162,7 @@ export function CommentsPanel({
   /** The threads whose cards are on screen in the panel (sorted ids; for read state). */
   onVisible(ids: string[]): void;
 }) {
-  const { c } = useTheme();
+  const { c, scheme } = useTheme();
   const [filter, setFilter] = React.useState<CommentFilter>('open');
   const rows = filterRows(threads, filter);
   const openCount = filterRows(threads, 'open').length;
@@ -202,14 +211,19 @@ export function CommentsPanel({
   React.useEffect(() => () => onVisibleRef.current([]), []);
   return (
     <View style={[styles.panel, { backgroundColor: c.surface, borderLeftColor: c.line }]}>
+      {/* The same header and filter row as the Pages sidebar. */}
       <View style={styles.top}>
-        <Text variant="section" style={{ flex: 1 }} numberOfLines={1} accessibilityRole="header">
-          Comments
-          {openCount ? <Text variant="meta" tone="faint">{`   ${openCount} open`}</Text> : null}
-        </Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text variant="section" numberOfLines={1} accessibilityRole="header">
+            Comments
+          </Text>
+          <Text variant="meta" tone="faint" numberOfLines={1}>
+            {openCount ? `${openCount} open` : 'None open'}
+          </Text>
+        </View>
         <IconButton icon="x" label="Close comments" size={36} onPress={onClose} />
       </View>
-      <View style={{ paddingHorizontal: 12 }}>
+      <View style={[styles.filter, { borderBottomColor: c.line2 }]}>
         <Segmented<CommentFilter>
           value={filter}
           onChange={setFilter}
@@ -222,7 +236,9 @@ export function CommentsPanel({
       </View>
       <ScrollView
         ref={scroll}
-        contentContainerStyle={{ padding: 12, gap: 10, flexGrow: 1 }}
+        indicatorStyle={indicatorStyleFor(scheme)}
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.list}
         scrollEventThrottle={100}
         onScroll={(e) => {
           view.current.y = e.nativeEvent.contentOffset.y;
@@ -281,12 +297,15 @@ export function CommentsPanel({
 }
 
 const styles = StyleSheet.create({
-  panel: { flex: 1, width: 340, maxWidth: '100%', borderLeftWidth: StyleSheet.hairlineWidth },
-  top: { flexDirection: 'row', alignItems: 'center', paddingLeft: 16, paddingRight: 6, height: 56 },
-  card: { borderRadius: radius.panel, borderWidth: 1, padding: 6, paddingBottom: 8, gap: 6 },
-  summary: { borderRadius: radius.control, padding: 6, gap: 8 },
+  panel: { flex: 1, width: PANEL_W, maxWidth: '100%', minWidth: 0, overflow: 'hidden', borderLeftWidth: StyleSheet.hairlineWidth },
+  top: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingLeft: 16, paddingRight: 8, ...PANEL_HEADER },
+  filter: { paddingHorizontal: 12, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  list: { padding: 12, gap: 12, flexGrow: 1 },
+  card: { borderRadius: radius.panel, borderWidth: 1, padding: 6, gap: 4 },
+  summary: { borderRadius: radius.control, paddingHorizontal: 10, paddingVertical: 8, gap: 8 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  reply: { borderLeftWidth: 2, paddingLeft: 10, marginLeft: 6, gap: 2 },
-  actions: { paddingHorizontal: 6, gap: 8 },
+  reply: { borderLeftWidth: 2, paddingLeft: 10, marginLeft: 10, marginRight: 4, marginVertical: 2, gap: 2 },
+  actions: { paddingHorizontal: 4, gap: 8 },
+  actionRow: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 0 },
   foot: { paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
 });

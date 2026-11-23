@@ -3,11 +3,14 @@ import type { PageInfo } from '@qalm/core';
 
 /** Windows at least this wide show the navigator as a sidebar beside the pages; narrower ones as a full-screen grid. */
 export const NAV_SIDEBAR_MIN = 900;
-export const NAV_SIDEBAR_W = 216;
+export const NAV_SIDEBAR_W = 224;
 export const NAV_PAD = 12;
 export const NAV_GAP = 12;
 /** Height of the label row under a thumbnail (page number, bookmark). */
 export const NAV_LABEL_H = 36;
+
+/** px around a thumbnail inside its cell: the current-page ring (2) and the gap between it and the page (2). */
+export const NAV_RING = 4;
 
 export type NavMode = 'sidebar' | 'grid';
 export type NavFilter = 'all' | 'bookmarks';
@@ -29,6 +32,18 @@ export function navLayout(width: number, mode: NavMode, pages: Pick<PageInfo, 's
   const aspect = pages.reduce((m, p) => Math.max(m, p.size.h / p.size.w), 0) || 842 / 595;
   const thumbH = Math.round(cellW * Math.min(aspect, 2));
   return { columns, cellW, thumbH, rowH: thumbH + NAV_LABEL_H + NAV_GAP };
+}
+
+/**
+ * The thumbnail's box for a page of `size`: its own aspect ratio, as large as fits the cell (less the ring), so a page
+ * is never cropped and every page in a row lines up on the same centre.
+ */
+export function thumbBox(size: { w: number; h: number }, layout: Pick<NavLayout, 'cellW' | 'thumbH'>): { w: number; h: number } {
+  const aspect = size.h / size.w;
+  const maxW = Math.max(1, layout.cellW - NAV_RING * 2);
+  const maxH = Math.max(1, layout.thumbH - NAV_RING * 2);
+  const w = Math.min(maxW, maxH / aspect);
+  return { w: Math.floor(w), h: Math.floor(w * aspect) };
 }
 
 export interface NavEntry {

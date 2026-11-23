@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useColorScheme } from 'react-native';
 
 import { kvGet, kvSet } from '../lib/kv';
+import { applyWebScrollbars } from './scrollbars';
 import { dark, light, type Colors } from './tokens';
 
 export type Appearance = 'system' | 'light' | 'dark';
@@ -61,6 +62,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const scheme = prefs.appearance === 'system' ? (system === 'dark' ? 'dark' : 'light') : prefs.appearance;
+  // Web / Electron: slim, theme-aware scrollbars (see scrollbars.ts).
+  React.useEffect(() => applyWebScrollbars(scheme, scheme === 'dark' ? dark : light), [scheme]);
   const value = React.useMemo<ThemeValue>(
     () => ({
       c: scheme === 'dark' ? dark : light,

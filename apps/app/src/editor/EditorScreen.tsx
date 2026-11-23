@@ -15,15 +15,17 @@ import { pickFile } from '../lib/files';
 import { docIds, openLoaded, type DocHandle } from '../sync/docs';
 import { useDoc, useLibraryData, useSession, useSyncStatus, useVersion } from '../state/session';
 import { useTheme } from '../theme/ThemeProvider';
+import { indicatorStyleFor } from '../theme/scrollbars';
 import { PEN_COLORS, HIGHLIGHTER_COLORS, radius, shadow2 } from '../theme/tokens';
 import { confirm } from '../ui/confirm';
 import { Button, IconButton, Pill, TextField, Toggle } from '../ui/controls';
 import { EmptyState, Menu, Row, Sheet, useToast, type MenuItem } from '../ui/layout';
 import { Text } from '../ui/Text';
-import { CommentsPanel } from './CommentsPanel';
+import { CommentsPanel, PANEL_W } from './CommentsPanel';
 import { threadRows } from './CommentsPanel.logic';
 import { mirrorLoadedThreads, useThreadBackfill, useThreadIndex } from './threadIndex';
 import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence, useReadAfterDwell } from './ai';
+import { fitColumn, MARGIN_CARD_GAP, marginColumn } from './margin.logic';
 import { marginCards, markSeen, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, unreadIds, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditingText, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
 import { clipSetAt, getClip, pasteItems, setClip, useClip } from './clipboard';
@@ -74,7 +76,7 @@ const DEFAULT_TOOLS: ToolState = {
 type MenuState = { items: MenuItem[]; anchor?: { x: number; y: number; align?: 'left' | 'right' } } | null;
 
 export function EditorScreen({ notebookId }: { notebookId: string }) {
-  const { c, input } = useTheme();
+  const { c, input, scheme } = useTheme();
   const s = useSession();
   const { library } = useLibraryData();
   const h = useDoc(docIds.notebook(notebookId), 2500);
@@ -241,10 +243,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   slotsRef.current = slots;
   const shownKey = React.useRef('');
   shownKey.current = viewKey(slots, scrollY, viewport.h);
-  // Comment cards sit in the margin beside the page when there's room; otherwise pins on the page and the panel.
-  const gutter = (contentW - widestPx) / 2;
-  const wideMargin = gutter >= 200;
-  const marginW = Math.min(240, gutter - 40);
+  // Comment cards sit in a column beside the page when there's room and the panel is closed; otherwise pins on the page
+  // (and the panel, which lists every thread).
+  const column = marginColumn(contentW, widestPx, commentsOpen);
+  const wideMargin = column !== null;
   const current = currentPageIndex(slots, scrollY, viewport.h);
   const currentPageId = pages[current]?.id ?? null;
 
@@ -806,9 +808,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       const slot = slots[i];
       const d = info ? pageData.get(info.id) : undefined;
       if (!info || !slot || !d) continue;
-      for (const m of marginCards(d.lines, d.comments, slot.width / info.size.w, MARGIN_CARD_H, 8, activeCommentId, slot.height, d.items)) {
-        marginTops.set(m.comment.id, slot.top + m.top);
-      }
+      const placed = marginCards(d.lines, d.comments, slot.width / info.size.w, MARGIN_CARD_H, MARGIN_CARD_GAP, activeCommentId, slot.height, d.items);
+      for (const m of fitColumn(placed, MARGIN_CARD_H, MARGIN_CARD_GAP, slot.height).shown) marginTops.set(m.comment.id, slot.top + m.top);
     }
   }
   const marginTopsRef = React.useRef(marginTops);
@@ -953,6 +954,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               <ScrollView horizontal scrollEnabled={contentW > viewport.w + 1} contentContainerStyle={{ width: contentW }} showsHorizontalScrollIndicator={contentW > viewport.w + 1}>
                 <ScrollView
                   ref={vScroll}
+                  indicatorStyle={indicatorStyleFor(scheme)}
                   style={{ width: contentW, height: viewport.h }}
                   scrollEventThrottle={32}
                   onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -967,7 +969,15 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                       const info = pages[i]!;
                       const left = (contentW - slot.width) / 2;
                       const data = i >= first && i <= last ? pageData.get(info.id) : undefined;
-                      const cards = wideMargin && data ? marginCards(data.lines, data.comments, slot.width / info.size.w, MARGIN_CARD_H, 8, activeCommentId, slot.height, data.items) : [];
+                      const cards =
+                        column && data
+                          ? fitColumn(
+                              marginCards(data.lines, data.comments, slot.width / info.size.w, MARGIN_CARD_H, MARGIN_CARD_GAP, activeCommentId, slot.height, data.items),
+                              MARGIN_CARD_H,
+                              MARGIN_CARD_GAP,
+                              slot.height,
+                            )
+                          : null;
                       return (
                         <React.Fragment key={slot.id}>
                           <View style={[styles.page, { left, top: slot.top, width: slot.width, height: slot.height, borderColor: c.line }]}>
@@ -984,20 +994,35 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                             </Text>
                             <IconButton icon="more-horizontal" label={`Page ${i + 1} options`} size={32} onPress={(e) => pageMenu(i, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })} />
                           </View>
-                          {cards.length ? (
-                            <View pointerEvents="box-none" style={{ position: 'absolute', left: left + slot.width + 14, top: slot.top, width: marginW, height: slot.height }}>
-                              {cards.map((m) => (
+                          {column && cards && (cards.shown.length || cards.more) ? (
+                            <View
+                              pointerEvents="box-none"
+                              style={{ position: 'absolute', left: left + slot.width + column.gap, top: slot.top, width: column.width, height: slot.height }}
+                            >
+                              {cards.shown.map((m) => (
                                 <MarginCard
                                   key={m.comment.id}
                                   comment={m.comment}
                                   top={m.top}
-                                  width={marginW}
+                                  width={column.width}
                                   active={m.comment.id === activeCommentId}
                                   unread={unreadSet.has(m.comment.id)}
                                   thinking={isThinking && thinking?.commentId === m.comment.id}
                                   onPress={() => edCtx.setActiveComment(m.comment.id)}
                                 />
                               ))}
+                              {cards.more ? (
+                                <View style={{ position: 'absolute', top: cards.moreTop, left: 0 }}>
+                                  <Button
+                                    label={`${cards.more} more`}
+                                    accessibilityLabel={`${cards.more} more comments on page ${i + 1}: open comments`}
+                                    icon="message-square"
+                                    size="sm"
+                                    variant="ghost"
+                                    onPress={() => setCommentsOpen(true)}
+                                  />
+                                </View>
+                              ) : null}
                             </View>
                           ) : null}
                         </React.Fragment>
@@ -1071,7 +1096,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
           </View>
 
           {commentsOpen ? (
-            <View style={dockComments ? undefined : [StyleSheet.absoluteFill, { alignItems: 'flex-end' }]} pointerEvents="box-none">
+            // Docked: a fixed-width column beside the page area (never squeezed by it). Floating: over the page, at the right.
+            <View style={dockComments ? { width: PANEL_W, flexShrink: 0 } : [StyleSheet.absoluteFill, { alignItems: 'flex-end' }]} pointerEvents="box-none">
               <View style={dockComments ? { flex: 1 } : [{ flex: 1, maxWidth: '100%' }, shadow2]}>
               <CommentsPanel
                 threads={threads}

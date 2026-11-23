@@ -2,8 +2,9 @@ import type { PageInfo } from '@qalm/core';
 import * as React from 'react';
 import { FlatList, Image, PanResponder, PixelRatio, Platform, Pressable, StyleSheet, View, type GestureResponderEvent } from 'react-native';
 
+import { indicatorStyleFor } from '../theme/scrollbars';
 import { useTheme } from '../theme/ThemeProvider';
-import { PAPER_SWATCH, radius } from '../theme/tokens';
+import { PANEL_HEADER, PAPER_SWATCH } from '../theme/tokens';
 import { IconButton, Segmented } from '../ui/controls';
 import { EmptyState, Menu, type MenuItem } from '../ui/layout';
 import { Text } from '../ui/Text';
@@ -14,6 +15,7 @@ import {
   NAV_LABEL_H,
   NAV_PAD,
   navEntries,
+  thumbBox,
   navLayout,
   rowOf,
   type NavEntry,
@@ -76,16 +78,28 @@ interface CellProps {
   onMore(anchor: { x: number; y: number }): void;
 }
 
+/** A mouse or trackpad (not touch): page controls appear on hover / focus. On touch they're always there. */
+const HOVER_POINTER =
+  Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
+type PressState = { pressed: boolean; hovered?: boolean; focused?: boolean };
+
 const Cell = React.memo(function Cell({ entry, layout, current, priority, thumbs, dragging, onPress, onLongPress, onBookmark, onMore }: CellProps) {
   const { c } = useTheme();
   const { info, index } = entry;
   const thumbW = Math.round(layout.cellW * Math.min(2, Math.max(1, PixelRatio.get())));
   const uri = useThumbnail(thumbs, info, thumbW, priority);
-  const aspect = info.size.h / info.size.w;
-  const boxW = Math.min(layout.cellW, layout.thumbH / aspect);
-  const boxH = Math.round(boxW * aspect);
+  const box = thumbBox(info.size, layout);
+  const [hover, setHover] = React.useState(false);
+  const [focus, setFocus] = React.useState(0);
+  const controls = !HOVER_POINTER || hover || focus > 0;
+  const focusProps = { onFocus: () => setFocus((n) => n + 1), onBlur: () => setFocus((n) => Math.max(0, n - 1)) };
   return (
-    <View style={{ width: layout.cellW, height: layout.thumbH + NAV_LABEL_H, opacity: dragging ? 0.4 : 1 }}>
+    <View
+      style={{ width: layout.cellW, height: layout.thumbH + NAV_LABEL_H, opacity: dragging ? 0.4 : 1 }}
+      onPointerEnter={HOVER_POINTER ? () => setHover(true) : undefined}
+      onPointerLeave={HOVER_POINTER ? () => setHover(false) : undefined}
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Page ${index + 1}${info.bookmarked ? ', bookmarked' : ''}${current ? ', current page' : ''}`}
@@ -93,37 +107,47 @@ const Cell = React.memo(function Cell({ entry, layout, current, priority, thumbs
         onPress={onPress}
         onLongPress={onLongPress}
         delayLongPress={300}
-        style={{ height: layout.thumbH, alignItems: 'center', justifyContent: 'flex-end' }}
+        {...focusProps}
+        style={{ height: layout.thumbH, alignItems: 'center', justifyContent: 'center' }}
       >
-        <View
-          style={[
-            styles.thumb,
-            {
-              width: boxW,
-              height: boxH,
-              backgroundColor: PAPER_SWATCH[info.paperColor],
-              borderColor: current ? c.accent : c.line,
-              borderWidth: current ? 2 : StyleSheet.hairlineWidth,
-            },
-          ]}
-        >
-          {uri ? <Image source={{ uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" /> : null}
-        </View>
+        {(s) => {
+          const st = s as PressState;
+          return (
+            // The ring sits 2 px outside the page: accent for the current page, a hairline hint on hover.
+            <View style={[styles.ring, { borderColor: current ? c.accent : st.hovered || st.focused ? c.line : 'transparent' }]}>
+              <View style={[styles.thumb, { width: box.w, height: box.h, backgroundColor: PAPER_SWATCH[info.paperColor], borderColor: c.line }]}>
+                {uri ? <Image source={{ uri }} style={{ width: '100%', height: '100%' }} resizeMode="contain" /> : null}
+              </View>
+            </View>
+          );
+        }}
       </Pressable>
       <View style={styles.label}>
-        <Text variant="meta" tone={current ? 'accent' : 'muted'} style={{ flex: 1, fontWeight: current ? '600' : undefined }}>
+        <View style={[styles.side, { opacity: controls || info.bookmarked ? 1 : 0 }]}>
+          <IconButton
+            icon="bookmark"
+            label={info.bookmarked ? `Remove bookmark from page ${index + 1}` : `Bookmark page ${index + 1}`}
+            size={28}
+            color={info.bookmarked ? c.accentInk : c.faint}
+            style={info.bookmarked ? { backgroundColor: c.accentSoft } : undefined}
+            onPress={onBookmark}
+            {...focusProps}
+          />
+        </View>
+        <Text variant="meta" tone={current ? 'accent' : 'muted'} numberOfLines={1} style={{ flex: 1, textAlign: 'center', fontWeight: current ? '600' : undefined }}>
           {index + 1}
           {info.background.kind === 'pdf' ? ' · PDF' : ''}
         </Text>
-        <IconButton
-          icon="bookmark"
-          label={info.bookmarked ? `Remove bookmark from page ${index + 1}` : `Bookmark page ${index + 1}`}
-          size={32}
-          color={info.bookmarked ? c.accent : c.faint}
-          style={info.bookmarked ? { backgroundColor: c.accentSoft } : undefined}
-          onPress={onBookmark}
-        />
-        <IconButton icon="more-horizontal" label={`Page ${index + 1} options`} size={32} onPress={(e) => onMore({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })} />
+        <View style={[styles.side, { opacity: controls ? 1 : 0 }]}>
+          <IconButton
+            icon="more-horizontal"
+            label={`Page ${index + 1} options`}
+            size={28}
+            color={c.faint}
+            onPress={(e) => onMore({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
+            {...focusProps}
+          />
+        </View>
       </View>
     </View>
   );
@@ -136,7 +160,7 @@ const Cell = React.memo(function Cell({ entry, layout, current, priority, thumbs
  */
 export function PageNavigator(props: PageNavigatorProps) {
   const { mode, width, pages, current, thumbs, onJump, onClose, onGoTo, onMove, onDuplicate, onDelete, onBookmark, onPaper } = props;
-  const { c } = useTheme();
+  const { c, scheme } = useTheme();
   const [filter, setFilter] = React.useState<NavFilter>('all');
   const [menu, setMenu] = React.useState<{ items: MenuItem[]; anchor: { x: number; y: number } } | null>(null);
   const entries = React.useMemo(() => navEntries(pages, filter), [pages, filter]);
@@ -235,7 +259,7 @@ export function PageNavigator(props: PageNavigatorProps) {
   const grid = mode === 'grid';
   return (
     <View style={[styles.panel, grid ? { flex: 1, width: '100%' } : { width, flexGrow: 0, flexShrink: 0 }, { backgroundColor: grid ? c.bg : c.surface, borderRightColor: c.line }]}>
-      <View style={[styles.top, { borderBottomColor: c.line2, backgroundColor: c.surface }]}>
+      <View style={[styles.top, { backgroundColor: c.surface }]}>
         <View style={{ flex: 1 }}>
           <Text variant="section">Pages</Text>
           <Text variant="meta" tone="faint">
@@ -245,7 +269,7 @@ export function PageNavigator(props: PageNavigatorProps) {
         <IconButton icon="hash" label="Go to page" size={36} onPress={onGoTo} />
         <IconButton icon="x" label="Close pages" size={36} onPress={onClose} />
       </View>
-      <View style={{ paddingHorizontal: NAV_PAD, paddingVertical: 10, backgroundColor: c.surface, borderBottomWidth: grid ? StyleSheet.hairlineWidth : 0, borderBottomColor: c.line2 }}>
+      <View style={[styles.filter, { backgroundColor: c.surface, borderBottomColor: c.line2 }]}>
         <Segmented<NavFilter>
           value={filter}
           onChange={setFilter}
@@ -269,6 +293,7 @@ export function PageNavigator(props: PageNavigatorProps) {
         {rows.length ? (
           <FlatList
             ref={list}
+            indicatorStyle={indicatorStyleFor(scheme)}
             data={rows}
             key={layout.columns}
             keyExtractor={(row) => row[0]!.info.id}
@@ -326,7 +351,11 @@ export function PageNavigator(props: PageNavigatorProps) {
 
 const styles = StyleSheet.create({
   panel: { borderRightWidth: StyleSheet.hairlineWidth },
-  top: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingLeft: 16, paddingRight: 6, height: 56, borderBottomWidth: StyleSheet.hairlineWidth },
-  thumb: { borderRadius: 4, overflow: 'hidden' },
-  label: { height: NAV_LABEL_H, flexDirection: 'row', alignItems: 'center', gap: 0, paddingLeft: 2 },
+  // The same header and filter row as the comments panel, so the two sides line up.
+  top: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingLeft: 16, paddingRight: 8, ...PANEL_HEADER },
+  filter: { paddingHorizontal: 12, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  ring: { padding: 2, borderWidth: 2, borderRadius: 7 },
+  thumb: { borderRadius: 3, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
+  label: { height: NAV_LABEL_H, flexDirection: 'row', alignItems: 'center' },
+  side: { width: 28, alignItems: 'center' },
 });

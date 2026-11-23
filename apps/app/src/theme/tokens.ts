@@ -94,6 +94,11 @@ export const dark: Colors = {
 
 export const radius = { control: 8, panel: 12, pill: 999 } as const;
 export const CONTROL_H = 44;
+/**
+ * The side panels' (Pages, Comments) title row: its content sits 12 px down and 52 px tall, level with the floating
+ * toolbar beside it.
+ */
+export const PANEL_HEADER = { height: 64, paddingTop: 12 } as const;
 
 export const shadow1 = {
   shadowColor: '#000',
