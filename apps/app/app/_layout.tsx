@@ -55,8 +55,9 @@ function MoveLocalOffer() {
       }
     >
       <Text tone="muted">
-        {n === 1 ? 'A notebook was' : `${n} notebooks were`} made on this device without an account. Moving them syncs them to {who}. Only move them if
-        this is your account.
+        {n === 1
+          ? `A notebook was made on this device without an account. Moving it syncs it to ${who}. Only move it if this is your account.`
+          : `${n} notebooks were made on this device without an account. Moving them syncs them to ${who}. Only move them if this is your account.`}
       </Text>
     </Sheet>
   );
