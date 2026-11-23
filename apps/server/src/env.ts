@@ -14,7 +14,10 @@ export interface Env {
   JWT_SECRET: string;
   /** Public origin, e.g. https://api.qalm.app. Defaults to the request's origin. */
   PUBLIC_URL?: string;
-  /** Where magic links point. Defaults to `${origin}/auth/email/verify`. The app's universal link goes here. */
+  /**
+   * Where app sign-in links in emails point: the app's verify route, which POSTs the token back (a GET never uses a link up).
+   * Normally the web app's `/auth/email/verify` (also the universal link on iOS/Android). Defaults to `qalm://auth/email/verify`.
+   */
   MAGIC_LINK_URL?: string;
   /** 'console' (default: log the link) or 'resend'. */
   EMAIL_PROVIDER?: string;

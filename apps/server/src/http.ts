@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { num } from './env';
-import { handleAuth, requireUser } from './auth';
+import { handleAuth, requireUser, TooManyRequests } from './auth';
 import { handleAuthorize, messagePage } from './consent';
 import { canAccess, parseDocId, room } from './docs';
 import { type GrantRow, userNotebooks } from './grants';
@@ -10,7 +10,7 @@ const TICKET_TTL_MS = 30_000;
 const SHA = /^[0-9a-f]{64}$/;
 
 /** Paths the app calls cross-origin (web build on another origin, Electron from file://). Bearer auth only, no cookies. */
-const CORS_PATHS = /^\/(auth\/(email\/start|email\/verify|apple|google|refresh)|sync\/ticket|assets\/[^/]+|ai\/.*|health)$/;
+const CORS_PATHS = /^\/(auth\/(email\/start|email\/lookup|email\/verify|apple|google|refresh|logout)|sync\/ticket|assets\/[^/]+|ai\/.*|health)$/;
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
@@ -44,7 +44,9 @@ async function handle(req: Request, env: Env): Promise<Response> {
     } catch (e) {
       if (e instanceof HttpError) {
         if (path === '/auth/email/verify' && (req.headers.get('Accept') ?? '').includes('text/html')) return messagePage("Can't sign in", e.message, e.status);
-        return error(e.status, e.message);
+        const res = error(e.status, e.message);
+        if (e instanceof TooManyRequests) res.headers.set('Retry-After', String(e.retryAfterS));
+        return res;
       }
       console.error(e);
       return error(500, 'Internal error');

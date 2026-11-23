@@ -1,6 +1,6 @@
 import { AuthorizationError, CimdFetchError, type ConsentDescription } from '@cloudflare/workers-oauth-provider';
 import type { Env, McpProps } from './env';
-import { startMagicLink, webUser } from './auth';
+import { startMagicLink, TooManyRequests, webUser } from './auth';
 import { GRANT_TTL_MS, userNotebooks, type NotebookChoice } from './grants';
 import type { Folder } from '@qalm/core';
 import { BRAND_FONT_STACK, D, MARK_SVG, T } from './brand';
@@ -42,6 +42,7 @@ h1{margin:0 0 4px;font-size:20px;font-weight:600;letter-spacing:-.02em;text-alig
 button{font:inherit;font-weight:600;height:44px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);flex:1;cursor:pointer}
 button.p{background:var(--accent);border-color:var(--accent);color:#fff}
 button:disabled{opacity:.5;cursor:default}
+a.btn{display:flex;align-items:center;justify-content:center;flex:1;height:44px;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;text-decoration:none}
 input[type=email]{width:100%;height:44px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;padding:0 12px}
 .fine{font-size:12px;color:var(--faint);text-align:center;margin-top:14px}
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
@@ -79,6 +80,26 @@ const logos = (clientName: string) => `<div class="logos"><span class="av">${e(i
 
 export function messagePage(title: string, text: string, status = 200): Response {
   return page(title, `<div class="logos"><span class="mark">${MARK_SVG}</span></div><h1>${e(title)}</h1><p class="sub">${e(text)}</p>`, status);
+}
+
+/**
+ * GET /auth/email/verify: a page with a button, so following a link (mail scanners, previews) never uses it up.
+ * `postToken`: MCP consent sign-in (the button POSTs the token here). `href`: an app sign-in link reached on the server (old link
+ * or misconfigured MAGIC_LINK_URL); the button opens the app link, which verifies it.
+ */
+export function magicLinkPage(email: string, to: { postToken: string } | { href: string }): Response {
+  const button =
+    'postToken' in to
+      ? `<form method="post" action="/auth/email/verify"><input type="hidden" name="token" value="${e(to.postToken)}"><div class="foot"><button class="p" type="submit">Continue</button></div></form>`
+      : `<div class="foot"><a class="btn" href="${e(to.href)}">Continue</a></div>`;
+  const res = page(
+    'Sign in to Qalm',
+    `<div class="logos"><span class="mark">${MARK_SVG}</span></div>
+<h1>Sign in to Qalm</h1><p class="sub">Continue as <b>${e(email)}</b>. Only continue if you just asked for this link.</p>
+${button}`,
+  );
+  res.headers.set('Referrer-Policy', 'no-referrer');
+  return res;
 }
 
 function signInPage(returnTo: string, sent = false, error?: string): Response {
@@ -147,8 +168,12 @@ export async function handleAuthorize(req: Request, env: Env, path: string): Pro
     const returnTo = String(form.get('return') ?? '');
     if (!returnTo.startsWith('/authorize?')) return messagePage("Can't connect", 'Start again from your app.', 400);
     try {
-      await startMagicLink(env, req, String(form.get('email') ?? ''), returnTo);
+      await startMagicLink(env, req, String(form.get('email') ?? ''), { returnTo });
     } catch (err) {
+      if (err instanceof TooManyRequests) {
+        const res = signInPage(returnTo, false, 'Too many sign-in emails. Try again later.');
+        return new Response(res.body, { status: 429, headers: new Headers([...res.headers, ['Retry-After', String(err.retryAfterS)]]) });
+      }
       if (err instanceof HttpError && err.status === 400) return signInPage(returnTo, false, 'Enter a valid email address.');
       throw err;
     }

@@ -3,7 +3,7 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { Notebook, Page, createNotebookDoc } from '@qalm/core';
-import { BASE, YClient, call, captureLink, cookieJar, signIn, stroke, until, type Tokens } from './helpers';
+import { BASE, YClient, call, captureLink, consentSignIn, cookieJar, signIn, stroke, until, type Tokens } from './helpers';
 import { sessionOf } from '../src/grants';
 
 const REDIRECT = 'https://client.test/cb';
@@ -38,7 +38,7 @@ async function connectAgent(
   const link = await captureLink(() =>
     call('/authorize/signin', { method: 'POST', body: new URLSearchParams({ email, return: authorizePath }) }),
   );
-  const back = await SELF.fetch(link, { redirect: 'manual' });
+  const back = await consentSignIn(link);
   expect(back.status).toBe(302);
   expect(back.headers.get('Location')).toBe(authorizePath);
   jar.take(back);

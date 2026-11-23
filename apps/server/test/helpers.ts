@@ -15,30 +15,68 @@ export function call(path: string, init: RequestInit & { token?: string } = {}):
   return SELF.fetch(`${BASE}${path}`, { ...init, headers, redirect: 'manual' });
 }
 
-/** Runs `fn` while capturing console.log, and returns the first magic link logged. */
-export async function captureLink(fn: () => Promise<unknown>): Promise<string> {
+/** Runs `fn` while capturing console.log, and returns the first sign-in email logged (link and, for app sign-in, the code). */
+export async function captureEmail(fn: () => Promise<unknown>): Promise<{ link: string; code: string | null }> {
   const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
   try {
     await fn();
     const text = spy.mock.calls.map((c) => c.join(' ')).join('\n');
     const m = /(https:\/\/\S+\/auth\/email\/verify\?token=\S+)/.exec(text);
     expect(m, 'a magic link was logged').toBeTruthy();
-    return m![1]!;
+    return { link: m![1]!, code: /enter this code in Qalm: (\d{6})/.exec(text)?.[1] ?? null };
   } finally {
     spy.mockRestore();
   }
 }
 
+export async function captureLink(fn: () => Promise<unknown>): Promise<string> {
+  return (await captureEmail(fn)).link;
+}
+
+export const tokenOf = (link: string) => new URL(link).searchParams.get('token')!;
+
+async function sha256Hex(s: string): Promise<string> {
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** A device nonce and the hash sent to /auth/email/start. */
+export async function deviceNonce(): Promise<{ nonce: string; nonceHash: string }> {
+  const nonce = crypto.randomUUID();
+  return { nonce, nonceHash: await sha256Hex(nonce) };
+}
+
+/** POST /auth/email/start as the app does; returns the email's link, token and code, and the device nonce. */
+export async function startEmail(email: string, headers?: HeadersInit) {
+  const n = await deviceNonce();
+  let status = 0;
+  const mail = await captureEmail(async () => {
+    const r = await call('/auth/email/start', { method: 'POST', headers, body: JSON.stringify({ email, nonceHash: n.nonceHash }) });
+    status = r.status;
+  });
+  expect(status).toBe(200);
+  return { ...mail, token: tokenOf(mail.link), ...n };
+}
+
+export function verifyEmail(body: Record<string, unknown>): Promise<Response> {
+  return call('/auth/email/verify', { method: 'POST', body: JSON.stringify(body) });
+}
+
 export interface Tokens { accessToken: string; refreshToken: string; expiresIn: number; userId: string }
 
 export async function signIn(email: string): Promise<Tokens> {
-  const link = await captureLink(async () => {
-    const r = await call('/auth/email/start', { method: 'POST', body: JSON.stringify({ email }) });
-    expect(r.status).toBe(200);
-  });
-  const r = await SELF.fetch(link);
+  const m = await startEmail(email);
+  const r = await verifyEmail({ token: m.token, nonce: m.nonce });
   expect(r.status).toBe(200);
   return (await r.json()) as Tokens;
+}
+
+/** MCP consent sign-in: GET the emailed link (a page with a button), then press it (form POST). */
+export async function consentSignIn(link: string): Promise<Response> {
+  const page = await SELF.fetch(link, { redirect: 'manual' });
+  expect(page.status).toBe(200);
+  const token = /name="token" value="([^"]*)"/.exec(await page.text())?.[1];
+  expect(token, 'the page has a form with the token').toBeTruthy();
+  return call('/auth/email/verify', { method: 'POST', body: new URLSearchParams({ token: token!.replace(/&#(\d+);/g, (_, c) => String.fromCharCode(Number(c))) }) });
 }
 
 export async function ticket(token: string, docId: string): Promise<Response> {
