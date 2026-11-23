@@ -48,3 +48,26 @@ describe('global web CSS', () => {
     expect(css).not.toMatch(/gradient|blur\(/);
   });
 });
+
+function lum(hex: string): number {
+  const v = parseInt(hex.slice(1), 16);
+  const ch = [(v >> 16) & 255, (v >> 8) & 255, v & 255].map((x) => {
+    const s = x / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * ch[0]! + 0.7152 * ch[1]! + 0.0722 * ch[2]!;
+}
+const contrast = (a: string, b: string) => {
+  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+  return (x! + 0.05) / (y! + 0.05);
+};
+
+describe('text on solid fills', () => {
+  for (const [name, t] of [['light', light], ['dark', dark]] as const) {
+    it(`is readable (≥ 4.5:1) in ${name} mode`, () => {
+      expect(contrast(t.onAccent, t.accent)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t.onAssistant, t.assistant)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t.onBad, t.bad)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});

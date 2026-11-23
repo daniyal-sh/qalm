@@ -49,11 +49,11 @@ export function Button({ label, variant = 'secondary', icon, loading, size = 'md
   // Hover is one quiet step, press a firmer one. Solid fills dim slightly instead (never a gradient or glow).
   const fill: Record<ButtonVariant, { bg: string; bgHover: string; bgPressed: string; border: string; fg: string }> = {
     primary: { bg: c.accent, bgHover: c.accent, bgPressed: c.accent, border: c.accent, fg: c.onAccent },
-    assistant: { bg: c.assistant, bgHover: c.assistant, bgPressed: c.assistant, border: c.assistant, fg: c.onAccent },
+    assistant: { bg: c.assistant, bgHover: c.assistant, bgPressed: c.assistant, border: c.assistant, fg: c.onAssistant },
     secondary: { bg: c.surface, bgHover: c.surface2, bgPressed: c.soft, border: c.line, fg: c.ink },
     ghost: { bg: 'transparent', bgHover: c.surface2, bgPressed: c.soft, border: 'transparent', fg: c.ink },
     danger: { bg: c.surface, bgHover: c.badSoft, bgPressed: c.badSoft, border: c.line, fg: c.bad },
-    destructive: { bg: c.bad, bgHover: c.bad, bgPressed: c.bad, border: c.bad, fg: c.onAccent },
+    destructive: { bg: c.bad, bgHover: c.bad, bgPressed: c.bad, border: c.bad, fg: c.onBad },
   };
   const f = fill[variant];
   const solid = variant === 'primary' || variant === 'assistant' || variant === 'destructive';
@@ -270,7 +270,7 @@ export function Avatar({ name, kind = 'user', size = 28 }: { name: string; kind?
   const letters = name.trim().slice(0, kind === 'agent' && name.length > 1 ? 2 : 1);
   return (
     <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: kind === 'agent' ? c.assistant : c.accent, alignItems: 'center', justifyContent: 'center' }}>
-      <Text variant="meta" style={{ color: c.onAccent, fontFamily: font.semibold, fontSize: size * 0.42 }}>
+      <Text variant="meta" style={{ color: kind === 'agent' ? c.onAssistant : c.onAccent, fontFamily: font.semibold, fontSize: size * 0.42 }}>
         {letters.charAt(0).toUpperCase() + letters.slice(1).toLowerCase()}
       </Text>
     </View>

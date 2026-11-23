@@ -34,6 +34,9 @@ export interface Colors {
   badSoft: string;
   /** text on solid accent / assistant fills */
   onAccent: string;
+  /** text on solid `assistant` and `bad` fills: white in light mode; dark ink in dark mode, where those fills are light */
+  onAssistant: string;
+  onBad: string;
   /** the plain dim behind modal sheets and dialogs (never a blur) */
   scrim: string;
 }
@@ -64,6 +67,8 @@ export const light: Colors = {
   bad: '#b91c1c',
   badSoft: '#f8e9e9',
   onAccent: '#ffffff',
+  onAssistant: '#ffffff',
+  onBad: '#ffffff',
   scrim: 'rgba(24,24,27,0.32)',
 };
 
@@ -93,6 +98,8 @@ export const dark: Colors = {
   bad: '#f87171',
   badSoft: '#351f20',
   onAccent: '#ffffff',
+  onAssistant: '#0b1526',
+  onBad: '#240d0d',
   scrim: 'rgba(0,0,0,0.56)',
 };
 
