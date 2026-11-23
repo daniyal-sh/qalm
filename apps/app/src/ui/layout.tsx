@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { hoverTransition, riseStyle, usePresence } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
 import { motion, radius, shadow1, shadow2, space } from '../theme/tokens';
-import { IconButton, StackedRow } from './controls';
+import { IconButton, StackedRow, Toggle } from './controls';
 import { Icon, type IconName } from './Icon';
 import { Text } from './Text';
 
@@ -73,7 +73,8 @@ export function Row({
 }) {
   const { c } = useTheme();
   const { width } = useWindowDimensions();
-  const stack = width < 560;
+  // Narrow windows stack a wide control (a segmented control, a button) under the text; a switch stays on the right.
+  const stack = width < 560 && !(React.isValidElement(children) && children.type === Toggle);
   const body = (
     <View
       style={[
