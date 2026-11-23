@@ -138,7 +138,8 @@ export function PageNavigator(props: PageNavigatorProps) {
   const [filter, setFilter] = React.useState<NavFilter>('all');
   const [menu, setMenu] = React.useState<{ items: MenuItem[]; anchor: { x: number; y: number } } | null>(null);
   const entries = React.useMemo(() => navEntries(pages, filter), [pages, filter]);
-  const layout = React.useMemo(() => navLayout(width, mode, pages), [width, mode, pages]);
+  // Leave room for the web scrollbar, which takes width from the list.
+  const layout = React.useMemo(() => navLayout(width - (Platform.OS === 'web' ? 14 : 0), mode, pages), [width, mode, pages]);
   const rows = React.useMemo(() => {
     const out: NavEntry[][] = [];
     for (let i = 0; i < entries.length; i += layout.columns) out.push(entries.slice(i, i + layout.columns));
@@ -226,7 +227,7 @@ export function PageNavigator(props: PageNavigatorProps) {
 
   const grid = mode === 'grid';
   return (
-    <View style={[styles.panel, { width: grid ? '100%' : width, backgroundColor: grid ? c.bg : c.surface, borderRightColor: c.line }]}>
+    <View style={[styles.panel, grid ? { flex: 1, width: '100%' } : { width, flexGrow: 0, flexShrink: 0 }, { backgroundColor: grid ? c.bg : c.surface, borderRightColor: c.line }]}>
       <View style={[styles.top, { borderBottomColor: c.line2, backgroundColor: c.surface }]}>
         <View style={{ flex: 1 }}>
           <Text variant="section">Pages</Text>
@@ -317,7 +318,7 @@ export function PageNavigator(props: PageNavigatorProps) {
 }
 
 const styles = StyleSheet.create({
-  panel: { flex: 1, borderRightWidth: StyleSheet.hairlineWidth },
+  panel: { borderRightWidth: StyleSheet.hairlineWidth },
   top: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingLeft: 16, paddingRight: 6, height: 56, borderBottomWidth: StyleSheet.hairlineWidth },
   thumb: { borderRadius: 4, overflow: 'hidden' },
   label: { height: NAV_LABEL_H, flexDirection: 'row', alignItems: 'center', gap: 0, paddingLeft: 2 },
