@@ -45,6 +45,19 @@ describe('export wiring', () => {
     expect(released()).toBe(2);
   });
 
+  it('passes images PDF cannot hold through the converter, and reports the ones it could not convert', async () => {
+    const { src, nb, first } = source();
+    nb.addAsset({ id: 'w', sha256: 'w'.repeat(64), mime: 'image/webp', name: 'pic.webp', bytes: 12 });
+    const page = new Page((await src.loadPage(first)).doc);
+    page.addItem({ id: 'im', type: 'image', assetId: 'w', x: 10, y: 10, w: 20, h: 20 });
+    src.assetBytes = async () => Uint8Array.from('RIFF\0\0\0\0WEBP', (c) => c.charCodeAt(0));
+    const seen: number[] = [];
+    const skipped: string[] = [];
+    await buildPdf(src, { toPng: async (b) => (seen.push(b.length), null), onSkippedImage: (id) => skipped.push(id) });
+    expect(seen).toEqual([12]);
+    expect(skipped).toEqual(['w']);
+  });
+
   it('restores a .qalm backup as a new notebook with new ids, leaving the original untouched', async () => {
     const { src, first, nb } = source();
     const second = nb.addPage({ paper: 'grid' });

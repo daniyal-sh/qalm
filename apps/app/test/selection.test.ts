@@ -1,8 +1,8 @@
 import { LOCAL_ORIGIN, Page, createUndoManager, moveBy, transformPatch, type ImageItem, type TextItem } from '@qalm/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 
-import { getClip, pasteItems, PASTE_STEP, setClip } from '../src/editor/clipboard';
+import { getClip, pasteItems, PASTE_STEP, persistClip, setClip } from '../src/editor/clipboard';
 import { hitText, recolorPatch, selectionBBox } from '../src/editor/items';
 import { liveFrame } from '../src/editor/selection.logic';
 import { stroke } from './helpers';
@@ -29,6 +29,39 @@ describe('clipboard', () => {
     setClip([t], [], 'p1');
     t.text = 'changed';
     expect((getClip()!.items[0] as TextItem).text).toBe('a');
+  });
+
+  it('is saved on copy and paste, and a saved clip comes back after a restart', async () => {
+    let saved: unknown;
+    const store = { get: async () => saved, set: async (c: unknown) => void (saved = JSON.parse(JSON.stringify(c))) };
+    // Something was copied in this run already: the saved clip doesn't replace it.
+    saved = { items: [stroke(0, 0, 1, 1)], assets: [], pageId: 'old', pastes: 0 };
+    await persistClip(store);
+    expect(getClip()!.pageId).not.toBe('old');
+
+    const img: ImageItem = { id: 'im', type: 'image', assetId: 'a1', x: 0, y: 0, w: 10, h: 10 };
+    const asset = { id: 'a1', sha256: 'h', mime: 'image/png', name: 'a.png', bytes: 3 };
+    setClip([img], [asset], 'p1');
+    expect(saved).toMatchObject({ items: [img], assets: [asset], pageId: 'p1', pastes: 0 });
+    pasteItems(getClip()!, 'p1', fresh);
+    expect(saved).toMatchObject({ pastes: 1 });
+
+    // A fresh module (the app restarted) restores it.
+    vi.resetModules();
+    const fresh2 = await import('../src/editor/clipboard');
+    expect(fresh2.getClip()).toBeNull();
+    await fresh2.persistClip(store);
+    expect(fresh2.getClip()).toEqual({ items: [img], assets: [asset], pageId: 'p1', pastes: 1 });
+    const next = fresh2.pasteItems(fresh2.getClip()!, 'p1', fresh)[0] as ImageItem;
+    expect(next.x).toBe(2 * PASTE_STEP);
+
+    // Junk in storage is ignored.
+    vi.resetModules();
+    const fresh3 = await import('../src/editor/clipboard');
+    await fresh3.persistClip({ get: async () => ({ items: 'x' }), set: async () => undefined });
+    expect(fresh3.getClip()).toBeNull();
+    await fresh3.persistClip({ get: async () => { throw new Error('io'); }, set: async () => undefined });
+    expect(fresh3.getClip()).toBeNull();
   });
 });
 

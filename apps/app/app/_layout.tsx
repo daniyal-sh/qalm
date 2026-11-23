@@ -8,12 +8,17 @@ import { ActivityIndicator, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { persistClip } from '../src/editor/clipboard';
 import { desktop } from '../src/lib/desktop';
+import { kvGet, kvSet } from '../src/lib/kv';
 import { SessionProvider, useSession } from '../src/state/session';
 import { Button } from '../src/ui/controls';
 import { Sheet } from '../src/ui/layout';
 import { Text } from '../src/ui/Text';
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
+
+// Copy/Cut survive reloads and restarts (per device).
+void persistClip({ get: () => kvGet('clipboard'), set: (c) => kvSet('clipboard', c) });
 
 // Electron: qalm:// links (email magic-link sign-in) arrive as in-app routes from the preload.
 function useDesktopDeepLinks(ready: boolean) {

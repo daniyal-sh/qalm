@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDict, PDFDocument, PDFName, rgb } from 'pdf-lib';
 import { Notebook, Page, exportPdf, packQalm, renderPageSvg, unpackQalm } from '../src';
+import { figtreeBytes } from '../src/export/pdf';
 import { newNotebook, stroke } from './helpers';
 
 declare const atob: (s: string) => string;
+declare const process: { getBuiltinModule(m: 'node:fs'): { readFileSync(path: string): Uint8Array } };
+const bytesOf = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
 const PNG_1PX = Uint8Array.from(
   atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='),
   (c) => c.charCodeAt(0),
@@ -72,6 +75,66 @@ describe('exportPdf', () => {
     expect(out.getPage(1).getSize()).toEqual({ width: 612, height: 792 });
     expect(loads.sort()).toEqual(['pdf1', 'png1']);
     expect(out.getTitle()).toBe('Calculus');
+  });
+
+  /** BaseFont names of the fonts in a PDF. */
+  const fontsOf = (doc: PDFDocument) =>
+    doc.context
+      .enumerateIndirectObjects()
+      .map(([, o]) => o)
+      .filter((o): o is PDFDict => o instanceof PDFDict && o.get(PDFName.of('Type')) === PDFName.of('Font'))
+      .map((d) => String(d.get(PDFName.of('BaseFont'))))
+      .filter((n) => n !== 'undefined');
+
+  it('text boxes use embedded Figtree, with the Symbol font for maths it lacks', async () => {
+    const nb = newNotebook();
+    const page = new Page(new Y.Doc());
+    page.addItem({ id: 'tx', type: 'text', x: 50, y: 100, w: 300, text: 'Area ∫ √x π ≤ 2 中', fontSize: 14, color: '#27272a' });
+    const bytes = await exportPdf(nb, async () => page, async () => new Uint8Array());
+    expect(bytes.length).toBeLessThan(figtreeBytes().length / 2); // a subset, not the whole font
+    const out = await PDFDocument.load(bytes);
+    const fonts = fontsOf(out);
+    expect(fonts.some((f) => f.startsWith('/Figtree-Regular'))).toBe(true);
+    expect(fonts).toContain('/Symbol');
+    expect(fonts).not.toContain('/Helvetica');
+    // No text boxes: no fonts at all.
+    const blank = await PDFDocument.load(await exportPdf(newNotebook(), async () => new Page(new Y.Doc()), async () => new Uint8Array()));
+    expect(fontsOf(blank)).toEqual([]);
+  });
+
+  it('the embedded Figtree is the one the app draws text boxes with', () => {
+    // Tests run from packages/core.
+    const ttf = process.getBuiltinModule('node:fs').readFileSync('../../modules/qalm-ink/assets/fonts/Figtree-Regular.ttf');
+    expect(figtreeBytes()).toEqual(new Uint8Array(ttf));
+  });
+
+  it('images PDF cannot hold go through toPng; ones that still fail are reported', async () => {
+    const nb = newNotebook();
+    const page = new Page(new Y.Doc());
+    const webp = bytesOf('RIFF\0\0\0\0WEBPVP8 ');
+    page.addItem({ id: 'a', type: 'image', assetId: 'webp1', x: 10, y: 10, w: 40, h: 40 });
+    page.addItem({ id: 'b', type: 'image', assetId: 'heic1', x: 60, y: 10, w: 40, h: 40 });
+    page.addItem({ id: 'c', type: 'image', assetId: 'heic1', x: 110, y: 10, w: 40, h: 40 });
+    const assets: Record<string, Uint8Array> = { webp1: webp, heic1: bytesOf('\0\0\0\x18ftypheic') };
+    const converted: string[] = [];
+    const skipped: string[] = [];
+    const bytes = await exportPdf(nb, async () => page, async (id) => assets[id]!, {
+      toPng: async (b) => {
+        converted.push(String.fromCharCode(...b.slice(8, 12)));
+        if (b === webp) return PNG_1PX;
+        throw new Error('cannot decode');
+      },
+      onSkippedImage: (id) => skipped.push(id),
+    });
+    expect(converted).toEqual(['WEBP', 'heic']);
+    expect(skipped).toEqual(['heic1']); // once per asset
+    const out = await PDFDocument.load(bytes);
+    const xobjects = out.getPage(0).node.Resources()!.lookup(PDFName.of('XObject'), PDFDict);
+    expect(xobjects.keys()).toHaveLength(1);
+    // Without a converter the WebP is left out too.
+    const none: string[] = [];
+    await exportPdf(nb, async () => page, async (id) => assets[id]!, { onSkippedImage: (id) => none.push(id) });
+    expect(none).toEqual(['webp1', 'heic1']);
   });
 });
 
