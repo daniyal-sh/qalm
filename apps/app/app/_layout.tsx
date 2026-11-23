@@ -21,6 +21,17 @@ import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
 // Copy/Cut survive reloads and restarts (per device).
 void persistClip({ get: () => kvGet('clipboard'), set: (c) => kvSet('clipboard', c) });
 
+// Web / Electron: Ctrl/Cmd+A outside a text field would select every label in the window (the editor handles its own
+// Ctrl+A, selecting the page's items, and calls preventDefault first).
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  window.addEventListener('keydown', (ev) => {
+    if (ev.defaultPrevented || !(ev.ctrlKey || ev.metaKey) || ev.key.toLowerCase() !== 'a') return;
+    const t = ev.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    ev.preventDefault();
+  });
+}
+
 // Electron: qalm:// links (email magic-link sign-in) arrive as in-app routes from the preload.
 function useDesktopDeepLinks(ready: boolean) {
   React.useEffect(() => {
