@@ -44,6 +44,19 @@ interface LineIndex {
 }
 
 /**
+ * Lines' readings in one transaction: each line whose items changed, as it was at the start (its item ids and saved
+ * reading), and the lines changed since the last `Page` call returned. When a call returns, a changed line whose
+ * items differ from the start loses its reading (unless the user wrote it), and one whose items are the same again
+ * gets it back. Kept apart from the index, which may be rebuilt within a transaction.
+ */
+interface Readings {
+  tx: Y.Transaction;
+  before: Map<string, { ids: Set<string>; text: unknown; textSrc: unknown; conf: unknown }>;
+  changed: Set<string>;
+}
+const readings = new WeakMap<Y.Doc, Readings>();
+
+/**
  * Changes whenever anything is written to the doc within one transaction: inserts advance a client's clock, deletes
  * grow the transaction's delete set. O(clients).
  */
@@ -90,6 +103,7 @@ function watch(doc: Y.Doc): void {
   watched.add(doc);
   // Before any observer of the transaction can read lines.
   doc.on('beforeObserverCalls', (tx: Y.Transaction) => {
+    readings.delete(doc);
     const ix = indexes.get(doc);
     if (!ix) return;
     if (ix.tx === tx) ix.tx = null;
@@ -238,7 +252,11 @@ export class Page {
   addItem(item: Item): void {
     this.tx(() => {
       const replaced = this.itemMap.has(item.id);
-      if (replaced) this.dropIndex(); // writes pending fields to the map being replaced, as before
+      if (replaced) {
+        const ix = this.ix();
+        this.detach(ix, [item.id]); // it leaves its line (whose reading is then cleared)
+        this.dropIndex();
+      }
       const m = new Y.Map<unknown>();
       this.dirty();
       this.itemMap.set(item.id, m);
@@ -302,6 +320,7 @@ export class Page {
       const gone = new Set(ids);
       const touched = new Set<string>();
       this.dirty();
+      this.ix(); // so the lines the items leave are noted (their readings are cleared)
       for (const id of ids) {
         const key = this.lineField(id);
         if (typeof key === 'string') touched.add(key);
@@ -318,10 +337,7 @@ export class Page {
       }
       this.indexRemoved([...gone]);
       const groups = this.groups();
-      for (const key of touched) {
-        if (groups.has(key)) this.touch(key);
-        else this.deleteEntry(key);
-      }
+      for (const key of touched) if (!groups.has(key)) this.deleteEntry(key);
     });
   }
 
@@ -343,6 +359,9 @@ export class Page {
 
   setLineText(lineKey: string, text: string, src: TextSrc, conf?: number): void {
     this.tx(() => {
+      const r = this.readings();
+      r?.before.delete(lineKey); // its items now are what this reading is of
+      r?.changed.delete(lineKey);
       let e = this.lineMap.get(lineKey);
       if (!e) {
         const g = this.groups().get(lineKey);
@@ -530,7 +549,7 @@ export class Page {
   /** Writes items' changed `line` fields (inside the transaction). */
   private flushLines(): void {
     const ix = indexes.get(this.doc);
-    if (!ix || (!ix.pending.size && !ix.dirty.size)) return;
+    if (!ix) return;
     for (const [id, key] of ix.pending) {
       const m = this.itemMap.get(id);
       if (!m || ix.lineOf.has(id)) continue; // grouped since: its group writes it
@@ -547,6 +566,57 @@ export class Page {
     }
     ix.pending.clear();
     ix.dirty.clear();
+    this.settleReadings(ix);
+  }
+
+  /** This transaction's `Readings` (none outside a transaction). */
+  private readings(): Readings | undefined {
+    const tx = this.doc._transaction;
+    if (!tx) return undefined;
+    let r = readings.get(this.doc);
+    if (!r || r.tx !== tx) readings.set(this.doc, (r = { tx, before: new Map(), changed: new Set() }));
+    return r;
+  }
+
+  /** Notes that line `key`'s items are about to change (call before changing them). */
+  private noteChange(ix: LineIndex, key: string): void {
+    const r = this.readings();
+    if (!r) return;
+    r.changed.add(key);
+    if (r.before.has(key)) return;
+    const e = this.lineMap.get(key);
+    r.before.set(key, { ids: new Set(ix.groups.get(key)?.ids), text: e?.get('text'), textSrc: e?.get('textSrc'), conf: e?.get('conf') });
+  }
+
+  /**
+   * Lines whose items changed lose their reading (unless the user wrote it); lines whose items are the same as at the
+   * start of the transaction keep it, e.g. a whole line moved, resized or rotated (assignment splits and re-merges it
+   * item by item, but it ends with the same items under the same key).
+   */
+  private settleReadings(ix: LineIndex): void {
+    const r = this.readings();
+    if (!r?.changed.size) return;
+    for (const key of r.changed) {
+      const b = r.before.get(key)!;
+      const e = this.lineMap.get(key);
+      if (!e) continue;
+      const g = ix.groups.get(key);
+      const same = !!g && g.ids.length === b.ids.size && g.ids.every((id) => b.ids.has(id));
+      const text = e.get('text');
+      if (same) {
+        if (typeof b.text === 'string' && text !== b.text) {
+          e.set('text', b.text);
+          e.set('textSrc', b.textSrc);
+          if (typeof b.conf === 'number') e.set('conf', b.conf);
+          else e.delete('conf');
+        }
+      } else if (text !== undefined && e.get('textSrc') !== 'user') {
+        e.delete('text');
+        e.delete('textSrc');
+        e.delete('conf');
+      }
+    }
+    r.changed.clear();
   }
 
   /** An item's `line` field, counting writes not flushed yet. */
@@ -621,6 +691,7 @@ export class Page {
       s.boxes.push(this.cachedBBox(ix, id));
     }
     for (const [g, gone] of from) {
+      this.noteChange(ix, g.key);
       g.ids = g.ids.filter((id) => !gone.ids.has(id));
       this.regroup(ix, g, gone.boxes);
     }
@@ -687,15 +758,6 @@ export class Page {
     this.refreshKind(key);
   }
 
-  /** A line's items changed: clear its text unless the user wrote it. */
-  private touch(key: string): void {
-    const e = this.lineMap.get(key);
-    if (!e || e.get('textSrc') === 'user') return;
-    e.delete('text');
-    e.delete('textSrc');
-    e.delete('conf');
-  }
-
   private setLine(id: string, key: string): void {
     this.setLines([id], key);
   }
@@ -714,6 +776,7 @@ export class Page {
       else if (ix.lineOf.get(id)?.key !== key) add.push(id);
     }
     if (!add.length) return;
+    this.noteChange(ix, key);
     this.detach(ix, add);
     let g = ix.groups.get(key);
     const fresh = !g;
@@ -746,6 +809,8 @@ export class Page {
     const rest = others[0]!;
     if (ix.groups.has(rest) || ix.lineOf.get(id) !== g) return false;
     const key = g.key;
+    this.noteChange(ix, key);
+    this.noteChange(ix, rest);
     ix.groups.delete(key);
     g.key = rest;
     g.ids = others;
@@ -789,7 +854,6 @@ export class Page {
       const target = this.bestLine(b, groups);
       if (target) {
         this.setLine(id, target.key);
-        this.touch(target.key);
         return;
       }
     }
@@ -797,7 +861,6 @@ export class Page {
     if (e) {
       e.set('kind', drawing ? 'drawing' : 'line');
       this.refreshKind(id);
-      this.touch(id);
     } else this.newEntry(id, drawing ? 'drawing' : 'line');
     this.setLine(id, id);
     if (drawing) this.mergeDrawings(id);
@@ -809,7 +872,6 @@ export class Page {
     const key = win.key;
     this.setLines([...lose.ids], key);
     this.deleteEntry(lose.key);
-    this.touch(key);
     return key;
   }
 
@@ -851,14 +913,12 @@ export class Page {
       if (g.kind === 'line' ? fitsLine(b, ob) : intersects(b, ob)) return; // still belongs here
       if (id !== key) {
         this.unsetLine(id);
-        this.touch(key);
         return this.assign(id);
       }
       // The line follows its key item; the remaining items split off under their first item's id.
       const rest = others[0]!;
       this.newEntry(rest, g.kind);
       if (!this.splitOff(ix, g, id, others)) this.setLines(others, rest);
-      this.touch(key);
       groups = this.groups();
     }
     // Alone in its line: merge with a line (or drawings) it now fits.

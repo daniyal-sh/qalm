@@ -1,6 +1,8 @@
 // Bulk edits: line assignment keeps its grouping up to date within (and between) transactions instead of re-reading
 // the whole page per item. These tests run the same edits on the current `Page` and on the old implementation
-// (`LegacyPage`, a verbatim copy) and require identical lines, keys, item order and doc state.
+// (`LegacyPage`, a verbatim copy) and require identical lines, keys, item order and doc state, except lines' saved
+// readings: those now follow the rule checked by `checkReadings` (kept when a line's items are the same at the end of
+// a transaction as at its start; the old code cleared them on any change, e.g. a move).
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { LOCAL_ORIGIN, Page, transformPatch } from '../src';
@@ -38,16 +40,38 @@ function pair(client: number): Pair {
   return { now: new Page(a), old: new LegacyPage(b) };
 }
 
-/** Everything line assignment decides, plus the raw doc state it wrote. */
+const READING = new Set(['text', 'textSrc', 'conf']);
+const noReading = (o: object) => Object.fromEntries(Object.entries(o).filter(([k]) => !READING.has(k)));
+
+/** Everything line assignment decides, plus the raw doc state it wrote (without lines' readings). */
 function state(p: AnyPage): unknown {
   const d = p.doc;
   return {
-    lines: p.lines(),
+    lines: p.lines().map(noReading),
     ids: p.items().map((i) => i.id),
     items: Object.fromEntries([...d.getMap<Y.Map<unknown>>('items').entries()].map(([id, m]) => [id, m.get('line') ?? null])),
-    entries: d.getMap('lines').toJSON(),
+    entries: Object.fromEntries(Object.entries(d.getMap('lines').toJSON()).map(([k, v]) => [k, noReading(v as object)])),
     order: d.getArray('order').toArray(),
   };
+}
+
+/** Keys passed to `setLineText` by the ops of the current batch. */
+let textSet = new Set<string>();
+
+/**
+ * The reading rule, from the lines before a batch to after it: a line with a reading has the same items and reading
+ * as before (or a user's reading, or one saved during the batch); and if the batch was one transaction, a line whose
+ * items are the same as before kept its reading.
+ */
+function checkReadings(before: Line[], after: Line[], oneTx: boolean, what: string): void {
+  const prev = new Map(before.map((l) => [l.key, l]));
+  for (const l of after) {
+    if (textSet.has(l.key)) continue;
+    const b = prev.get(l.key);
+    const same = !!b && b.itemIds.length === l.itemIds.length && b.itemIds.every((id) => l.itemIds.includes(id));
+    if (l.text !== undefined && l.textSrc !== 'user') expect(same && b!.text === l.text && b!.textSrc === l.textSrc, `${what}: ${l.key} kept a reading of other items`).toBe(true);
+    if (oneTx && same && b!.text !== undefined) expect([l.text, l.textSrc, l.conf], `${what}: ${l.key} lost its reading`).toEqual([b!.text, b!.textSrc, b!.conf]);
+  }
 }
 
 function expectSame(p: Pair, what: string): void {
@@ -139,7 +163,10 @@ function randomOps(r: () => number, prefix: string, live: () => Item[]): Op[] {
       const k = r();
       ops.push((p) => {
         const lines = p.lines();
-        if (lines.length) p.setLineText(lines[Math.floor(k * lines.length)]!.key, 'x²', src, 0.5);
+        if (!lines.length) return;
+        const key = lines[Math.floor(k * lines.length)]!.key;
+        textSet.add(key);
+        p.setLineText(key, 'x²', src, 0.5);
       });
     } else if (kind < 0.93) {
       // Re-add a removed id, or replace an existing one (both keep the id's old z slot or reuse it).
@@ -163,12 +190,15 @@ function run(p: Pair, ops: Op[], r: () => number, label: string): void {
   while (i < ops.length) {
     const k = r() < 0.4 ? 1 : 1 + Math.floor(r() * 5);
     const batch = ops.slice(i, i + k);
+    const before = p.now.lines();
+    textSet = new Set();
     for (const page of [p.now, p.old]) {
       if (k === 1) batch[0]!(page);
       else page.doc.transact(() => batch.forEach((op) => op(page)), LOCAL_ORIGIN);
     }
     i += k;
     expectSame(p, `${label}, after op ${i}`);
+    checkReadings(before, p.now.lines(), k > 1, `${label}, after op ${i}`);
   }
 }
 
