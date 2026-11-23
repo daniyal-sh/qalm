@@ -17,6 +17,8 @@ import {
   StrokeCap,
   StrokeJoin,
   useFonts,
+  type SkCanvas,
+  type SkImage,
   type SkPaint,
   type SkPath,
   type SkPicture,
@@ -24,9 +26,11 @@ import {
   type SkTypefaceFontProvider,
 } from '@shopify/react-native-skia';
 import * as React from 'react';
+import { PixelRatio, Platform } from 'react-native';
 
 import figtree from '../assets/fonts/Figtree-Regular.ttf';
 import notoMath from '../assets/fonts/NotoSansMath-Subset.ttf';
+import { jobStillValid, planBake, type Baked, type BakePlan } from './bake';
 import { disposeLater } from './dispose';
 import { provideTextFonts, textParagraph } from './textMetrics';
 import { INK_CHUNK, inkGeometryKey, inkRuns, sameItems, type InkItem, type Run } from './inkRuns';
@@ -168,6 +172,8 @@ const now = () => (typeof performance !== 'undefined' ? performance.now() : Date
 
 interface Ink {
   runs: Run[];
+  /** The item's path from the cache, built (and cached) if missing. For baking. */
+  pathOf: (it: InkItem) => SkPath;
   pictures: Map<string, SkPicture>;
   /** Ids of items drawn as they are now (all non-ink items, and ink in up-to-date chunks). */
   drawnIds: string[];
@@ -180,6 +186,16 @@ interface Ink {
 function useInk(items: Item[], bounds: SkRect, live: ReadonlySet<string> | null): Ink {
   const cache = React.useRef<InkCache>({ paths: new Map(), pictures: new Map() });
   const [pass, setPass] = React.useState(0);
+  const cachedPath = React.useCallback((it: InkItem): SkPath => {
+    const key = inkGeometryKey(it);
+    const paths = cache.current.paths;
+    const hit = paths.get(it.id);
+    if (hit && hit.key === key) return hit.path;
+    if (hit) disposeLater(hit.path);
+    const path = it.type === 'stroke' ? outlineToPath(strokeOutline(it)) : shapePath(it);
+    paths.set(it.id, { key, path });
+    return path;
+  }, []);
   const result = React.useMemo((): Ink => {
     const t0 = now();
     const prev = cache.current;
@@ -251,7 +267,7 @@ function useInk(items: Item[], bounds: SkRect, live: ReadonlySet<string> | null)
       if (run.kind === 'item') drawnIds.push(run.item.id);
       else if (current.has(run.key)) for (const it of run.items) drawnIds.push(it.id);
     }
-    return { runs, pictures: new Map([...next.pictures].map(([k, v]) => [k, v.picture])), drawnIds, complete, pending };
+    return { runs, pictures: new Map([...next.pictures].map(([k, v]) => [k, v.picture])), drawnIds, complete, pending, pathOf: cachedPath };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, pass, live]);
   React.useEffect(() => {
@@ -303,13 +319,251 @@ function useInk(items: Item[], bounds: SkRect, live: ReadonlySet<string> | null)
  * Rendered inside <Canvas>, so its effect runs when Skia's own reconciler commits (after the new recording has been
  * dispatched to the view), not when React commits PageCanvas: on web that is often several frames later.
  */
-function DrawnProbe({ ink, onDrawn }: { ink: Ink; onDrawn?: (ids: string[], complete: boolean) => void }) {
+function DrawnProbe({ drawn, onDrawn }: { drawn: Drawn; onDrawn?: (ids: string[], complete: boolean) => void }) {
   const cb = React.useRef(onDrawn);
   cb.current = onDrawn;
   React.useEffect(() => {
-    cb.current?.(ink.drawnIds, ink.complete);
-  }, [ink]);
+    cb.current?.(drawn.ids, drawn.complete);
+  }, [drawn]);
   return null;
+}
+
+interface Drawn {
+  ids: string[];
+  complete: boolean;
+}
+
+/**
+ * Bakes dense pages into one image (bake.ts). Off on web: CanvasKit replays pictures on the GPU there, and the web
+ * benchmark (#9, #36) is measured with pictures.
+ */
+const BAKE_ENABLED = Platform.OS !== 'web';
+
+/** What the base holds besides items: paper, PDF background and comment highlights (all under the ink). */
+interface Backdrop {
+  bg: string;
+  stroke: string;
+  lines: SkPath;
+  dots: SkPath;
+  pdf: SkImage | null;
+  highlights: { x: number; y: number; width: number; height: number; r: number; soft: string; line: string; hairline: number }[];
+}
+
+let nextObjectId = 1;
+const objectIds = new WeakMap<object, number>();
+/** A stable number per object (for cache keys). */
+const objectId = (o: object | null | undefined): number => {
+  if (!o) return 0;
+  let id = objectIds.get(o);
+  if (!id) objectIds.set(o, (id = nextObjectId++));
+  return id;
+};
+
+function drawBackdrop(c: SkCanvas, b: Backdrop, pageW: number, pageH: number): void {
+  const p = Skia.Paint();
+  p.setAntiAlias(true);
+  p.setColor(Skia.Color(b.bg));
+  c.drawRect(Skia.XYWHRect(0, 0, pageW, pageH), p);
+  if (b.pdf) c.drawImageRect(b.pdf, Skia.XYWHRect(0, 0, b.pdf.width(), b.pdf.height()), Skia.XYWHRect(0, 0, pageW, pageH), p);
+  p.setColor(Skia.Color(b.stroke));
+  p.setStyle(PaintStyle.Stroke);
+  p.setStrokeWidth(PAPER_LINE_WIDTH);
+  c.drawPath(b.lines, p);
+  p.setStyle(PaintStyle.Fill);
+  c.drawPath(b.dots, p);
+  for (const h of b.highlights) {
+    const rr = Skia.RRectXY(Skia.XYWHRect(h.x, h.y, h.width, h.height), h.r, h.r);
+    p.setStyle(PaintStyle.Fill);
+    p.setColor(Skia.Color(h.soft));
+    c.drawRRect(rr, p);
+    p.setStyle(PaintStyle.Stroke);
+    p.setStrokeWidth(h.hairline);
+    p.setColor(Skia.Color(h.line));
+    c.drawRRect(rr, p);
+  }
+  disposeLater(p);
+}
+
+/** Draws one item onto a bake surface (page units), as the declarative tree draws it. Images are never baked. */
+function drawItem(c: SkCanvas, it: Item, pathOf: (it: InkItem) => SkPath, paints: Map<string, SkPaint>, fonts: SkTypefaceFontProvider | null): void {
+  if (it.type === 'stroke' || it.type === 'shape') {
+    const k = paintKey(it);
+    let paint = paints.get(k);
+    if (!paint) paints.set(k, (paint = skiaInkPaint(it)));
+    c.drawPath(pathOf(it), paint);
+  } else if (it.type === 'text' && fonts) {
+    const para = textParagraph(it, fonts);
+    c.save();
+    if (it.rot) c.rotate((it.rot * 180) / Math.PI, it.x, it.y);
+    para.paint(c, it.x, it.y);
+    c.restore();
+    disposeLater(para as unknown as { dispose?: () => void });
+  }
+}
+
+const BAKE_SLICE_MS = 8;
+/** After the base was invalidated (an older stroke erased or moved, undo past the tail), re-bake once edits pause. */
+const REBAKE_DELAY_MS = 250;
+
+interface Base {
+  baked: Baked;
+  image: SkImage;
+}
+
+interface RunningBake {
+  snapshot: readonly Item[];
+  to: number;
+  key: string;
+  w: number;
+  h: number;
+  cancel: () => void;
+}
+
+const NO_ITEMS: Item[] = [];
+const NO_BAKE: BakePlan = { use: false, tailStart: 0, job: null, enabled: false };
+
+/**
+ * Keeps a baked base for a dense page and plans each render against it (bake.ts). A full bake runs in the background
+ * in 8 ms slices onto one raster surface on the JS thread; growing the base by the tail is one small synchronous draw.
+ */
+function useBase(
+  items: Item[],
+  target: { key: string; w: number; h: number },
+  pageW: number,
+  pageH: number,
+  live: ReadonlySet<string> | null,
+  fonts: SkTypefaceFontProvider | null,
+  backdrop: Backdrop,
+  pathOf: (it: InkItem) => SkPath,
+): { plan: BakePlan; base: Base | null; hadBase: boolean } {
+  const base = React.useRef<Base | null>(null);
+  const hadBase = React.useRef(false);
+  const running = React.useRef<RunningBake | null>(null);
+  const [version, setVersion] = React.useState(0);
+  const bakeable = React.useCallback((it: Item) => it.type === 'stroke' || it.type === 'shape' || (it.type === 'text' && !!fonts), [fonts]);
+  const plan = React.useMemo(
+    () => (BAKE_ENABLED ? planBake(base.current?.baked ?? null, items, target, bakeable, live) : NO_BAKE),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, target.key, target.w, target.h, bakeable, live, version],
+  );
+  const inputs = React.useRef({ backdrop, pathOf, fonts });
+  inputs.current = { backdrop, pathOf, fonts };
+
+  const install = React.useCallback((next: Base) => {
+    if (base.current) disposeLater(base.current.image);
+    base.current = next;
+    hadBase.current = true;
+    setVersion((v) => v + 1);
+  }, []);
+
+  React.useEffect(() => {
+    if (!plan.enabled) {
+      running.current?.cancel();
+      running.current = null;
+      if (base.current) disposeLater(base.current.image);
+      base.current = null;
+      hadBase.current = false;
+      return;
+    }
+    const job = plan.job;
+    const r = running.current;
+    if (r) {
+      // A bake in progress that still matches the page keeps going (strokes added meanwhile join the next one).
+      if (job && r.key === target.key && r.w === target.w && r.h === target.h && jobStillValid(r.snapshot, r.to, items)) return;
+      r.cancel();
+      running.current = null;
+    }
+    if (!job) return;
+    const { w, h, key } = target;
+    const sx = w / pageW;
+    const sy = h / pageH;
+    if (!job.full && base.current) {
+      // Grow the base by the tail: the old image plus a few dozen items.
+      const surface = Skia.Surface.Make(w, h);
+      if (!surface) return;
+      const c = surface.getCanvas();
+      c.drawImage(base.current.image, 0, 0);
+      c.save();
+      c.scale(sx, sy);
+      const paints = new Map<string, SkPaint>();
+      for (let i = job.from; i < job.to; i++) drawItem(c, items[i]!, inputs.current.pathOf, paints, inputs.current.fonts);
+      c.restore();
+      const image = surface.makeImageSnapshot();
+      disposeLater(surface, ...paints.values());
+      install({ baked: { items: items.slice(0, job.to), key: base.current.baked.key, w, h }, image });
+      return;
+    }
+    // A full bake, in slices. The items are a snapshot: if the page changes underneath, the next plan notices.
+    const snapshot = items;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let surface: ReturnType<typeof Skia.Surface.Make> = null;
+    const paints = new Map<string, SkPaint>();
+    let i = 0;
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      disposeLater(surface, ...paints.values());
+      surface = null;
+    };
+    const bake: RunningBake = {
+      snapshot,
+      to: job.to,
+      key,
+      w,
+      h,
+      cancel: () => {
+        cancelled = true;
+        cleanup();
+      },
+    };
+    const step = () => {
+      timer = null;
+      if (cancelled) return;
+      const t0 = now();
+      if (!surface) {
+        surface = Skia.Surface.Make(w, h);
+        if (!surface) {
+          if (running.current === bake) running.current = null;
+          return;
+        }
+        const c = surface.getCanvas();
+        c.scale(sx, sy);
+        drawBackdrop(c, inputs.current.backdrop, pageW, pageH);
+      }
+      const c = surface.getCanvas();
+      while (i < job.to && now() - t0 < BAKE_SLICE_MS) drawItem(c, snapshot[i++]!, inputs.current.pathOf, paints, inputs.current.fonts);
+      if (i < job.to) {
+        timer = setTimeout(step, 0);
+        return;
+      }
+      const image = surface.makeImageSnapshot();
+      cleanup();
+      if (running.current === bake) running.current = null;
+      install({ baked: { items: snapshot.slice(0, job.to), key, w, h }, image });
+    };
+    running.current = bake;
+    timer = setTimeout(step, hadBase.current && !plan.use ? REBAKE_DELAY_MS : 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan]);
+
+  // Free the base once the page unmounts (not on StrictMode's immediate re-mount).
+  const mounted = React.useRef(true);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      setTimeout(() => {
+        if (mounted.current) return;
+        running.current?.cancel();
+        running.current = null;
+        if (base.current) disposeLater(base.current.image);
+        base.current = null;
+      }, 0);
+    };
+  }, []);
+
+  return { plan, base: plan.use ? base.current : null, hadBase: hadBase.current };
 }
 
 function TextNode({ item, fonts }: { item: TextItem; fonts: SkTypefaceFontProvider }) {
@@ -371,51 +625,90 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
     return box;
   }, [items, selection]);
 
+  // Dense pages: a baked base image plus the newest items as vectors (bake.ts). Highlights are baked under the ink.
+  const highlights = React.useMemo(
+    () =>
+      (anchors ?? [])
+        .filter((a) => a.active)
+        .map((a) => ({
+          x: a.bbox[0] - 3,
+          y: a.bbox[1] - 3,
+          width: a.bbox[2] - a.bbox[0] + 6,
+          height: a.bbox[3] - a.bbox[1] + 6,
+          r: 4,
+          soft: anchorColors.soft,
+          line: anchorColors.line,
+          hairline,
+        })),
+    [anchors, anchorColors, hairline],
+  );
+  const backdrop = React.useMemo((): Backdrop => ({ ...paper, pdf, highlights }), [paper, pdf, highlights]);
+  const target = React.useMemo(() => {
+    const ratio = PixelRatio.get();
+    return { w: Math.round(width * ratio), h: Math.round(height * ratio), key: `${objectId(paper)}|${objectId(pdf)}|${fonts ? 1 : 0}|${JSON.stringify(highlights)}` };
+  }, [width, height, paper, pdf, fonts, highlights]);
+  const { plan, base, hadBase } = useBase(items, target, pageW, pageH, liveIds, fonts, backdrop, ink.pathOf);
+  const tailItems = React.useMemo(() => (base ? items.slice(plan.tailStart) : NO_ITEMS), [base, items, plan.tailStart]);
+  const tail = useInk(tailItems, bounds, liveIds);
+  // A dense page seen for the first time shows its paper until the base is ready (replaying thousands of paths on the
+  // UI thread while it loads is what made scrolling past dense pages stutter). The overlay keeps any stroke drawn meanwhile.
+  const hideInk = !base && plan.enabled && !!plan.job?.full && !hadBase;
+  const drawn = React.useMemo((): Drawn => {
+    if (base) return { ids: [...base.baked.items.map((it) => it.id), ...tail.drawnIds], complete: tail.complete };
+    if (hideInk) return { ids: [], complete: false };
+    return { ids: ink.drawnIds, complete: ink.complete };
+  }, [base, tail, hideInk, ink]);
+
+  const runs = (src: Ink) =>
+    src.runs.map((run) => {
+      if (run.kind === 'ink') {
+        const picture = src.pictures.get(run.key);
+        if (!picture) return null;
+        return run.live ? (
+          <Group key={run.key} transform={liveMatrix}>
+            <Picture picture={picture} />
+          </Group>
+        ) : (
+          <Picture key={run.key} picture={picture} />
+        );
+      }
+      const it = run.item;
+      let node: React.ReactElement | null = null;
+      if (it.type === 'text') node = fonts ? <TextNode key={it.id} item={it} fonts={fonts} /> : null;
+      else {
+        const uri = assetUri?.(it.assetId);
+        node = uri ? <ImageNode key={it.id} item={it} uri={uri} /> : null;
+      }
+      return node && liveIds?.has(it.id) ? (
+        <Group key={it.id} transform={liveMatrix}>
+          {node}
+        </Group>
+      ) : (
+        node
+      );
+    });
+
   return (
     <Canvas style={{ width, height }}>
       <Group transform={[{ scale }]}>
-        <Rect x={0} y={0} width={pageW} height={pageH} color={paper.bg} />
-        {pdf ? <Image image={pdf} x={0} y={0} width={pageW} height={pageH} fit="fill" /> : null}
-        <Path path={paper.lines} color={paper.stroke} style="stroke" strokeWidth={PAPER_LINE_WIDTH} />
-        <Path path={paper.dots} color={paper.stroke} />
-
-        {anchors?.filter((a) => a.active).map((a) => {
-          const r = { x: a.bbox[0] - 3, y: a.bbox[1] - 3, width: a.bbox[2] - a.bbox[0] + 6, height: a.bbox[3] - a.bbox[1] + 6, r: 4 };
-          return (
-            <Group key={`hl-${a.id}`}>
-              <RoundedRect {...r} color={anchorColors.soft} />
-              <RoundedRect {...r} color={anchorColors.line} style="stroke" strokeWidth={hairline} />
-            </Group>
-          );
-        })}
-
-        {ink.runs.map((run) => {
-          if (run.kind === 'ink') {
-            const picture = ink.pictures.get(run.key);
-            if (!picture) return null;
-            return run.live ? (
-              <Group key={run.key} transform={liveMatrix}>
-                <Picture picture={picture} />
+        {base ? (
+          <Image image={base.image} x={0} y={0} width={pageW} height={pageH} fit="fill" />
+        ) : (
+          <>
+            <Rect x={0} y={0} width={pageW} height={pageH} color={paper.bg} />
+            {pdf ? <Image image={pdf} x={0} y={0} width={pageW} height={pageH} fit="fill" /> : null}
+            <Path path={paper.lines} color={paper.stroke} style="stroke" strokeWidth={PAPER_LINE_WIDTH} />
+            <Path path={paper.dots} color={paper.stroke} />
+            {highlights.map((h, i) => (
+              <Group key={`hl-${i}`}>
+                <RoundedRect x={h.x} y={h.y} width={h.width} height={h.height} r={h.r} color={h.soft} />
+                <RoundedRect x={h.x} y={h.y} width={h.width} height={h.height} r={h.r} color={h.line} style="stroke" strokeWidth={h.hairline} />
               </Group>
-            ) : (
-              <Picture key={run.key} picture={picture} />
-            );
-          }
-          const it = run.item;
-          let node: React.ReactElement | null = null;
-          if (it.type === 'text') node = fonts ? <TextNode key={it.id} item={it} fonts={fonts} /> : null;
-          else {
-            const uri = assetUri?.(it.assetId);
-            node = uri ? <ImageNode key={it.id} item={it} uri={uri} /> : null;
-          }
-          return node && liveIds?.has(it.id) ? (
-            <Group key={it.id} transform={liveMatrix}>
-              {node}
-            </Group>
-          ) : (
-            node
-          );
-        })}
+            ))}
+          </>
+        )}
+
+        {base ? runs(tail) : hideInk ? null : runs(ink)}
 
         {selectionBox ? (
           <Rect
@@ -438,7 +731,7 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
           </Group>
         ))}
       </Group>
-      <DrawnProbe ink={ink} onDrawn={onDrawn} />
+      <DrawnProbe drawn={drawn} onDrawn={onDrawn} />
     </Canvas>
   );
 });
