@@ -55,6 +55,7 @@ describe('mcp', () => {
     expect(tr.isError).toBeFalsy();
     await until(() => n.page.lines().find((l) => l.key === 's1')?.text === 'x^3/3');
     expect(n.page.lines().find((l) => l.key === 's1')?.textSrc).toBe('agent');
+    expect(n.page.lines().find((l) => l.key === 's1')?.by).toBe('Tutor'); // the agent's name, shown with the reading
     const read = textOf(await tool(token, 'read', { ref: 'p1', s }));
     expect(read).toContain('L1 "x^3/3"');
     expect(read).toContain('L2 [1]');

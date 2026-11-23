@@ -1,4 +1,4 @@
-import { createNotebookUndoManager, inkOnPaper, Notebook, Page, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem, type Item } from '@qalm/core';
+import { createNotebookUndoManager, inkOnPaper, Notebook, Page, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem, type Item, type Line } from '@qalm/core';
 import { router } from 'expo-router';
 import { QalmInk, renderThumbnail } from 'qalm-ink';
 import * as React from 'react';
@@ -30,6 +30,8 @@ import { cloneItems, recolorPatch, selectionBBox, selectionSwatch } from './item
 import { trackModifiers } from './modifiers';
 import { SelectionThumb } from './SelectionThumb';
 import { PageView } from './PageView';
+import { selectionLines } from './reading.logic';
+import { ReadingSheet } from './ReadingSheet';
 import { SwatchStrip } from './Swatches';
 import { Toolbar } from './Toolbar';
 import { keyTarget, NAV_SIDEBAR_MIN, NAV_SIDEBAR_W, parseGoTo } from './navigator.logic';
@@ -306,6 +308,14 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     if (!selection || !selectionPage) return;
     const box = selectionBBox(selectedItems());
     if (box) openAsk({ pageId: selection.pageId, ids: selection.ids, bbox: box, mode });
+  };
+  // Readings: what the selected handwritten lines say (none for drawings, images or text boxes).
+  const selLines = selection && pageData.get(selection.pageId) ? selectionLines(pageData.get(selection.pageId)!.lines, selection.ids) : [];
+  const [reading, setReading] = React.useState<{ pageId: string; page: Page; lines: Line[] } | null>(null);
+  const openReading = () => {
+    if (!selection || !selectionPage) return;
+    const lines = selectionLines(selectionPage.lines(), selection.ids);
+    if (lines.length) setReading({ pageId: selection.pageId, page: selectionPage, lines });
   };
   const deleteSelection = () => {
     if (!selection || !selectionPage) return;
@@ -976,7 +986,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                       ) : (
                         selMore.map((m) => <IconButton key={m.label} icon={m.icon!} label={m.label} onPress={m.onPress} />)
                       )}
+                      {/* Reading stays on the bar at every width (F6). */}
+                      {selLines.length ? <IconButton icon="type" label={selLines.length > 1 ? 'Readings' : 'Reading'} onPress={openReading} /> : null}
                       <Button label="Ask" accessibilityLabel="Ask about selection" icon="message-circle" variant="assistant" size="sm" onPress={() => openSelection('ask')} />
+
                       <IconButton icon="trash-2" label="Delete selection" tone="bad" onPress={deleteSelection} />
                       <IconButton icon="x" label="Deselect" onPress={() => setSelection(null)} />
                     </>
@@ -1039,6 +1052,18 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         ) : null}
         {toast}
 
+        {reading ? (
+          <ReadingSheet
+            page={reading.page}
+            lines={reading.lines}
+            onClose={() => setReading(null)}
+            onDone={(msg) => {
+              touchPage(reading.pageId);
+              setReading(null);
+              if (msg) showToast(msg);
+            }}
+          />
+        ) : null}
         <Menu visible={!!menu} onClose={() => setMenu(null)} items={menu?.items ?? []} anchor={menu?.anchor} />
 
         <Sheet

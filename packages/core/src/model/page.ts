@@ -56,7 +56,7 @@ interface LineIndex {
  */
 interface Readings {
   tx: Y.Transaction;
-  before: Map<string, { ids: Set<string>; text: unknown; textSrc: unknown; conf: unknown }>;
+  before: Map<string, { ids: Set<string>; text: unknown; textSrc: unknown; conf: unknown; by: unknown }>;
   changed: Set<string>;
 }
 const readings = new WeakMap<Y.Doc, Readings>();
@@ -357,12 +357,18 @@ export class Page {
         line.textSrc = e!.get('textSrc') as TextSrc;
         const conf = e!.get('conf');
         if (typeof conf === 'number') line.conf = conf;
+        const by = e!.get('by');
+        if (typeof by === 'string') line.by = by;
       }
       return line;
     });
   }
 
-  setLineText(lineKey: string, text: string, src: TextSrc, conf?: number): void {
+  /**
+   * Saves a line's reading. `by` names the agent that saved it. A user reading (`src: 'user'`) is kept when the line's
+   * items change, and agents can't overwrite it (the server refuses `transcribe` on it).
+   */
+  setLineText(lineKey: string, text: string, src: TextSrc, conf?: number, by?: string): void {
     this.tx(() => {
       const r = this.readings();
       r?.before.delete(lineKey); // its items now are what this reading is of
@@ -380,6 +386,20 @@ export class Page {
       e.set('textSrc', src);
       if (conf === undefined) e.delete('conf');
       else e.set('conf', conf);
+      if (by === undefined) e.delete('by');
+      else e.set('by', by);
+    });
+  }
+
+  /** Forgets a line's reading, whoever saved it, so recognition and agents can read it again. */
+  clearLineText(lineKey: string): void {
+    this.tx(() => {
+      const r = this.readings();
+      r?.before.delete(lineKey);
+      r?.changed.delete(lineKey);
+      const e = this.lineMap.get(lineKey);
+      if (!e) return;
+      for (const k of ['text', 'textSrc', 'conf', 'by']) e.delete(k);
     });
   }
 
@@ -596,7 +616,7 @@ export class Page {
     r.changed.add(key);
     if (r.before.has(key)) return;
     const e = this.lineMap.get(key);
-    r.before.set(key, { ids: new Set(ix.groups.get(key)?.ids), text: e?.get('text'), textSrc: e?.get('textSrc'), conf: e?.get('conf') });
+    r.before.set(key, { ids: new Set(ix.groups.get(key)?.ids), text: e?.get('text'), textSrc: e?.get('textSrc'), conf: e?.get('conf'), by: e?.get('by') });
   }
 
   /**
@@ -620,11 +640,14 @@ export class Page {
           e.set('textSrc', b.textSrc);
           if (typeof b.conf === 'number') e.set('conf', b.conf);
           else e.delete('conf');
+          if (typeof b.by === 'string') e.set('by', b.by);
+          else e.delete('by');
         }
       } else if (text !== undefined && e.get('textSrc') !== 'user') {
         e.delete('text');
         e.delete('textSrc');
         e.delete('conf');
+        e.delete('by');
       }
     }
     r.changed.clear();
