@@ -1,5 +1,6 @@
 import { newIdFallback } from '../lib/id';
-import { frameBBox, inkOnPaper, itemDistance, moveBy, selectionFrame, swatchOfInk, transformItem, type BBox, type InkPoint, type Item, type PaperColor, type PenStyle, type Smoothing, type StrokeItem, type TextItem } from '@qalm/core';
+import type { CrossPageUndo } from './undoStack';
+import { frameBBox, inkOnPaper, itemDistance, moveBy, selectionFrame, swatchOfInk, transformItem, type BBox, type InkPoint, type Item, type Page, type PaperColor, type PenStyle, type Smoothing, type StrokeItem, type TextItem } from '@qalm/core';
 
 /** Text box line height (matches core's TEXT_LINE_HEIGHT). */
 export const TEXT_LINE_HEIGHT = 1.3;
@@ -80,6 +81,36 @@ export function recolorPatch(it: Item, color: string, paper?: PaperColor): Parti
 export function selectionSwatch(items: readonly Item[], paper?: PaperColor): string | null {
   const cs = new Set(items.filter(recolorable).map((it) => swatchOfInk(it.color.toLowerCase(), paper)));
   return cs.size === 1 ? [...cs][0]! : null;
+}
+
+const textUndoKey = (id: string) => `text:${id}`;
+
+/**
+ * Typing into a text box. A new box (`draft`) is added by its first non-blank character; it and the typing that
+ * follows (pauses under 2 s) are one undo step. Returns true when the box is on the page.
+ */
+export function typeText(page: Page, undo: Pick<CrossPageUndo, 'merging'>, id: string, text: string, draft?: TextItem): boolean {
+  return undo.merging(
+    textUndoKey(id),
+    () => {
+      if (page.item(id)) page.updateItem(id, { text } as Partial<TextItem>);
+      else if (draft && text.trim()) page.addItem({ ...draft, text });
+      else return false;
+      return true;
+    },
+    2000,
+  );
+}
+
+/**
+ * Removes a text box left empty. The removal joins the box's last typing step (however old), so one undo restores the
+ * box as it was before that typing: not at all when that typing created it. Returns true if it removed the box.
+ */
+export function dropEmptyText(page: Page, undo: Pick<CrossPageUndo, 'merging'>, id: string): boolean {
+  const it = page.item(id);
+  if (it?.type !== 'text' || it.text.trim()) return false;
+  undo.merging(textUndoKey(id), () => page.removeItems([id]), Number.POSITIVE_INFINITY);
+  return true;
 }
 
 /** Copies of items with fresh ids, offset by (dx, dy). */

@@ -16,7 +16,6 @@ import {
   Skia,
   StrokeCap,
   StrokeJoin,
-  TextAlign,
   useFonts,
   type SkPaint,
   type SkPath,
@@ -28,6 +27,7 @@ import * as React from 'react';
 
 import figtree from '../assets/fonts/Figtree-Regular.ttf';
 import { disposeLater } from './dispose';
+import { provideTextFonts, textParagraph } from './textMetrics';
 import { INK_CHUNK, inkGeometryKey, inkRuns, sameItems, type InkItem, type Run } from './inkRuns';
 import { traceOutline } from './outlinePath';
 import { usePageImage } from './usePageImage';
@@ -311,15 +311,7 @@ function DrawnProbe({ ink, onDrawn }: { ink: Ink; onDrawn?: (ids: string[], comp
 }
 
 function TextNode({ item, fonts }: { item: TextItem; fonts: SkTypefaceFontProvider }) {
-  const paragraph = React.useMemo(() => {
-    const p = Skia.ParagraphBuilder.Make({ textAlign: TextAlign.Left }, fonts)
-      .pushStyle({ color: Skia.Color(item.color), fontFamilies: ['Figtree'], fontSize: item.fontSize })
-      .addText(item.text)
-      .pop()
-      .build();
-    p.layout(item.w);
-    return p;
-  }, [item.color, item.fontSize, item.text, item.w, fonts]);
+  const paragraph = React.useMemo(() => textParagraph(item, fonts), [item.color, item.fontSize, item.text, item.w, fonts]); // eslint-disable-line react-hooks/exhaustive-deps
   const t = turned(item.x, item.y, item.rot);
   const node = <Paragraph paragraph={paragraph} x={item.x} y={item.y} width={item.w} />;
   return t ? <Group transform={t}>{node}</Group> : node;
@@ -342,6 +334,8 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items, selectio
   const scale = width / pageW;
   const height = Math.round(pageH * scale);
   const fonts = useFonts({ Figtree: [figtree] });
+  // Text boxes' heights (frames, hit boxes) are measured with this font once it has loaded.
+  if (fonts) provideTextFonts(fonts);
   const pdf = usePageImage(pdfImage);
   const bounds = React.useMemo(() => Skia.XYWHRect(-pageW, -pageH, pageW * 3, pageH * 3), [pageW, pageH]);
   const liveIds = React.useMemo(() => (live?.ids.length ? new Set(live.ids) : null), [live?.ids]);

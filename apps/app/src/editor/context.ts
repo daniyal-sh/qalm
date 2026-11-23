@@ -1,4 +1,4 @@
-import { createUndoManager, type Comment, type Item, type Line, type Notebook, type Page, type PenStyle } from '@qalm/core';
+import { createUndoManager, type Comment, type Item, type Line, type Notebook, type Page, type PenStyle, type TextItem } from '@qalm/core';
 import * as React from 'react';
 import type * as Y from 'yjs';
 
@@ -25,6 +25,13 @@ export interface Selection {
   ids: string[];
 }
 
+/** The text box being typed in. A new box is a `draft` until its first character: only then is it added to the page. */
+export interface EditingText {
+  pageId: string;
+  itemId: string;
+  draft?: TextItem;
+}
+
 export interface PageData {
   page: Page;
   index: number;
@@ -46,8 +53,8 @@ export interface EditorCtx {
   undoManagerFor(pageId: string, page: Page): Y.UndoManager;
   selection: Selection | null;
   setSelection(s: Selection | null): void;
-  editingText: { pageId: string; itemId: string } | null;
-  setEditingText(e: { pageId: string; itemId: string } | null): void;
+  editingText: EditingText | null;
+  setEditingText(e: EditingText | null): void;
   activeCommentId: string | null;
   setActiveComment(id: string | null): void;
   reportPage(pageId: string, data: PageData | null): void;

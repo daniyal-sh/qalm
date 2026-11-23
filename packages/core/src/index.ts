@@ -21,7 +21,7 @@ export {
 } from './geometry/stroke';
 export { snapShape, SNAP_HOLD_MS } from './geometry/shape';
 export { hitTestErase, lassoSelect } from './geometry/hit';
-export { itemBBox, unionBBox, textHeight, boxCorners, TEXT_LINE_HEIGHT } from './geometry/bbox';
+export { itemBBox, unionBBox, textHeight, setTextMeasure, boxCorners, TEXT_LINE_HEIGHT, type TextMeasure } from './geometry/bbox';
 export { shapePolylines, ellipseAxes } from './geometry/shape';
 export {
   IDENTITY,

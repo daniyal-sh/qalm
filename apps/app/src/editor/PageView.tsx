@@ -10,19 +10,21 @@ import { useSession, useVersion } from '../state/session';
 import { smoothingLevel } from '../theme/ThemeProvider';
 import { font } from '../theme/tokens';
 import { useEditor } from './context';
-import { DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, hitText, makeStroke, pointsBBox, transformPatch } from './items';
+import { DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, dropEmptyText, TEXT_LINE_HEIGHT, hitText, typeText, makeStroke, pointsBBox, transformPatch } from './items';
 import { isAdditive } from './modifiers';
-import { SelectionFrame, type LiveEdit } from './SelectionFrame';
+import { PAPER_ACCENT, SelectionFrame, type LiveEdit } from './SelectionFrame';
 import { RecognitionScheduler } from './recognition';
 import { pageDocQueue, pdfQueue } from './renderQueue';
 import { commentAnchors, pdfRenderWidth } from './view';
 
-const ACCENT = '#4338ca';
 /** A lasso that moved less than this (px) is a tap. */
 const TAP_SLOP_PX = 6;
 /** A tap selects the nearest item within this many px. */
 const TAP_TOLERANCE_PX = 10;
 const DOUBLE_TAP_MS = 450;
+/** A text-tool tap this soon after a text box was finished only finished it (no new box), like GoodNotes. */
+const TEXT_END_MS = 400;
+let textEndedAt = 0;
 
 /** Resolves asset ids to loadable uris (PDF file for the background, image files for image items). */
 function useAssetUris(ids: string[]): Map<string, string> {
@@ -225,6 +227,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   const selSet = React.useMemo(() => new Set(sel ?? []), [sel]);
   const selItems = React.useMemo(() => (sel ? items.filter((it) => selSet.has(it.id)) : []), [items, sel, selSet]);
   const editing = ed.editingText?.pageId === info.id ? ed.editingText.itemId : null;
+  const draft = ed.editingText?.pageId === info.id ? ed.editingText.draft : undefined;
   const shown = React.useMemo(() => {
     let out: Item[] = items;
     if (live?.kind === 'text') out = out.map((it) => (it.id === live.id ? ({ ...it, ...live.patch } as Item) : it));
@@ -304,6 +307,8 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   const nightInk = inkOnPaper(t.penColor, info.paperColor);
 
   const tapText = (x: number, y: number) => {
+    // The tap that ended typing (its blur) doesn't also start a new box.
+    if (Date.now() - textEndedAt < TEXT_END_MS) return;
     const hit = hitText(items, x, y);
     if (hit) {
       ed.setEditingText({ pageId: info.id, itemId: hit.id });
@@ -320,9 +325,8 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
       fontSize: DEFAULT_TEXT_SIZE,
       color: nightInk,
     };
-    page.addItem(item);
-    ed.touchPage(info.id);
-    ed.setEditingText({ pageId: info.id, itemId: id });
+    // Not on the page yet: the first character adds it (an abandoned empty box never exists).
+    ed.setEditingText({ pageId: info.id, itemId: id, draft: item });
   };
 
   return (
@@ -391,6 +395,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
           onLive={setLive}
           onCommit={commit}
           onTap={(wx, wy) => toPage(wx, wy, (x, y) => tapSelect(x, y, true))}
+          night={info.paperColor === 'night'}
         />
       ) : null}
       {anchors.map((a) => {
@@ -404,44 +409,70 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
           />
         ) : null;
       })}
-      {editing ? <TextEditor page={page} itemId={editing} scale={scale} onDone={() => ed.setEditingText(null)} /> : null}
+      {editing ? (
+        <TextEditor
+          key={editing}
+          page={page}
+          itemId={editing}
+          draft={draft}
+          scale={scale}
+          night={info.paperColor === 'night'}
+          onDone={() => {
+            textEndedAt = Date.now();
+            ed.setEditingText(null);
+          }}
+        />
+      ) : null}
     </View>
   );
 });
 
 
-function TextEditor({ page, itemId, scale, onDone }: { page: Page; itemId: string; scale: number; onDone(): void }) {
+function TextEditor({ page, itemId, draft, scale, night, onDone }: { page: Page; itemId: string; draft?: TextItem; scale: number; night: boolean; onDone(): void }) {
   const ed = useEditor();
-  const item = page.item(itemId);
-  const [text, setText] = React.useState(item?.type === 'text' ? item.text : '');
-  if (!item || item.type !== 'text') return null;
+  const stored = page.item(itemId);
+  const item = stored?.type === 'text' ? stored : draft;
+  const [text, setText] = React.useState(item?.text ?? '');
+  const input = React.useRef<React.ComponentRef<typeof TextInput>>(null);
+  const dropIfEmpty = React.useCallback(() => void dropEmptyText(page, ed.undo, itemId), [page, ed.undo, itemId]);
+  // Leaving mid-edit (back to the library, the page unmounting) still drops an emptied box.
+  React.useEffect(() => dropIfEmpty, [dropIfEmpty]);
+  if (!item) return null;
   const finish = () => {
-    if (!text.trim()) page.removeItems([itemId]);
+    dropIfEmpty();
     onDone();
   };
   return (
     <TextInput
+      ref={input}
       autoFocus
       multiline
       value={text}
       onChangeText={(v) => {
         setText(v);
-        ed.undo.merging(`text:${itemId}`, () => page.updateItem(itemId, { text: v } as Partial<TextItem>), 2000);
+        // The first character adds a new box; it and the typing that follows are one undo step.
+        const isNew = !page.item(itemId);
+        if (typeText(page, ed.undo, itemId, v, draft) && isNew && ed.editingText) ed.touchPage(ed.editingText.pageId);
       }}
       onBlur={finish}
+      // Escape finishes typing (web and hardware keyboards).
+      onKeyPress={(e) => {
+        if (e.nativeEvent.key === 'Escape') input.current?.blur();
+      }}
       placeholder="Type here"
-      placeholderTextColor="#8b8b95"
+      placeholderTextColor={night ? '#71717a' : '#8b8b95'}
       style={[
         styles.textEditor,
         {
+          borderColor: night ? PAPER_ACCENT.night.line : PAPER_ACCENT.light.line,
           left: item.x * scale - 4,
           top: item.y * scale - 4,
           width: item.w * scale + 8,
-          minHeight: item.fontSize * 1.3 * scale + 8,
-          // Grow with the text (a multiline input on web doesn't): the same wrapping estimate as the selection frame.
+          minHeight: item.fontSize * TEXT_LINE_HEIGHT * scale + 8,
+          // Grow with the text (a multiline input on web doesn't): the measured height, as the frame and canvas use.
           height: textHeight({ text: text || ' ', w: item.w, fontSize: item.fontSize }) * scale + 8 + item.fontSize * 0.3 * scale,
           fontSize: item.fontSize * scale,
-          lineHeight: item.fontSize * 1.3 * scale,
+          lineHeight: item.fontSize * TEXT_LINE_HEIGHT * scale,
           color: item.color,
         },
         // A turned text box is edited turned, about its top-left corner (the box sits 4 px out from it).
@@ -457,7 +488,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     padding: 3,
     borderWidth: 1,
-    borderColor: ACCENT,
     borderRadius: 4,
     fontFamily: font.regular,
     backgroundColor: 'transparent',

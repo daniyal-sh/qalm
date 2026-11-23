@@ -23,7 +23,7 @@ import { Text } from '../ui/Text';
 import { CommentsPanel } from './CommentsPanel';
 import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence } from './ai';
 import { markAllSeen, marginCards, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, type SeenThreads, type Thinking } from './ai.logic';
-import { EditorContext, UndoRegistry, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
+import { EditorContext, UndoRegistry, type EditingText, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
 import { getClip, pasteItems, setClip, useClip } from './clipboard';
 import { cloneItems, recolorPatch, selectionBBox, selectionSwatch } from './items';
 import { trackModifiers } from './modifiers';
@@ -138,7 +138,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
 
   // ---- selection, text, comments ----
   const [selection, setSelection] = React.useState<Selection | null>(null);
-  const [editingText, setEditingText] = React.useState<{ pageId: string; itemId: string } | null>(null);
+  const [editingText, setEditingText] = React.useState<EditingText | null>(null);
   const [activeCommentId, setActiveComment] = React.useState<string | null>(null);
   const [pageData, setPageData] = React.useState(() => new Map<string, PageData>());
   const reportPage = React.useCallback((pageId: string, data: PageData | null) => {

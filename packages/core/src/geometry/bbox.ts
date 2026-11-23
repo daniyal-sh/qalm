@@ -32,9 +32,24 @@ export function textRows(item: Pick<TextItem, 'text' | 'w' | 'fontSize'>): numbe
   return Math.max(1, wrapText(item.text, item.w, (s) => s.length * item.fontSize * TEXT_CHAR_WIDTH).length);
 }
 
-/** Height of a text box (estimated wrapping). */
+/** Measures the laid-out height of a text box with the real font; null when it can't (fonts not loaded yet). */
+export type TextMeasure = (item: Pick<TextItem, 'text' | 'w' | 'fontSize'>) => number | null;
+let measure: TextMeasure | null = null;
+
+/**
+ * Installs the renderer's text measure (the app's PageCanvas registers Skia's, with the font it draws), so text
+ * boxes' heights, frames and hit boxes fit the drawn text. Without one (server, tests) heights are estimated.
+ */
+export function setTextMeasure(fn: TextMeasure | null): void {
+  measure = fn;
+}
+
+/** Height of a text box: measured when a measure is installed, else estimated from an average glyph width. */
 export function textHeight(item: Pick<TextItem, 'text' | 'w' | 'fontSize'>): number {
-  return textRows(item) * item.fontSize * TEXT_LINE_HEIGHT;
+  const row = item.fontSize * TEXT_LINE_HEIGHT;
+  const h = measure?.(item);
+  if (h != null && Number.isFinite(h)) return Math.max(row, h);
+  return textRows(item) * row;
 }
 
 /** The 4 corners (top-left, top-right, bottom-right, bottom-left) of a text box or image, turned by `rot` about (x, y). */
