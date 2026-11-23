@@ -1,6 +1,32 @@
 import * as Y from 'yjs';
 import { LOCAL_ORIGIN } from '../origin';
 import { newId } from '../ids';
+import { normalizeColor } from '../geometry/color';
+
+/** Which swatch list: text and shapes use the pen list. */
+export type SwatchTool = 'pen' | 'highlighter';
+/** At most this many saved colours per tool. */
+export const MAX_SWATCHES = 24;
+/** The brand palettes (brand.md): what a library shows until the user changes its swatches. */
+export const DEFAULT_SWATCHES: Record<SwatchTool, readonly string[]> = {
+  pen: ['#27272a', '#4338ca', '#1d4ed8', '#0f766e', '#b91c1c', '#b45309'],
+  highlighter: ['#fde68a', '#bfdbfe', '#bbf7d0', '#fbcfe8'],
+};
+
+/** Pens are opaque: an alpha on a pen colour is dropped. */
+function swatchColor(tool: SwatchTool, c: string): string | null {
+  const n = normalizeColor(c);
+  return n && tool === 'pen' ? n.slice(0, 7) : n;
+}
+
+function dedupe(tool: SwatchTool, list: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const c of list) {
+    const n = swatchColor(tool, c);
+    if (n && !out.includes(n)) out.push(n);
+  }
+  return out.slice(0, MAX_SWATCHES);
+}
 
 export interface Folder { id: string; name: string; createdAt: number }
 export interface LibraryEntry {
@@ -25,11 +51,13 @@ export class Library {
   readonly doc: Y.Doc;
   private readonly folderMap: Y.Map<Y.Map<unknown>>;
   private readonly entryMap: Y.Map<Y.Map<unknown>>;
+  private readonly swatchMap: Y.Map<Y.Array<string>>;
 
   constructor(doc: Y.Doc) {
     this.doc = doc;
     this.folderMap = doc.getMap('folders');
     this.entryMap = doc.getMap('entries');
+    this.swatchMap = doc.getMap('swatches');
   }
 
   private tx(fn: () => void): void {
@@ -89,6 +117,80 @@ export class Library {
   /** Permanently removes an entry (use `updateEntry(id, { deletedAt })` to trash it). */
   removeEntry(id: string): void {
     this.tx(() => this.entryMap.delete(id));
+  }
+
+  // ---- saved colours (tech-spec §2): one Y.Array per tool; never set = the brand palette ----
+
+  /** The tool's saved colours in order (normalised, deduplicated, at most MAX_SWATCHES). */
+  swatches(tool: SwatchTool): string[] {
+    const a = this.swatchMap.get(tool);
+    return dedupe(tool, a ? a.toArray() : DEFAULT_SWATCHES[tool]);
+  }
+
+  /** True once the user has changed this tool's swatches (added, moved or removed one). */
+  hasCustomSwatches(tool: SwatchTool): boolean {
+    return this.swatchMap.has(tool);
+  }
+
+  /** Replaces the tool's list (normalised, deduplicated, capped). */
+  setSwatches(tool: SwatchTool, colors: readonly string[]): void {
+    const list = dedupe(tool, colors);
+    this.tx(() => {
+      let a = this.swatchMap.get(tool);
+      if (!a) {
+        a = new Y.Array<string>();
+        this.swatchMap.set(tool, a);
+      } else if (a.length) a.delete(0, a.length);
+      a.insert(0, list);
+    });
+  }
+
+  /**
+   * Appends a colour. Returns false (and changes nothing) if it isn't a colour, is already saved, or the list is full.
+   * Edits rewrite the whole (tiny) array. Two devices editing at once leave both lists in it; reads deduplicate.
+   */
+  addSwatch(tool: SwatchTool, color: string): boolean {
+    const c = swatchColor(tool, color);
+    const cur = this.swatches(tool);
+    if (!c || cur.includes(c) || cur.length >= MAX_SWATCHES) return false;
+    this.setSwatches(tool, [...cur, c]);
+    return true;
+  }
+
+  /** Moves a saved colour to `index` (clamped). */
+  moveSwatch(tool: SwatchTool, color: string, index: number): void {
+    const c = swatchColor(tool, color);
+    const cur = this.swatches(tool);
+    const from = c ? cur.indexOf(c) : -1;
+    if (from < 0) return;
+    cur.splice(from, 1);
+    cur.splice(Math.max(0, Math.min(cur.length, Math.round(index))), 0, c!);
+    this.setSwatches(tool, cur);
+  }
+
+  removeSwatch(tool: SwatchTool, color: string): void {
+    const c = swatchColor(tool, color);
+    const cur = this.swatches(tool);
+    if (!c || !cur.includes(c)) return;
+    this.setSwatches(tool, cur.filter((x) => x !== c));
+  }
+
+  /** Back to the brand palette (removes the custom list). */
+  resetSwatches(tool: SwatchTool): void {
+    this.tx(() => this.swatchMap.delete(tool));
+  }
+
+  /**
+   * Brings `from`'s custom swatches into this library (signed-out colours on sign-in): the account's list first,
+   * then the other's colours it lacks, capped. Lists `from` never changed are left alone.
+   */
+  mergeSwatchesFrom(from: Library): void {
+    for (const tool of ['pen', 'highlighter'] as const) {
+      if (!from.hasCustomSwatches(tool)) continue;
+      const mine = this.hasCustomSwatches(tool) ? this.swatches(tool) : [];
+      const merged = this.hasCustomSwatches(tool) ? [...mine, ...from.swatches(tool)] : from.swatches(tool);
+      this.setSwatches(tool, merged);
+    }
   }
 
   observe(cb: (tx: Y.Transaction) => void): () => void {

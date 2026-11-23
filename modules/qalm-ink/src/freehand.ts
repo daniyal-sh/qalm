@@ -16,4 +16,5 @@ export function liveOutline(
   return strokeOutline({ tool, width, points: pts, style, smoothing });
 }
 
+/** Default highlighter alpha; a `#rrggbbaa` highlighter colour carries its own (`inkPaint` in @qalm/core). */
 export const HIGHLIGHTER_ALPHA = 0.45;
