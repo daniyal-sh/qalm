@@ -25,7 +25,7 @@ import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence } from './ai';
 import { markAllSeen, marginCards, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
 import { getClip, pasteItems, setClip, useClip } from './clipboard';
-import { cloneItems, recolorPatch, selectionBBox } from './items';
+import { cloneItems, recolorPatch, selectionBBox, selectionSwatch } from './items';
 import { trackModifiers } from './modifiers';
 import { SelectionThumb } from './SelectionThumb';
 import { PageView } from './PageView';
@@ -296,6 +296,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   }, [commitZoom]);
 
   const selectionPage = selection ? pageData.get(selection.pageId)?.page : undefined;
+  const selectionPaper = selection ? pages.find((p) => p.id === selection.pageId)?.paperColor : undefined;
   const selectedItems = () => (selection && selectionPage ? selection.ids.map((id) => selectionPage.item(id)).filter((x) => !!x) : []);
   const openSelection = (mode: 'ask' | 'comment') => {
     if (!selection || !selectionPage) return;
@@ -360,7 +361,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       if (!selection || !selectionPage) return;
       selectionPage.updateItems(
         selectedItems().flatMap((it) => {
-          const patch = recolorPatch(it, hex);
+          const patch = recolorPatch(it, hex, selectionPaper);
           return patch ? [[it.id, patch] as const] : [];
         }),
       );
@@ -383,8 +384,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   // The selection's colour when every recolourable item shares one (marked in the recolour swatches).
   const selectionColor = React.useMemo(() => {
     if (!recoloring) return null;
-    const cs = new Set(selectedItems().flatMap((it) => (recolorPatch(it, '#000000') && 'color' in it ? [it.color] : [])));
-    return cs.size === 1 ? [...cs][0]! : null;
+    return selectionSwatch(selectedItems(), selectionPaper);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recoloring, selection, pageData]);
 
@@ -836,6 +836,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             <View style={styles.toolbarWrap} pointerEvents="box-none">
               <Toolbar
                 tools={tools}
+                paper={pages[current]?.paperColor}
                 onTool={setTool}
                 onChange={changeTools}
                 onImage={insertImage}
@@ -851,7 +852,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                   {recoloring ? (
                     <>
                       <IconButton icon="chevron-left" label="Back" onPress={() => setRecoloring(false)} />
-                      <SwatchStrip tool="pen" verb="Recolour" current={selectionColor ?? ''} onSelect={(hex) => sel.recolor(hex)} />
+                      <SwatchStrip tool="pen" verb="Recolour" paper={selectionPaper} current={selectionColor ?? ''} onSelect={(hex) => sel.recolor(hex)} />
                     </>
                   ) : (
                     <>

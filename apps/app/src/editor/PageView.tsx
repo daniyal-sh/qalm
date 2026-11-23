@@ -1,4 +1,4 @@
-import { boxSelect, textHeight, hitTestErase, hitTestPoint, isIdentity, lassoSelect, Page, snapShape, type Item, type PageInfo, type TextItem } from '@qalm/core';
+import { boxSelect, inkOnPaper, textHeight, hitTestErase, hitTestPoint, isIdentity, lassoSelect, Page, snapShape, type Item, type PageInfo, type TextItem } from '@qalm/core';
 import { InkOverlay, PageCanvas, QalmInk, type InkOverlayProps } from 'qalm-ink';
 import * as React from 'react';
 import { PixelRatio, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -301,7 +301,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
 
   const t = ed.tools;
   const inkTool = t.tool === 'text' ? 'none' : t.tool;
-  const nightInk = info.paperColor === 'night' && t.penColor === '#27272a' ? '#e4e4e7' : t.penColor;
+  const nightInk = inkOnPaper(t.penColor, info.paperColor);
 
   const tapText = (x: number, y: number) => {
     const hit = hitText(items, x, y);

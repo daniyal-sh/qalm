@@ -45,7 +45,7 @@ export {
   type Sim,
   type Frame,
 } from './geometry/transform';
-export { paperPattern, type PaperPattern } from './geometry/paper';
+export { paperPattern, inkOnPaper, swatchOfInk, DEFAULT_INK, NIGHT_INK, PAPER_BG, type PaperPattern } from './geometry/paper';
 export { renderPageSvg } from './render/svg';
 export { renderLinesStripSvg } from './render/strip';
 export { exportPdf } from './export/pdf';

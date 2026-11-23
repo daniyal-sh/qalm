@@ -1,5 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { HIGHLIGHTER_WIDTH, PEN_WIDTHS, type PenStyle } from '@qalm/core';
+import { HIGHLIGHTER_WIDTH, PEN_WIDTHS, type PaperColor, type PenStyle } from '@qalm/core';
 import * as React from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -90,10 +90,12 @@ export interface ToolbarProps {
   zoom: number;
   onZoom(dir: 1 | -1): void;
   onZoomReset(): void;
+  /** The current page's paper: the colour picker previews pen ink on it. */
+  paper?: PaperColor;
 }
 
 /** The floating toolbar: a solid surface with shadow-2 (brand.md). Scrolls sideways on narrow screens. */
-export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoomReset }: ToolbarProps) {
+export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoomReset, paper }: ToolbarProps) {
   const { c } = useTheme();
   const t = tools.tool;
   const [dragging, setDragging] = React.useState(false);
@@ -107,7 +109,7 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
         <Sep />
         {t === 'pen' || t === 'text' ? (
           <>
-            <SwatchStrip tool="pen" current={tools.penColor} onSelect={(c) => onChange({ penColor: c })} onDragging={setDragging} />
+            <SwatchStrip tool="pen" paper={paper} current={tools.penColor} onSelect={(c) => onChange({ penColor: c })} onDragging={setDragging} />
             {t === 'pen' ? (
               <>
                 <Sep />

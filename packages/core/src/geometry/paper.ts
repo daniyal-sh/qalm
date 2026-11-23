@@ -6,6 +6,18 @@ export const PAPER_BG: Record<PaperColor, string> = { white: '#ffffff', cream: '
 export const PAPER_RULE: Record<PaperColor, string> = { white: '#d9dce3', cream: '#d9dce3', night: '#34343a' };
 /** Default ink on night paper. */
 export const NIGHT_INK = '#e4e4e7';
+/** The default dark ink ("Graphite"): on night paper it is stored and drawn as NIGHT_INK. */
+export const DEFAULT_INK = '#27272a';
+
+/** The colour ink of swatch `color` gets on `paper`: graphite turns light on night paper, everything else is kept. */
+export function inkOnPaper(color: string, paper: PaperColor | undefined): string {
+  return paper === 'night' && color.toLowerCase() === DEFAULT_INK ? NIGHT_INK : color;
+}
+
+/** The swatch a stored ink colour came from (the inverse of `inkOnPaper`), for ticking the current colour. */
+export function swatchOfInk(color: string, paper: PaperColor | undefined): string {
+  return paper === 'night' && color.toLowerCase() === NIGHT_INK ? DEFAULT_INK : color;
+}
 /** Rule line width and dot radius, in page units. */
 export const RULE_WIDTH = 0.5;
 export const DOT_RADIUS = 0.75;

@@ -1,5 +1,5 @@
 import { newIdFallback } from '../lib/id';
-import { frameBBox, itemDistance, moveBy, selectionFrame, transformItem, type BBox, type InkPoint, type Item, type PenStyle, type Smoothing, type StrokeItem, type TextItem } from '@qalm/core';
+import { frameBBox, inkOnPaper, itemDistance, moveBy, selectionFrame, swatchOfInk, transformItem, type BBox, type InkPoint, type Item, type PaperColor, type PenStyle, type Smoothing, type StrokeItem, type TextItem } from '@qalm/core';
 
 /** Text box line height (matches core's TEXT_LINE_HEIGHT). */
 export const TEXT_LINE_HEIGHT = 1.3;
@@ -62,10 +62,24 @@ export function selectionBBox(items: readonly Item[]): BBox | null {
   return f ? frameBBox(f) : null;
 }
 
-/** Recolours strokes, shapes and text. Images and highlighters keep their colour. */
-export function recolorPatch(it: Item, color: string): Partial<Item> | null {
-  if (it.type === 'image' || (it.type === 'stroke' && it.tool === 'highlighter')) return null;
-  return { color } as Partial<Item>;
+/** Can the item be recoloured? Images and highlighters keep their colour. */
+export function recolorable(it: Item): it is Exclude<Item, { type: 'image' }> {
+  return it.type !== 'image' && !(it.type === 'stroke' && it.tool === 'highlighter');
+}
+
+/**
+ * Recolours strokes, shapes and text to swatch `color` on a page of `paper`: like new ink, graphite turns light on
+ * night paper. Images and highlighters keep their colour.
+ */
+export function recolorPatch(it: Item, color: string, paper?: PaperColor): Partial<Item> | null {
+  if (!recolorable(it)) return null;
+  return { color: inkOnPaper(color, paper) } as Partial<Item>;
+}
+
+/** The swatch the selection's ink uses when it all shares one (ticked in the recolour strip), else null. */
+export function selectionSwatch(items: readonly Item[], paper?: PaperColor): string | null {
+  const cs = new Set(items.filter(recolorable).map((it) => swatchOfInk(it.color.toLowerCase(), paper)));
+  return cs.size === 1 ? [...cs][0]! : null;
 }
 
 /** Copies of items with fresh ids, offset by (dx, dy). */
