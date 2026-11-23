@@ -23,7 +23,9 @@ import { CommentsPanel } from './CommentsPanel';
 import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence } from './ai';
 import { markAllSeen, marginCards, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
-import { cloneItems, itemBBox, unionBBox } from './items';
+import { getClip, pasteItems, setClip, useClip } from './clipboard';
+import { cloneItems, recolorPatch, selectionBBox } from './items';
+import { trackModifiers } from './modifiers';
 import { SelectionThumb } from './SelectionThumb';
 import { PageView } from './PageView';
 import { Toolbar } from './Toolbar';
@@ -251,24 +253,100 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   }, [commitZoom]);
 
   const selectionPage = selection ? pageData.get(selection.pageId)?.page : undefined;
+  const selectedItems = () => (selection && selectionPage ? selection.ids.map((id) => selectionPage.item(id)).filter((x) => !!x) : []);
   const openSelection = (mode: 'ask' | 'comment') => {
     if (!selection || !selectionPage) return;
-    const box = unionBBox(selection.ids.map((id) => selectionPage.item(id)).filter((x) => !!x).map(itemBBox));
+    const box = selectionBBox(selectedItems());
     if (box) openAsk({ pageId: selection.pageId, ids: selection.ids, bbox: box, mode });
   };
-  const deleteSelection = React.useCallback(() => {
+  const deleteSelection = () => {
     if (!selection || !selectionPage) return;
     selectionPage.removeItems(selection.ids);
     setSelection(null);
-  }, [selection, selectionPage]);
+  };
+  // Items deleted elsewhere (undo, another device) drop out of the selection.
+  React.useEffect(() => {
+    if (!selection) return;
+    const d = pageData.get(selection.pageId);
+    if (!d) return;
+    const have = new Set(d.items.map((it) => it.id));
+    const ids = selection.ids.filter((id) => have.has(id));
+    if (ids.length !== selection.ids.length) setSelection(ids.length ? { pageId: selection.pageId, ids } : null);
+  }, [pageData, selection]);
+
+  const clip = useClip();
+  /** Where Paste goes: the selection's page, else the page last written on, else the one in view. */
+  const pasteTarget = (): { pageId: string; page: Page } | null => {
+    const id = selection?.pageId ?? (lastPage.current && pageData.has(lastPage.current) ? lastPage.current : currentPageId);
+    const page = id ? pageData.get(id)?.page : undefined;
+    return id && page ? { pageId: id, page } : null;
+  };
+  const copySelection = () => {
+    if (!selection || !notebook) return false;
+    const items = selectedItems();
+    if (!items.length) return false;
+    const assets = items.flatMap((it) => (it.type === 'image' ? [notebook.asset(it.assetId)].filter((x) => !!x) : []));
+    setClip(items, assets, selection.pageId);
+    return true;
+  };
+  const sel = {
+    copy: () => {
+      if (copySelection()) showToast('Copied');
+    },
+    cut: () => {
+      if (copySelection()) deleteSelection();
+    },
+    paste: () => {
+      const cl = getClip();
+      const target = pasteTarget();
+      if (!cl || !target || !notebook) return;
+      for (const a of cl.assets) if (!notebook.asset(a.id)) notebook.addAsset(a); // images pasted from another notebook
+      const copies = pasteItems(cl, target.pageId, newId);
+      target.page.doc.transact(() => copies.forEach((it) => target.page.addItem(it)), LOCAL_ORIGIN);
+      touchPage(target.pageId);
+      setTool('lasso');
+      setSelection({ pageId: target.pageId, ids: copies.map((x) => x.id) });
+    },
+    duplicate: () => {
+      if (!selection || !selectionPage) return;
+      const copies = cloneItems(selectedItems(), 16, 16, newId);
+      selectionPage.doc.transact(() => copies.forEach((it) => selectionPage.addItem(it)), LOCAL_ORIGIN);
+      setSelection({ pageId: selection.pageId, ids: copies.map((x) => x.id) });
+    },
+    recolor: (hex: string) => {
+      if (!selection || !selectionPage) return;
+      selectionPage.doc.transact(() => {
+        for (const it of selectedItems()) {
+          const patch = recolorPatch(it, hex);
+          if (patch) selectionPage.updateItem(it.id, patch);
+        }
+      }, LOCAL_ORIGIN);
+    },
+    order: (to: 'front' | 'back') => {
+      if (selection && selectionPage) selectionPage.reorder(selection.ids, to);
+    },
+    selectAll: () => {
+      const target = pasteTarget();
+      const ids = target ? pageData.get(target.pageId)?.items.map((it) => it.id) : [];
+      if (!target || !ids?.length) return;
+      setTool('lasso');
+      setSelection({ pageId: target.pageId, ids });
+    },
+  };
+  const selRef = React.useRef(sel);
+  selRef.current = sel;
+  const [recoloring, setRecoloring] = React.useState(false);
+  React.useEffect(() => setRecoloring(false), [selection?.pageId, selection?.ids.length]);
 
   React.useEffect(() => {
     if (Platform.OS !== 'web') return;
+    trackModifiers();
     const onKey = (ev: KeyboardEvent) => {
       const target = ev.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
       const mod = ev.ctrlKey || ev.metaKey;
       const k = ev.key.toLowerCase();
+      const a = selRef.current;
       if (mod && k === 'z') {
         ev.preventDefault();
         if (ev.shiftKey) undo.redo();
@@ -276,19 +354,32 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       } else if (mod && k === 'y') {
         ev.preventDefault();
         undo.redo();
+      } else if (mod && (k === 'c' || k === 'x' || k === 'd') && selection) {
+        ev.preventDefault();
+        if (k === 'c') a.copy();
+        else if (k === 'x') a.cut();
+        else a.duplicate();
+      } else if (mod && k === 'v' && getClip()) {
+        ev.preventDefault();
+        a.paste();
+      } else if (mod && k === 'a') {
+        ev.preventDefault();
+        a.selectAll();
       } else if ((k === 'delete' || k === 'backspace') && selection) {
         ev.preventDefault();
         deleteSelection();
       } else if (k === 'escape') setSelection(null);
-      else if (!mod && k === 'p') setTool('pen');
-      else if (!mod && k === 'h') setTool('highlighter');
-      else if (!mod && k === 'e') setTool('eraser');
-      else if (!mod && k === 'l') setTool('lasso');
-      else if (!mod && k === 't') setTool('text');
+      else if (mod) return;
+      else if (k === 'p') setTool('pen');
+      else if (k === 'h') setTool('highlighter');
+      else if (k === 'e') setTool('eraser');
+      else if (k === 'l') setTool('lasso');
+      else if (k === 't') setTool('text');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, selection, deleteSelection, setTool]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [undo, selection, selectionPage, setTool]);
 
   // ---- actions ----
   const [menu, setMenu] = React.useState<MenuState>(null);
@@ -618,41 +709,37 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             {selection && selectionPage ? (
               <View style={styles.selWrap} pointerEvents="box-none">
                 <View style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
-                  <Text variant="label" style={{ paddingHorizontal: 8 }}>
-                    {selection.ids.length} selected
-                  </Text>
-                  {PEN_COLORS.map((p) => (
-                    <IconButton
-                      key={p.hex}
-                      icon="circle"
-                      label={`Recolour ${p.name}`}
-                      size={36}
-                      color={p.hex}
-                      onPress={() =>
-                        selectionPage.doc.transact(() => {
-                          for (const id of selection.ids) {
-                            const it = selectionPage.item(id);
-                            if (it && it.type !== 'image' && !(it.type === 'stroke' && it.tool === 'highlighter')) selectionPage.updateItem(id, { color: p.hex });
-                          }
-                        }, LOCAL_ORIGIN)
-                      }
-                    />
-                  ))}
-                  <IconButton
-                    icon="copy"
-                    label="Duplicate"
-                    size={36}
-                    onPress={() => {
-                      const items = selection.ids.map((id) => selectionPage.item(id)).filter((x) => !!x);
-                      const copies = cloneItems(items, 16, 16, newId);
-                      selectionPage.doc.transact(() => copies.forEach((it) => selectionPage.addItem(it)), LOCAL_ORIGIN);
-                      setSelection({ pageId: selection.pageId, ids: copies.map((x) => x.id) });
-                    }}
-                  />
-                  <IconButton icon="message-square" label="Comment on selection" size={36} onPress={() => openSelection('comment')} />
-                  <Button label="Ask" accessibilityLabel="Ask about selection" icon="help-circle" variant="assistant" size="sm" onPress={() => openSelection('ask')} />
-                  <IconButton icon="trash-2" label="Delete selection" tone="bad" size={36} onPress={deleteSelection} />
-                  <IconButton icon="x" label="Deselect" size={36} onPress={() => setSelection(null)} />
+                  {recoloring ? (
+                    <>
+                      <IconButton icon="chevron-left" label="Back" onPress={() => setRecoloring(false)} />
+                      {PEN_COLORS.map((p) => (
+                        <IconButton key={p.hex} icon="circle" label={`Recolour ${p.name}`} color={p.hex} onPress={() => sel.recolor(p.hex)} />
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <Text variant="label" style={{ paddingHorizontal: 8 }}>
+                        {selection.ids.length} selected
+                      </Text>
+                      <IconButton icon="droplet" label="Recolour" onPress={() => setRecoloring(true)} />
+                      <IconButton icon="plus-square" label="Duplicate" onPress={sel.duplicate} />
+                      <IconButton icon="copy" label="Copy" onPress={sel.copy} />
+                      <IconButton icon="scissors" label="Cut" onPress={sel.cut} />
+                      {clip ? <IconButton icon="clipboard" label="Paste" onPress={sel.paste} /> : null}
+                      <IconButton icon="chevrons-up" label="Bring to front" onPress={() => sel.order('front')} />
+                      <IconButton icon="chevrons-down" label="Send to back" onPress={() => sel.order('back')} />
+                      <IconButton icon="message-square" label="Comment on selection" onPress={() => openSelection('comment')} />
+                      <Button label="Ask" accessibilityLabel="Ask about selection" icon="help-circle" variant="assistant" size="sm" onPress={() => openSelection('ask')} />
+                      <IconButton icon="trash-2" label="Delete selection" tone="bad" onPress={deleteSelection} />
+                      <IconButton icon="x" label="Deselect" onPress={() => setSelection(null)} />
+                    </>
+                  )}
+                </View>
+              </View>
+            ) : tools.tool === 'lasso' && clip ? (
+              <View style={styles.selWrap} pointerEvents="box-none">
+                <View style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
+                  <Button label="Paste" icon="clipboard" size="sm" onPress={sel.paste} />
                 </View>
               </View>
             ) : null}

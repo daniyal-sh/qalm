@@ -1,20 +1,11 @@
-import {
-  frameCorners,
-  mapFrame,
-  moveBy,
-  resizeSim,
-  rotateSim,
-  selectionFrame,
-  textWidthPatch,
-  type Frame,
-  type Item,
-  type Sim,
-  type TextItem,
-} from '@qalm/core';
+import { frameCorners, moveBy, resizeSim, rotateSim, selectionFrame, textWidthPatch, type Frame, type Item, type TextItem } from '@qalm/core';
 import * as React from 'react';
 import { PanResponder, Platform, StyleSheet, View, type GestureResponderEvent, type PanResponderGestureState } from 'react-native';
 
 import { Icon } from '../ui/Icon';
+import { liveFrame, type LiveEdit } from './selection.logic';
+
+export type { LiveEdit } from './selection.logic';
 
 const ACCENT = '#4338ca'; // paper stays light: brand accent (light)
 /** px between the ink and the frame line */
@@ -27,9 +18,6 @@ const ROT_OFF = 30;
 const TAP_SLOP = 4;
 
 type P = [number, number];
-
-/** A selection edit in progress: a transform of every selected item, or a text box's new width. */
-export type LiveEdit = { kind: 'sim'; sim: Sim } | { kind: 'text'; id: string; patch: Pick<TextItem, 'x' | 'y' | 'w'> };
 
 export interface SelectionFrameProps {
   /** The selected items as they are on the page (not the live edit). */
@@ -68,13 +56,6 @@ function useDrag(h: DragHandlers, onCancel: () => void) {
       }).panHandlers,
     [],
   );
-}
-
-/** The frame shown for the selection: its items' frame, with the live edit applied. */
-export function liveFrame(items: Item[], live: LiveEdit | null): Frame | null {
-  if (live?.kind === 'text') return selectionFrame(items.map((it) => (it.id === live.id ? ({ ...it, ...live.patch } as Item) : it)));
-  const f = selectionFrame(items);
-  return f && live?.kind === 'sim' ? mapFrame(f, live.sim) : f;
 }
 
 /**
