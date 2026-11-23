@@ -98,7 +98,8 @@ export function magicLinkPage(email: string, to: { postToken: string } | { href:
 <h1>Sign in to qalm</h1><p class="sub">Continue as <b>${e(email)}</b>. Only continue if you just asked for this link.</p>
 ${button}`,
   );
-  res.headers.set('Referrer-Policy', 'no-referrer');
+  // Keep the token-bearing URL from leaking to other sites, but still let the Continue form send our Origin.
+  res.headers.set('Referrer-Policy', 'same-origin');
   return res;
 }
 
