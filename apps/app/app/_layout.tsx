@@ -9,7 +9,10 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { desktop } from '../src/lib/desktop';
-import { SessionProvider } from '../src/state/session';
+import { SessionProvider, useSession } from '../src/state/session';
+import { Button } from '../src/ui/controls';
+import { Sheet } from '../src/ui/layout';
+import { Text } from '../src/ui/Text';
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
 
 // Electron: qalm:// links (email magic-link sign-in) arrive as in-app routes from the preload.
@@ -19,6 +22,44 @@ function useDesktopDeepLinks(ready: boolean) {
     if (!ready || !d) return;
     return d.onDeepLink((path) => router.push(path as never));
   }, [ready]);
+}
+
+/**
+ * After a sign-in this device didn't ask for (a confirmed magic link), notebooks made here while signed out are
+ * only moved into the account when the user says so.
+ */
+function MoveLocalOffer() {
+  const s = useSession();
+  const [busy, setBusy] = React.useState(false);
+  const n = s.localOffer;
+  const who = s.profile?.email ?? 'this account';
+  return (
+    <Sheet
+      visible={n > 0}
+      onClose={s.dismissLocalOffer}
+      title={`Move ${n} notebook${n === 1 ? '' : 's'} into this account?`}
+      width={440}
+      footer={
+        <>
+          <Button label="Not now" onPress={s.dismissLocalOffer} disabled={busy} />
+          <Button
+            label="Move notebooks"
+            variant="primary"
+            loading={busy}
+            onPress={() => {
+              setBusy(true);
+              void s.moveLocal().finally(() => setBusy(false));
+            }}
+          />
+        </>
+      }
+    >
+      <Text tone="muted">
+        {n === 1 ? 'A notebook was' : `${n} notebooks were`} made on this device without an account. Moving them syncs them to {who}. Only move them if
+        this is your account.
+      </Text>
+    </Sheet>
+  );
 }
 
 function Shell() {
@@ -36,6 +77,7 @@ function Shell() {
     <>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: c.bg }, animation: 'fade' }} />
+      <MoveLocalOffer />
     </>
   );
 }

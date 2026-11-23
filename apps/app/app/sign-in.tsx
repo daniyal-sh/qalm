@@ -6,7 +6,9 @@ import * as React from 'react';
 import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { extractMagicToken, isEmail, startMagicLink, verifyMagicLink } from '../src/auth/magicLink';
+import { pendingDeps } from '../src/auth/device';
+import { extractCode, extractMagicToken, isEmail, startMagicLink, verifyCode } from '../src/auth/magicLink';
+import { beginEmailSignIn, clearPending, pendingNonce } from '../src/auth/pending';
 import { config } from '../src/config';
 import { useSession, type Profile } from '../src/state/session';
 import { useTheme } from '../src/theme/ThemeProvider';
@@ -87,17 +89,27 @@ export default function SignIn() {
   const onEmail = () =>
     run('email', async () => {
       if (!s.serverUrl) throw new Error('No server configured');
-      await startMagicLink(fetch, s.serverUrl, email);
+      const { nonceHash } = await beginEmailSignIn(pendingDeps, email);
+      await startMagicLink(fetch, s.serverUrl, email, nonceHash);
       setSentTo(email.trim());
     });
 
   const onLink = () =>
     run('link', async () => {
-      const token = extractMagicToken(link);
-      if (!token) throw new Error('Paste the whole link from the email');
       if (!s.serverUrl) throw new Error('No server configured');
-      const t = await verifyMagicLink(fetch, s.serverUrl, token);
-      await s.signInWithTokens(t, { provider: 'email', email: sentTo ?? undefined });
+      const code = extractCode(link);
+      if (code && sentTo) {
+        const nonce = await pendingNonce(pendingDeps, sentTo);
+        if (!nonce) throw new Error('This code has expired. Send a new one.');
+        const t = await verifyCode(fetch, s.serverUrl, sentTo, code, nonce);
+        await clearPending(pendingDeps, sentTo);
+        await s.signInWithTokens(t, { provider: 'email', email: t.email || sentTo });
+        return;
+      }
+      const token = extractMagicToken(link);
+      if (!token) throw new Error('Enter the 6-digit code or paste the whole link from the email');
+      // The verify screen checks the link belongs to this device's request (or asks first).
+      router.replace({ pathname: '/auth/email/verify', params: { token } });
     });
 
   const skip = () => {
@@ -125,11 +137,22 @@ export default function SignIn() {
             <View style={{ gap: 12 }}>
               <View style={[styles.note, { backgroundColor: c.goodSoft, borderColor: c.line }]}>
                 <Text variant="label" tone="good">
-                  We sent a sign-in link to {sentTo}.
+                  We sent a sign-in link and code to {sentTo}.
                 </Text>
               </View>
-              <Text tone="muted">Open the link on this device. If it opens somewhere else, paste it here.</Text>
-              <TextField value={link} onChangeText={setLink} placeholder="Paste the link from the email" autoCapitalize="none" autoCorrect={false} icon="link" onSubmitEditing={onLink} />
+              <Text tone="muted">Open the link on this device, or enter the 6-digit code from the email. You can also paste the link here.</Text>
+              <TextField
+                value={link}
+                onChangeText={setLink}
+                placeholder="6-digit code or link"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="one-time-code"
+                textContentType="oneTimeCode"
+                icon="link"
+                onSubmitEditing={onLink}
+                accessibilityLabel="Code or link from the email"
+              />
               <Button label="Sign in" variant="primary" loading={busy === 'link'} disabled={!link.trim()} onPress={onLink} />
               <Button label="Use another email" variant="ghost" onPress={() => setSentTo(null)} />
             </View>
