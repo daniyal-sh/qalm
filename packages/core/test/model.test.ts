@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { Library, LOCAL_ORIGIN, Page, createUndoManager, decodePoints, encodePoints } from '../src';
+import { Library, LOCAL_ORIGIN, Page, createNotebookUndoManager, createUndoManager, decodePoints, encodePoints } from '../src';
 import type { ShapeItem, StrokeItem } from '../src';
 import { newNotebook, newPage, pts, stroke, sync } from './helpers';
 
@@ -301,5 +301,71 @@ describe('item read cache and z-order', () => {
       expect(page.items().map((i) => i.id)).toEqual(['b', 'a']);
     }, LOCAL_ORIGIN);
     expect(page.items().map((i) => i.id)).toEqual(['b', 'a']);
+  });
+});
+
+describe('page navigator model', () => {
+  it('bookmarks pages, keeping the flag across moves', () => {
+    const nb = newNotebook();
+    const a = nb.pages()[0]!.id;
+    const b = nb.addPage();
+    nb.setBookmark(a, true);
+    expect(nb.pages().map((p) => !!p.bookmarked)).toEqual([true, false]);
+    nb.movePage(a, 1);
+    expect(nb.pages().map((p) => [p.id, !!p.bookmarked])).toEqual([[b, false], [a, true]]);
+    nb.setBookmark(a, false);
+    expect(nb.pages().some((p) => p.bookmarked)).toBe(false);
+    expect('bookmarked' in nb.pages()[1]!).toBe(false);
+  });
+
+  it('duplicates a page right after the original, without its bookmark', () => {
+    const nb = newNotebook();
+    const a = nb.pages()[0]!.id;
+    nb.addPage();
+    nb.setBookmark(a, true);
+    const copy = nb.duplicatePage(a, 'copy')!;
+    expect(nb.pages().map((p) => p.id)).toEqual([a, 'copy', nb.pages()[2]!.id]);
+    expect(nb.pages()[1]!.bookmarked).toBeUndefined();
+    expect(nb.pages()[1]!.size).toEqual(nb.pages()[0]!.size);
+    expect(nb.duplicatePage('missing')).toBeNull();
+    expect(copy).toBe('copy');
+  });
+
+  it('copies page content with new ids, same order, lines and line text, but no comments', () => {
+    const src = newPage();
+    src.addItem(stroke('a', 50, 100, 60, 120));
+    src.addItem(stroke('b', 62, 100, 70, 120));
+    src.addItem(stroke('c', 50, 300, 60, 320));
+    src.setLineText('a', 'x + 1', 'user');
+    src.addComment({ lineKey: 'a', author: { kind: 'agent', name: 'Claude' }, text: 'ok' });
+    const dst = newPage();
+    let n = 0;
+    dst.copyFrom(src, () => `n${n++}`);
+    expect(dst.items().map((i) => i.id)).toEqual(['n0', 'n1', 'n2']);
+    expect(dst.items().map((i) => (i as StrokeItem).points.length)).toEqual(src.items().map((i) => (i as StrokeItem).points.length));
+    expect(dst.lines().map((l) => [l.key, l.itemIds, l.text ?? null])).toEqual([['n0', ['n0', 'n1'], 'x + 1'], ['n2', ['n2'], null]]);
+    expect(dst.comments()).toEqual([]);
+    // Editing the copy leaves the original alone.
+    dst.removeItems(['n0']);
+    expect(src.items()).toHaveLength(3);
+  });
+
+  it('undoes page-list changes one step at a time, locally only', () => {
+    const nb = newNotebook();
+    const um = createNotebookUndoManager(nb);
+    const a = nb.pages()[0]!.id;
+    const b = nb.addPage();
+    nb.duplicatePage(a, 'copy');
+    nb.movePage(b, 0);
+    nb.removePage(a);
+    expect(nb.pages().map((p) => p.id)).toEqual([b, 'copy']);
+    um.undo();
+    expect(nb.pages().map((p) => p.id)).toEqual([b, a, 'copy']);
+    um.undo();
+    expect(nb.pages().map((p) => p.id)).toEqual([a, 'copy', b]);
+    um.undo();
+    expect(nb.pages().map((p) => p.id)).toEqual([a, b]);
+    um.redo();
+    expect(nb.pages().map((p) => p.id)).toEqual([a, 'copy', b]);
   });
 });

@@ -5,7 +5,7 @@ export { Notebook, createNotebookDoc, type NotebookInit } from './model/notebook
 export { Page } from './model/page';
 export { Library, DEFAULT_SWATCHES, MAX_SWATCHES, type Folder, type LibraryEntry, type SwatchTool } from './model/library';
 export { normalizeColor, splitAlpha, withAlpha, inkPaint } from './geometry/color';
-export { createUndoManager } from './model/undo';
+export { createUndoManager, createNotebookUndoManager } from './model/undo';
 export {
   strokeOutline,
   strokeSvgPath,
