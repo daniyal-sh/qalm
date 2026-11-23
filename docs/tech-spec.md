@@ -183,7 +183,9 @@ background at the nearest width bucket (1×, 2× or 4× the base width). The ove
 **Palm rejection** happens inside each overlay, in **millimetres** converted with the screen's density (Android `xdpi`, iOS points ≈ 0.19 mm on iPad,
 web CSS px = 0.2646 mm):
 1. Pen input always draws. With `drawWith: 'pen'`, touches never draw: they're passed through to scroll and zoom.
-2. Touches whose contact major axis is larger than the threshold are rejected: relaxed 9 mm, standard 7 mm, strict 5 mm.
+2. Touches whose contact major axis is larger than the threshold are rejected: relaxed 9 mm, standard 7 mm, strict 5 mm. The major axis is
+   the full contact length on every platform: Android `getTouchMajor`, iOS `2 × majorRadius` (not reduced by `majorRadiusTolerance`),
+   web the larger of the pointer's `width` / `height`.
 3. Touches within 600 ms of pen activity, or below or beside the pen on the `hand` side, are rejected.
 4. An OS cancel (`ACTION_CANCEL` / `FLAG_CANCELED` / `touchesCancelled`) retracts the in-progress stroke.
 
@@ -200,14 +202,21 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
   `GET /sync/{docId}?ticket=…` upgrades. Access tokens never appear in URLs.
 - **R2** `ASSETS`: `PUT /assets/{sha256}` and `GET /assets/{sha256}` (Bearer auth; content-addressed).
 - **App API** (Bearer, CORS `*` for the web/Electron build): `GET /ai/grants`, `PATCH /ai/grants/{id} {canComment?, canTranscribe?, notebookIds?, folderIds?}`,
-  `DELETE /ai/grants/{id}`, `GET /ai/requests`, `POST /ai/requests/{id}/deny`, `GET /ai/activity?limit=`.
-- **D1** tables: `users`, `sessions`, `magic_links`, `notebooks(id, owner_id, title, ai_access)`, `sync_tickets`, OAuth tables, and
+  `DELETE /ai/grants/{id}`, `GET /ai/requests`, `POST /ai/requests/{id}/deny`, `GET /ai/activity?limit=`, and `DELETE /notebooks/{id}` (owner only,
+  "Delete forever": sets `notebooks.deleted_at`, refuses sync tickets from then on, and purges the notebook's `nb:`/`pg:` room storage, best effort).
+  Moving to the trash is only `deletedAt` in the library doc, so restoring from the trash needs no server call.
+- **D1** tables: `users`, `sessions`, `magic_links`, `notebooks(id, owner_id, title, ai_access, deleted_at)`, `sync_tickets`, OAuth tables, and
   `grants(client_id, user_id, notebook_ids|folder_ids, can_comment, can_transcribe, expires_at)`.
 - **Auth:** `POST /auth/email/start`, `GET /auth/email/verify`, `POST /auth/apple`, `POST /auth/google`. These return `{accessToken (JWT, 1h), refreshToken}`,
   and `POST /auth/refresh` renews them. In dev, emails are logged to the console.
 - **MCP:** Streamable HTTP at `/mcp` with OAuth 2.1 and dynamic client registration (`@cloudflare/workers-oauth-provider`). The consent page is
   served by the worker (mockup screen 5). There are 4 tools: `wait`, `read`, `transcribe` and `comment`, as in `qink-live.md`. Images are returned as MCP image
   content: a PNG made from `renderLinesStripSvg` with `@resvg/resvg-wasm`.
+- **What an agent sees:** a notebook is visible only if it is (a) a live library entry (not trashed, not deleted forever), (b) inside the grant
+  (picked directly or in a granted folder), and (c) has AI access on. (c) is read live from the notebook's index doc in its `DocRoom` on every tool
+  call and on every pass of the `wait` update stream, so switching it off takes effect at once (a pending `wait` ends with an error). A notebook
+  whose meta is unknown counts as off. `notebooks.ai_access` in D1 is a mirror kept by the `DocRoom` on every client update of the index doc; the
+  consent page uses it to mark notebooks with AI access off (they can be granted but stay hidden until it's turned on).
 - **Q-ink labels and snapshots** live in the notebook `DocRoom`'s storage (`QinkLabels`, plus a `QinkSnapshot` per agent session).
   Only that object assigns labels, so they're stable and unique.
 - **Wake rules:** `wait(s)` resolves when (pen idle ≥ 6 s **and** changes since the last delivery **and** ≥ 20 s since the last wake) **or** a new `asks` entry arrives.
@@ -222,6 +231,10 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
   - Settings: Account, Pen and palm rejection, and AI access (connected agents, pending requests, activity log)
   - Sign-in
 - **Sync:** the client uses the `y-websocket` provider (with tickets) for each loaded doc, with IndexedDB persistence on web and file persistence on native.
+  Native snapshot files are replaced crash-safely: write `.tmp`, rename the old file to `.bak`, rename `.tmp` into place, delete `.bak`; reads fall
+  back to a complete `.tmp`, then `.bak`.
+- **`.qalm` backups** restore as a **new** notebook (new notebook and page ids, title + " (restored)"), copying pages, items, lines, comments, assets
+  and meta. A backup never merges into the original, so it works under any account and can't resurrect or collide with the original's history.
 - **Recognition:** debounced on-device recognition runs 1 s after a line changes, then calls `setLineText(key, …, 'device', score)`.
 
 ## 6. Desktop (`apps/desktop`, Electron)

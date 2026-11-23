@@ -329,9 +329,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   }
 
   private func contactAxisMm(_ touch: UITouch) -> Double {
-    // Use the lower bound of the reported radius; iOS quantizes majorRadius coarsely.
-    let r = max(0, Double(touch.majorRadius - touch.majorRadiusTolerance))
-    return 2 * r * QalmInkView.mmPerPoint
+    // Full major axis (2 × majorRadius), as on Android and web, so the spec's mm thresholds mean the same everywhere.
+    return 2 * max(0, Double(touch.majorRadius)) * QalmInkView.mmPerPoint
   }
 
   private func palmSizeExceeded(_ touch: UITouch) -> Bool {
