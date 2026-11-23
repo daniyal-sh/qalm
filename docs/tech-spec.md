@@ -50,6 +50,14 @@ pg:{notebookId}:{pageId}   page doc
 lib:{userId}               library doc: folders + notebook entries {id,title,cover,folderId,updatedAt,aiAccess,favorite,deletedAt}
   swatches: Y.Map<'pen'|'highlighter', Y.Array<string>>   saved colours, in order; a missing key = the brand palette
 ```
+
+**Changing paper later:** a page's `paper`/`paperColor` are set in place on its `pages` map (`Notebook.setPagePaper`,
+one transaction, so one undo step on the notebook stack, even for "Apply to all pages"). PDF pages keep their PDF and
+are skipped: their pattern and colour don't apply. Ink isn't rewritten. Instead, renderers draw items through
+`itemsOnPaper`, so the default ink follows the paper: graphite (#27272a) draws as night ink (#e4e4e7) on night paper,
+and night ink draws as graphite on white and cream. Other colours draw as stored. The cover (colour, title) is `meta`
+plus the library entry (`updateNotebookMeta`), like a rename. It isn't on the undo stack.
+
 **Saved colours (swatches).** One list per tool; text and shapes use the pen list. Pen colours are `#rrggbb`. A highlighter
 colour is `#rrggbb` (drawn at the default 0.45 alpha, like every highlight made before custom colours) or `#rrggbbaa`,
 which carries its own opacity. Colours are normalised (lowercase, `#rgb` expanded, `ff` alpha dropped, alpha dropped on

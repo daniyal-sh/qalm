@@ -209,7 +209,7 @@ export function Menu({
         position: 'absolute',
         top: Math.min(anchor.y, win.height - 60 * items.length - 24),
         ...(anchor.align === 'right'
-          ? { right: Math.max(8, win.width - anchor.x) }
+          ? { right: Math.min(Math.max(8, win.width - anchor.x), Math.max(8, win.width - width - 8)) } // never past the left edge
           : { left: Math.min(Math.max(8, anchor.x), win.width - width - 8) }),
       }
     : { alignSelf: 'center', marginTop: win.height * 0.25 };
