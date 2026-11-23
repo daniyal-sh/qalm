@@ -1,10 +1,12 @@
-// Native: one snapshot file per doc in the documents directory.
+// Native: one snapshot file per doc in the documents directory, replaced crash-safely (persistence.atomic.ts).
 import { Directory, File, Paths } from 'expo-file-system';
 import type * as Y from 'yjs';
 
+import { readSnapshot, removeSnapshot, snapshotNames, writeSnapshot, type SnapFs } from './persistence.atomic';
 import { SnapshotPersistence, type BytesStorage, type DocPersistence } from './snapshot';
 
-const fileName = (docId: string) => `${encodeURIComponent(docId).replace(/%/g, '_')}.ydoc`;
+const EXT = '.ydoc';
+const fileName = (docId: string) => `${encodeURIComponent(docId).replace(/%/g, '_')}${EXT}`;
 const docIdOf = (name: string) => decodeURIComponent(name.replace(/\.ydoc$/, '').replace(/_([0-9A-F]{2})/g, '%$1'));
 
 function dir(): Directory {
@@ -13,29 +15,28 @@ function dir(): Directory {
   return d;
 }
 
+const fs: SnapFs = {
+  exists: (name) => new File(dir(), name).exists,
+  read: (name) => new File(dir(), name).bytes(),
+  write(name, bytes) {
+    const f = new File(dir(), name);
+    f.create({ overwrite: true });
+    f.write(bytes);
+  },
+  move: (from, to) => new File(dir(), from).move(new File(dir(), to)),
+  remove: (name) => new File(dir(), name).delete(),
+};
+
 export const fileStorage: BytesStorage = {
-  async read(docId) {
-    const f = new File(dir(), fileName(docId));
-    return f.exists ? await f.bytes() : null;
-  },
-  async write(docId, bytes) {
-    const tmp = new File(dir(), `${fileName(docId)}.tmp`);
-    if (tmp.exists) tmp.delete();
-    tmp.create();
-    tmp.write(bytes);
-    const target = new File(dir(), fileName(docId));
-    if (target.exists) target.delete();
-    tmp.move(target);
-  },
-  async remove(docId) {
-    const f = new File(dir(), fileName(docId));
-    if (f.exists) f.delete();
-  },
+  read: async (docId) => readSnapshot(fs, fileName(docId)),
+  write: async (docId, bytes) => writeSnapshot(fs, fileName(docId), bytes),
+  remove: async (docId) => removeSnapshot(fs, fileName(docId)),
   async list() {
-    return dir()
+    const names = dir()
       .list()
-      .filter((e): e is File => e instanceof File && e.name.endsWith('.ydoc'))
-      .map((f) => docIdOf(f.name));
+      .filter((e): e is File => e instanceof File)
+      .map((f) => f.name);
+    return snapshotNames(names, EXT).map(docIdOf);
   },
 };
 
