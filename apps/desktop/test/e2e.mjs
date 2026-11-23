@@ -1,6 +1,13 @@
 // Smoke test of the packaged app (release/win-unpacked, or QALM_EXE): library renders, PDF import through the
 // native open dialog (stubbed in main), drawing with the mouse, reload on a deep route (SPA fallback), PDF export
 // through the native save dialog (stubbed), a qalm:// link handed to a second instance, and no console errors.
+//
+// A build with a server URL (EXPO_PUBLIC_QALM_SERVER_URL) opens on the sign-in screen with a fresh profile:
+//   QALM_E2E_SIGNIN=skip  (default) "Continue without an account"
+//   QALM_E2E_SIGNIN=code  sign in with the 6-digit code from the email
+//   QALM_E2E_SIGNIN=link  sign in by opening the email's qalm:// link (a second instance hands it over)
+// code and link read the email from the server's console: QALM_E2E_SERVER_LOG=<file with `wrangler dev` output>
+// (a dev server without an email provider logs every email). QALM_E2E_EMAIL picks the address.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -33,6 +40,22 @@ const { PDFDocument, StandardFonts } = require('pdf-lib');
 }
 
 const log = (...a) => console.log('•', ...a);
+const signInMode = process.env.QALM_E2E_SIGNIN ?? 'skip';
+if (!['skip', 'code', 'link'].includes(signInMode)) throw new Error(`QALM_E2E_SIGNIN must be skip, code or link (got ${signInMode})`);
+const serverLog = process.env.QALM_E2E_SERVER_LOG;
+if (signInMode !== 'skip' && !(serverLog && existsSync(serverLog))) throw new Error('QALM_E2E_SIGNIN=code|link needs QALM_E2E_SERVER_LOG');
+const email = process.env.QALM_E2E_EMAIL ?? `e2e-${Date.now().toString(36)}@example.com`;
+
+/** The newest dev email to `to` in the server log after `from` characters: its app link and 6-digit code. */
+function emailFromLog(to, from) {
+  const text = readFileSync(serverLog, 'utf8').slice(from);
+  const at = text.lastIndexOf(`[email] to=${to} `);
+  if (at < 0) return null;
+  const body = text.slice(at);
+  const link = /(qalm:\/\/auth\/email\/verify\?token=\S+)/.exec(body)?.[1] ?? null;
+  const code = /enter this code in qalm: (\d{6})/.exec(body)?.[1] ?? null;
+  return link && code ? { link, code } : null;
+}
 // Hosts that are themselves Electron apps may leak ELECTRON_RUN_AS_NODE, which turns qalm.exe into plain Node.
 const env = { ...process.env, QALM_USER_DATA: userData };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -45,9 +68,45 @@ try {
   win.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   win.on('requestfailed', (r) => errors.push(`requestfailed: ${r.url()} ${r.failure()?.errorText}`));
 
-  // 1. Library
-  await win.getByText('All notebooks').first().waitFor({ timeout: 60_000 });
+  // 1. Library, after the sign-in screen when the build has a server.
+  const library = win.getByText('All notebooks').first();
+  const skip = win.getByText('Continue without an account').first();
+  await library.or(skip).waitFor({ timeout: 60_000 });
+  if (await skip.isVisible()) {
+    log('sign-in screen at', win.url());
+    if (signInMode === 'skip') {
+      await skip.click();
+      log('continued without an account');
+    } else {
+      const logStart = readFileSync(serverLog, 'utf8').length;
+      await win.getByLabel('Email').first().fill(email);
+      await win.getByText('Email me a sign-in link').first().click();
+      await win.getByText(`We sent a sign-in link and code to ${email}`).first().waitFor({ timeout: 20_000 });
+      let mail = null;
+      for (let i = 0; i < 40 && !mail; i++) {
+        mail = emailFromLog(email, logStart);
+        if (!mail) await win.waitForTimeout(250);
+      }
+      if (!mail) throw new Error(`no sign-in email to ${email} in ${serverLog}`);
+      if (signInMode === 'code') {
+        await win.getByLabel('Code or link from the email').first().fill(mail.code);
+        await win.getByRole('button', { name: 'Sign in', exact: true }).first().click();
+      } else {
+        const opener = spawn(exe, [mail.link], { env, stdio: 'ignore' });
+        await new Promise((r) => opener.on('exit', r));
+      }
+      log(`signing in as ${email} with the ${signInMode} from the email`);
+    }
+  } else if (signInMode !== 'skip') {
+    throw new Error('QALM_E2E_SIGNIN is set, but this build has no sign-in screen (no server URL)');
+  }
+  await library.waitFor({ timeout: 60_000 });
   log('library rendered at', win.url());
+  if (signInMode !== 'skip') {
+    const signedIn = await win.evaluate(() => !!localStorage.getItem('qalm:tokens'));
+    if (!signedIn) throw new Error('the library opened, but no session was stored');
+    log('session stored');
+  }
 
   // 2. Bridge and isolation
   const bridge = await win.evaluate(() => ({
@@ -102,10 +161,15 @@ try {
   await win.getByLabel('Back to library').first().click();
   await win.getByLabel(/^More for /).first().click();
   await win.getByText('Export PDF').first().click();
-  for (let i = 0; i < 60 && !existsSync(pdfOut); i++) await win.waitForTimeout(500);
+  // The file can appear before all its bytes are written: wait for a whole PDF (header and trailer).
+  const whole = () => {
+    if (!existsSync(pdfOut)) return false;
+    const b = readFileSync(pdfOut);
+    return b.subarray(0, 5).toString('latin1') === '%PDF-' && b.subarray(-32).toString('latin1').includes('%%EOF');
+  };
+  for (let i = 0; i < 60 && !whole(); i++) await win.waitForTimeout(500);
   if (!existsSync(pdfOut)) throw new Error('export wrote nothing');
-  const head = readFileSync(pdfOut).subarray(0, 5).toString('latin1');
-  if (head !== '%PDF-') throw new Error(`export is not a PDF (${head})`);
+  if (!whole()) throw new Error(`export is not a whole PDF (starts ${JSON.stringify(readFileSync(pdfOut).subarray(0, 5).toString('latin1'))})`);
   log(`exported ${readFileSync(pdfOut).length} bytes of PDF through saveFile`);
 
   // 7. A qalm:// link opened while running reaches the window (second instance → IPC → router).

@@ -244,7 +244,7 @@ pnpm --filter @qalm/app export:web      # -> apps/app/dist
 
 # desktop (Windows)
 pnpm --filter @qalm/desktop build       # web export + icons + electron-builder --dir -> apps/desktop/release/win-unpacked/qalm.exe
-pnpm --filter @qalm/desktop e2e
+pnpm --filter @qalm/desktop e2e         # a build with a server URL: QALM_E2E_SIGNIN=skip (default), or code/link + QALM_E2E_SERVER_LOG=<wrangler dev output>
 
 # Android example for the ink module
 cd modules/qalm-ink/example/android && ./gradlew assembleDebug --max-workers=1
