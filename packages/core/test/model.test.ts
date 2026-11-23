@@ -85,129 +85,13 @@ describe('Library', () => {
   });
 });
 
-describe('line assignment', () => {
-  it('groups strokes on the same row and keys a new line by its first stroke', () => {
-    const page = newPage();
-    page.addItem(stroke('a', 50, 100, 60, 120));
-    page.addItem(stroke('b', 65, 102, 80, 121)); // gap 5 <= 1.5 * 20
-    page.addItem(stroke('c', 200, 100, 210, 120)); // gap 120: new line
-    page.addItem(stroke('d', 50, 150, 70, 170)); // next row
-    const lines = page.lines();
-    expect(lines.map((l) => [l.key, l.kind, l.itemIds])).toEqual([
-      ['a', 'line', ['a', 'b']],
-      ['c', 'line', ['c']],
-      ['d', 'line', ['d']],
-    ]);
-    expect(lines[0]!.bbox).toEqual([50, 100, 80, 121]);
-  });
-
-  it('requires 50% vertical overlap of the smaller height', () => {
-    const page = newPage();
-    page.addItem(stroke('a', 50, 100, 60, 120));
-    page.addItem(stroke('b', 62, 112, 70, 132)); // overlap 8 < 10
-    page.addItem(stroke('c', 40, 109, 48, 129)); // overlap with a's line (100..120): 11 >= 10, gap 2
-    expect(page.lines().map((l) => l.itemIds)).toEqual([['a', 'c'], ['b']]);
-  });
-
-  it('makes tall strokes and shapes drawings, merging overlapping drawings (earliest key wins)', () => {
-    const page = newPage();
-    page.addItem(stroke('a', 50, 100, 60, 120));
-    page.addItem(stroke('b', 50, 150, 60, 170));
-    page.addItem(stroke('t1', 300, 300, 400, 400)); // 100 > 2.5 * 20
-    const shape: ShapeItem = { id: 'sh', type: 'shape', kind: 'rect', pts: [[500, 300], [550, 300], [550, 350], [500, 350]], color: '#000', width: 2 };
-    page.addItem(shape);
-    expect(page.lines().filter((l) => l.kind === 'drawing').map((l) => l.key)).toEqual(['t1', 'sh']);
-    page.addItem(stroke('t2', 380, 290, 520, 420)); // overlaps both drawings
-    const drawings = page.lines().filter((l) => l.kind === 'drawing');
-    expect(drawings).toHaveLength(1);
-    expect(drawings[0]!.key).toBe('t1');
-    expect(drawings[0]!.itemIds).toEqual(['t1', 'sh', 't2']);
-  });
-
-  it('deletes empty lines and clears text on change unless the user wrote it', () => {
-    const page = newPage();
-    page.addItem(stroke('a', 50, 100, 60, 120));
-    page.addItem(stroke('x', 50, 200, 60, 220));
-    page.setLineText('a', 'hi', 'device', 0.8);
-    page.setLineText('x', 'mine', 'user');
-    expect(page.lines()[0]).toMatchObject({ text: 'hi', textSrc: 'device', conf: 0.8 });
-    page.addItem(stroke('b', 62, 100, 70, 120));
-    page.addItem(stroke('y', 62, 200, 70, 220));
-    const [a, x] = page.lines();
-    expect(a!.text).toBeUndefined();
-    expect(x).toMatchObject({ text: 'mine', textSrc: 'user' });
-    page.removeItems(['a', 'b']);
-    expect(page.lines().map((l) => l.key)).toEqual(['x']);
-    expect(page.doc.getMap('lines').has('a')).toBe(false);
-  });
-
-  it('keeps trusted text from device guesses', () => {
-    const page = newPage();
-    page.addItem(stroke('a', 50, 100, 60, 120));
-    page.setLineText('a', 'x^2', 'agent');
-    page.setLineText('a', 'x2', 'device');
-    expect(page.lines()[0]).toMatchObject({ text: 'x^2', textSrc: 'agent' });
-  });
-
-  it('keeps the key when a whole line is moved, and splits off moved parts', () => {
-    const page = newPage();
-    page.addItem(stroke('a', 50, 100, 60, 120));
-    page.addItem(stroke('b', 62, 100, 70, 120));
-    page.addItem(stroke('c', 72, 100, 80, 120));
-    page.addItem(stroke('z', 50, 300, 60, 320));
-    page.doc.transact(() => {
-      for (const id of ['b', 'a', 'c']) {
-        const it = page.item(id)!;
-        if (it.type !== 'stroke') continue;
-        page.updateItem(id, { bbox: [it.bbox[0], it.bbox[1] + 400, it.bbox[2], it.bbox[3] + 400], points: it.points.map((q) => ({ ...q, y: q.y + 400 })) });
-      }
-    }, LOCAL_ORIGIN);
-    expect(page.lines().map((l) => [l.key, l.itemIds])).toEqual([
-      ['a', ['a', 'b', 'c']],
-      ['z', ['z']],
-    ]);
-    page.updateItem('c', { bbox: [72, 300, 80, 320] }); // onto z's row
-    expect(page.lines().map((l) => [l.key, l.itemIds])).toEqual([
-      ['a', ['a', 'b']],
-      ['z', ['c', 'z']],
-    ]);
-  });
-
-  it('never collides keys when two offline devices add lines, then merge', () => {
-    const a = new Y.Doc();
-    const pa = new Page(a);
-    pa.addItem(stroke('s0', 50, 100, 60, 120));
-    const b = new Y.Doc();
-    sync(a, b);
-    const pb = new Page(b);
-    // Offline: both write new lines at the same place, and both extend the shared line.
-    pa.addItem(stroke('a1', 50, 150, 60, 170));
-    pa.addItem(stroke('a2', 62, 100, 70, 120));
-    pb.addItem(stroke('b1', 52, 152, 62, 172));
-    pb.addItem(stroke('b2', 62, 101, 72, 121));
-    sync(a, b);
-    for (const p of [pa, pb]) {
-      const lines = p.lines();
-      const keys = lines.map((l) => l.key);
-      expect(new Set(keys).size).toBe(keys.length);
-      expect(lines.map((l) => [l.key, [...l.itemIds].sort()]).sort()).toEqual([
-        ['a1', ['a1']],
-        ['b1', ['b1']],
-        ['s0', ['a2', 'b2', 's0']],
-      ]);
-      expect(lines.flatMap((l) => l.itemIds).sort()).toEqual(['a1', 'a2', 'b1', 'b2', 's0']);
-    }
-    expect(pa.lines()).toEqual(pb.lines());
-  });
-});
-
 describe('comments', () => {
   it('adds, replies and resolves', () => {
     const page = newPage();
-    const id = page.addComment({ lineKey: 'a', author: { kind: 'agent', name: 'Claude' }, text: 'check L5' });
+    const id = page.addComment({ anchorIds: ['a'], anchor: [0, 0, 10, 10], author: { kind: 'agent', name: 'Claude' }, text: 'check R5' });
     page.replyToComment(id, { kind: 'user', name: 'Sam' }, 'thanks');
     page.resolveComment(id);
-    expect(page.comments()).toMatchObject([{ id, lineKey: 'a', resolved: true, replies: [{ text: 'thanks' }] }]);
+    expect(page.comments()).toMatchObject([{ id, anchorIds: ['a'], anchor: [0, 0, 10, 10], resolved: true, replies: [{ text: 'thanks' }] }]);
   });
 });
 
@@ -231,9 +115,8 @@ describe('undo', () => {
     undo.undo();
     expect(page.items().map((i) => i.id)).toEqual(['theirs']);
     expect(undo.canUndo()).toBe(false);
-    expect(page.lines().map((l) => [l.key, l.itemIds])).toEqual([['mine', ['theirs']]]);
     undo.redo();
-    expect(page.lines().map((l) => [l.key, l.itemIds])).toEqual([['mine', ['mine', 'theirs']]]);
+    expect(page.items().map((i) => i.id)).toEqual(['mine', 'theirs']);
   });
 });
 
@@ -331,19 +214,19 @@ describe('page navigator model', () => {
     expect(copy).toBe('copy');
   });
 
-  it('copies page content with new ids, same order, lines and line text, but no comments', () => {
+  it('copies page content with new ids, same order and readings, but no comments', () => {
     const src = newPage();
     src.addItem(stroke('a', 50, 100, 60, 120));
     src.addItem(stroke('b', 62, 100, 70, 120));
     src.addItem(stroke('c', 50, 300, 60, 320));
-    src.setLineText('a', 'x + 1', 'user');
-    src.addComment({ lineKey: 'a', author: { kind: 'agent', name: 'Claude' }, text: 'ok' });
+    src.setReading(['a', 'b'], 'x + 1', 'user');
+    src.addComment({ anchorIds: ['a'], author: { kind: 'agent', name: 'Claude' }, text: 'ok' });
     const dst = newPage();
     let n = 0;
     dst.copyFrom(src, () => `n${n++}`);
     expect(dst.items().map((i) => i.id)).toEqual(['n0', 'n1', 'n2']);
     expect(dst.items().map((i) => (i as StrokeItem).points.length)).toEqual(src.items().map((i) => (i as StrokeItem).points.length));
-    expect(dst.lines().map((l) => [l.key, l.itemIds, l.text ?? null])).toEqual([['n0', ['n0', 'n1'], 'x + 1'], ['n2', ['n2'], null]]);
+    expect(dst.readings().map((r) => [r.ids, r.text, r.src])).toEqual([[['n0', 'n1'], 'x + 1', 'user']]);
     expect(dst.comments()).toEqual([]);
     // Editing the copy leaves the original alone.
     dst.removeItems(['n0']);

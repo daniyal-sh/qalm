@@ -20,6 +20,7 @@ import {
   type ImageItem,
   type Item,
   type ShapeItem,
+  type StrokeItem,
   type TextItem,
 } from '../src';
 import { newPage, stroke } from './helpers';
@@ -161,7 +162,7 @@ describe('tap and box select', () => {
 });
 
 describe('editing a page', () => {
-  it('moves, rotates and reorders as single undo steps, keeping line assignment right', () => {
+  it('moves, rotates and reorders as single undo steps', () => {
     const page = newPage();
     page.addItem(stroke('a', 50, 100, 60, 120));
     page.addItem(stroke('b', 62, 100, 70, 120));
@@ -172,9 +173,7 @@ describe('editing a page', () => {
       const b = page.item('b')!;
       page.updateItem('b', transformPatch(b, { s: 1, r: 0.1, ox: 66, oy: 110, dx: 0, dy: 200 }));
     }, LOCAL_ORIGIN);
-    expect(page.lines().map((l) => l.key)).toEqual(['a', 'z']);
-    expect(page.lines()[0]!.itemIds).toEqual(['a']);
-    expect(new Set(page.lines().find((l) => l.key === 'z')!.itemIds)).toEqual(new Set(['b', 'z']));
+    expect((page.item('b') as StrokeItem).bbox[1]).toBeGreaterThan(290);
     page.reorder(['a'], 'front');
     expect(page.items().map((i) => i.id)).toEqual(['b', 'z', 'a']);
     page.reorder(['a', 'z'], 'back');
@@ -183,19 +182,6 @@ describe('editing a page', () => {
     um.undo();
     expect(page.items().map((i) => i.id)).toEqual(['a', 'b', 'z']);
     um.undo();
-    expect(page.lines().map((l) => [l.key, l.itemIds])).toEqual([
-      ['a', ['a', 'b']],
-      ['z', ['z']],
-    ]);
-  });
-
-  it('a moved selection thread stays on its line key when its whole line moves', () => {
-    const page = newPage();
-    page.addItem(stroke('a', 50, 100, 60, 120));
-    page.addItem(stroke('b', 62, 100, 70, 120));
-    page.doc.transact(() => {
-      for (const id of ['a', 'b']) page.updateItem(id, transformPatch(page.item(id)!, { s: 1.5, r: 0, ox: 50, oy: 100, dx: 0, dy: 300 }));
-    }, LOCAL_ORIGIN);
-    expect(page.lines().map((l) => [l.key, l.itemIds])).toEqual([['a', ['a', 'b']]]);
+    expect((page.item('b') as StrokeItem).bbox).toEqual([62, 100, 70, 120]);
   });
 });

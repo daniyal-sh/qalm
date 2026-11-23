@@ -146,7 +146,7 @@ describe('.qalm', () => {
     for (const p of nb.pages()) {
       const page = new Page(new Y.Doc());
       page.addItem(stroke(`s-${p.id}`, 50, 100, 150, 120));
-      page.setLineText(`s-${p.id}`, 'hi', 'user');
+      page.setReading([`s-${p.id}`], 'hi', 'user');
       pages.set(p.id, page.doc);
     }
     const bytes = packQalm({ index: nb.doc, pages, assets: new Map([['png1', PNG_1PX]]) });
@@ -157,7 +157,7 @@ describe('.qalm', () => {
     expect([...back.pages.keys()].sort()).toEqual([...pages.keys()].sort());
     const p2 = new Page(back.pages.get(id2)!);
     expect(p2.items()).toEqual(new Page(pages.get(id2)!).items());
-    expect(p2.lines()).toMatchObject([{ key: `s-${id2}`, text: 'hi', textSrc: 'user' }]);
+    expect(p2.readings()).toMatchObject([{ ids: [`s-${id2}`], text: 'hi', src: 'user' }]);
     expect(back.assets.get('png1')).toEqual(PNG_1PX);
     expect(() => unpackQalm(packQalm({ index: nb.doc, pages: new Map(), assets: new Map() }).slice(0, 10))).toThrow();
   });

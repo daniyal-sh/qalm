@@ -40,8 +40,8 @@ describe('page with 5000 strokes', () => {
     page.items();
     page.removeItems([s.id]);
   });
-  bench('page.lines()', () => {
-    page.lines();
+  bench('page.readings()', () => {
+    page.readings();
   });
   bench('strokeOutline x 5000', () => {
     for (const it of items) strokeOutline(it as StrokeItem);
@@ -70,6 +70,13 @@ function page3000(): Page {
   return new Page(d);
 }
 
+/** The same page with an agent's reading of every row (moves then check which readings go stale). */
+function page3000read(): Page {
+  const d = new Y.Doc();
+  fillPage(d, 3000, A4, 5, 32, true);
+  return new Page(d);
+}
+
 describe('selection commit (3000 strokes; page setup not timed)', () => {
   bench('move 3000 strokes', (pg) => {
     const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 5, dy: 3 };
@@ -79,7 +86,7 @@ describe('selection commit (3000 strokes; page setup not timed)', () => {
     const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 5, dy: 3 };
     for (const it of pg.items()) transformPatch(it, sim);
   }, page3000);
-  bench('  floor: same Yjs writes, no line assignment', (pg) => {
+  bench('  floor: same Yjs writes, no Page bookkeeping', (pg) => {
     const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 5, dy: 3 };
     const items = pg.doc.getMap<Y.Map<unknown>>('items');
     pg.doc.transact(() => {
@@ -92,10 +99,14 @@ describe('selection commit (3000 strokes; page setup not timed)', () => {
       }
     }, LOCAL_ORIGIN);
   }, page3000);
-  bench('move 3000 strokes far (every line splits)', (pg) => {
+  bench('move 3000 strokes far', (pg) => {
     const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 0, dy: 300 };
     updateAll(pg, (it) => transformPatch(it, sim));
   }, page3000);
+  bench('move 3000 strokes with ~100 readings', (pg) => {
+    const sim = { s: 1, r: 0, ox: 0, oy: 0, dx: 0, dy: 300 };
+    updateAll(pg, (it) => transformPatch(it, sim));
+  }, page3000read);
   bench('rotate + scale 3000 strokes', (pg) => {
     const sim = { s: 0.8, r: 0.2, ox: 300, oy: 400, dx: 0, dy: 0 };
     updateAll(pg, (it) => transformPatch(it, sim));

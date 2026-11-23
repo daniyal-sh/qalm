@@ -142,8 +142,8 @@ ${d.redirectIsLoopback ? '<div class="warn">This sends access to an app on your 
 <input type="hidden" name="handle" value="${e(handle)}">
 <input type="hidden" name="rid" value="${e(rid)}">
 <div class="list">${folderRows}${nbRows || '<p class="sub">You have no synced notebooks yet.</p>'}</div>
-<label class="tgl"><div>Leave comments<small>Shown as pins. Never changes ink</small></div><span class="sw"><input type="checkbox" name="comment" value="1" checked><span></span></span></label>
-<label class="tgl"><div>Save readings<small>Can store its reading of a line. You can edit it</small></div><span class="sw"><input type="checkbox" name="transcribe" value="1" checked><span></span></span></label>
+<label class="tgl"><div>Leave comments<small>Pinned next to your ink. Never changes ink</small></div><span class="sw"><input type="checkbox" name="comment" value="1" checked><span></span></span></label>
+<label class="tgl"><div>Save readings<small>Can store what it reads in your handwriting. You can edit it</small></div><span class="sw"><input type="checkbox" name="transcribe" value="1" checked><span></span></span></label>
 <div class="info"><div>Access expires<small>After 30 days</small></div></div>
 <div class="foot"><button type="submit" name="decision" value="deny" formnovalidate>Deny</button><button class="p" type="submit" name="decision" value="approve" id="allow" disabled>Allow access</button></div>
 </form>

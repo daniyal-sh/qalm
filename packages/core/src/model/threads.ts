@@ -1,4 +1,4 @@
-import type { Author, Comment, Line } from '../types';
+import type { Author, Comment, Reading } from '../types';
 
 /**
  * A light, notebook-wide summary of one comment thread, mirrored into the notebook's index doc (`threads` map) so the
@@ -8,10 +8,9 @@ import type { Author, Comment, Line } from '../types';
 export interface ThreadSummary {
   id: string;
   pageId: string;
-  lineKey: string;
-  /** Started on a lasso selection. */
+  /** Anchored to ink or a box (not the whole page). */
   onSelection?: boolean;
-  /** The line's reading, when it has one. */
+  /** The reading of its strokes, when there is one. */
   quote?: string;
   /** Who started the thread. */
   author: Author;
@@ -37,13 +36,12 @@ export const THREADS_ORIGIN = 'qalm.threads';
 
 const cut = (s: string) => (s.length > SUMMARY_TEXT ? `${s.slice(0, SUMMARY_TEXT - 1)}…` : s);
 
-export function summarizeThread(pageId: string, c: Comment, lines: readonly Line[] = []): ThreadSummary {
+export function summarizeThread(pageId: string, c: Comment, readings: readonly Reading[] = []): ThreadSummary {
   const entries = [{ author: c.author, text: c.text, at: c.createdAt }, ...c.replies];
   const last = entries[entries.length - 1]!;
   const s: ThreadSummary = {
     id: c.id,
     pageId,
-    lineKey: c.lineKey,
     author: { kind: c.author.kind, name: c.author.name },
     text: cut(c.text),
     last: { author: { kind: last.author.kind, name: last.author.name }, text: cut(last.text), at: last.at },
@@ -53,15 +51,20 @@ export function summarizeThread(pageId: string, c: Comment, lines: readonly Line
     updatedAt: entries.reduce((m, e) => Math.max(m, e.at), 0),
   };
   if (c.anchor || c.anchorIds?.length) s.onSelection = true;
-  const quote = c.lineKey ? lines.find((l) => l.key === c.lineKey)?.text?.trim() : undefined;
+  const ids = new Set(c.anchorIds ?? []);
+  const quote = readings
+    .filter((r) => r.ids.some((id) => ids.has(id)))
+    .map((r) => r.text.trim())
+    .filter(Boolean)
+    .join(' / ');
   if (quote) s.quote = cut(quote);
   if (c.ask) s.ask = true;
   for (const e of entries) if (e.author.kind === 'agent' && (!s.lastAgent || e.at >= s.lastAgent.at)) s.lastAgent = { name: e.author.name, at: e.at };
   return s;
 }
 
-export function summarizeThreads(pageId: string, comments: readonly Comment[], lines: readonly Line[] = []): ThreadSummary[] {
-  return comments.map((c) => summarizeThread(pageId, c, lines));
+export function summarizeThreads(pageId: string, comments: readonly Comment[], readings: readonly Reading[] = []): ThreadSummary[] {
+  return comments.map((c) => summarizeThread(pageId, c, readings));
 }
 
 /**

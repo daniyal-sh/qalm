@@ -2,7 +2,8 @@ export * from './types';
 export { LOCAL_ORIGIN } from './origin';
 export { encodePoints, decodePoints } from './points';
 export { Notebook, createNotebookDoc, type NotebookInit } from './model/notebook';
-export { Page } from './model/page';
+export { Page, readingsOf, freshCover } from './model/page';
+export { migratePage, needsMigration, MIGRATION_ORIGIN } from './model/migrate';
 export { summarizeThread, summarizeThreads, threadNewer, agentEntriesAfter, THREADS_ORIGIN, SUMMARY_TEXT, type ThreadSummary } from './model/threads';
 export { Library, DEFAULT_SWATCHES, MAX_SWATCHES, type Folder, type LibraryEntry, type SwatchTool } from './model/library';
 export { normalizeColor, splitAlpha, withAlpha, inkPaint } from './geometry/color';
@@ -48,25 +49,51 @@ export {
 } from './geometry/transform';
 export { paperPattern, inkOnPaper, itemsOnPaper, swatchOfInk, DEFAULT_INK, NIGHT_INK, PAPER_BG, type PaperPattern } from './geometry/paper';
 export { renderPageSvg } from './render/svg';
-export { renderLinesStripSvg } from './render/strip';
+export { renderRegionsSvg, rowScale, UNIT_PX, MAX_ROW_AREA, MIN_UNIT_PX, type RegionRow } from './render/regions';
+export {
+  pageUnit,
+  clusterBoxes,
+  contextFor,
+  boxGap,
+  inkBoxes,
+  isInk,
+  gridScale,
+  gridSize,
+  toGrid,
+  fromGrid,
+  gridPlace,
+  boxRef,
+  CLUSTER_GAP,
+  NEAR,
+  ROW_GAP,
+  ROW_BAND,
+  MAX_CONTEXT,
+} from './geometry/regions';
 export { exportPdf, type ExportPdfOptions } from './export/pdf';
 export { packQalm, unpackQalm, type QalmBundle } from './export/qalm';
 export {
-  assignLabels,
   encodeQinkUpdate,
   encodeQinkRead,
   encodeQinkThread,
   cleanAsk,
-  resolveRef,
+  resolveTarget,
   resolveThread,
+  registerRegion,
   threadLabel,
   emptyThreads,
-  labelList,
-  type QinkLabels,
-  type QinkSnapshot,
+  emptyRegions,
+  inkInBox,
+  inkSig,
+  pageInk,
+  sigPolyline,
+  MAX_REGIONS,
+  type InkSeen,
+  type QinkRegion,
+  type QinkRegions,
+  type QinkTarget,
   type QinkImage,
   type QinkThreads,
   type QinkSeen,
   type QinkAsk,
 } from './qink';
-export { threadBox, anchorInkRemoved, anchorLines } from './anchor';
+export { threadBox, anchorInkRemoved } from './anchor';
