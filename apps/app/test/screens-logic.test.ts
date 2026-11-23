@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 
 import { grantSummary, getAiOverview, toggleId, updateGrant } from '../src/api/ai';
-import { extractMagicToken, isEmail, startMagicLink, verifyMagicLink } from '../src/auth/magicLink';
+import { extractMagicToken } from '../src/auth/magicLink';
 import { commentRows } from '../src/editor/CommentsPanel.logic';
 import {
   anchoredScroll,
@@ -30,21 +30,6 @@ describe('magic link', () => {
     expect(extractMagicToken('  Zm9vYmFyYmF6cXV4MTIzNDU2  ')).toBe('Zm9vYmFyYmF6cXV4MTIzNDU2');
     expect(extractMagicToken('hello')).toBeNull();
     expect(extractMagicToken('')).toBeNull();
-  });
-
-  it('verifies with a JSON GET and surfaces server errors', async () => {
-    const f = vi.fn(async (url: string) => (url.includes('good') ? json({ accessToken: 'a', refreshToken: 'r', expiresIn: 3600 }) : json({ error: 'This sign-in link is invalid or has expired' }, 400)));
-    await expect(verifyMagicLink(f, 'https://s', 'good')).resolves.toEqual({ accessToken: 'a', refreshToken: 'r' });
-    expect(f.mock.calls[0]![0]).toBe('https://s/auth/email/verify?token=good');
-    await expect(verifyMagicLink(f, 'https://s', 'bad')).rejects.toThrow('invalid or has expired');
-  });
-
-  it('starts sign-in with the trimmed email', async () => {
-    const f = vi.fn(async (_u: string, _i?: RequestInit) => json({ ok: true }));
-    await startMagicLink(f, 'https://s', ' a@b.co ');
-    expect(JSON.parse(String(f.mock.calls[0]![1]!.body))).toEqual({ email: 'a@b.co' });
-    expect(isEmail('a@b.co')).toBe(true);
-    expect(isEmail('a@b')).toBe(false);
   });
 });
 

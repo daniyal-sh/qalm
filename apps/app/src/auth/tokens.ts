@@ -69,6 +69,15 @@ export function decodeJwt(token: string): JwtClaims {
   }
 }
 
+/** Runs `fn` holding a lock shared by every tab of this origin. */
+export type RefreshLock = <T>(fn: () => Promise<T>) => Promise<T>;
+
+/** Web: `navigator.locks`, so two tabs never refresh at once. Elsewhere (or unsupported) no lock. */
+export const navigatorLock: RefreshLock = (fn) => {
+  const locks = (globalThis as { navigator?: { locks?: { request?: <T>(name: string, cb: () => Promise<T>) => Promise<T> } } }).navigator?.locks;
+  return locks?.request ? locks.request('qalm:token-refresh', fn) : fn();
+};
+
 /** Refresh when the access token has less than this left. */
 const REFRESH_MARGIN_MS = 60_000;
 
@@ -86,6 +95,7 @@ export class TokenManager {
     private readonly store: TokenStore,
     private readonly fetchFn: FetchFn = (i, init) => fetch(i, init),
     private readonly now: () => number = () => Date.now(),
+    private readonly lock: RefreshLock = navigatorLock,
   ) {}
 
   async load(): Promise<User | null> {
@@ -122,6 +132,33 @@ export class TokenManager {
     return this.setTokens(null);
   }
 
+  /** Best effort: ends the current session on the server (POST /auth/logout). Doesn't change local state. */
+  async revoke(timeoutMs = 4000): Promise<void> {
+    const t = this.tokens;
+    if (!t) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.fetchFn(`${this.baseUrl}/auth/logout`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${t.accessToken}` },
+          body: JSON.stringify({ refreshToken: t.refreshToken }),
+        }),
+        new Promise((r) => (timer = setTimeout(r, timeoutMs))),
+      ]);
+    } catch {
+      /* offline: the local sign-out still happens */
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Signs out: ends the server session (best effort), then clears the tokens. */
+  async logout(): Promise<void> {
+    await this.revoke();
+    await this.signOut();
+  }
+
   private expiresSoon(t: Tokens): boolean {
     const exp = decodeJwt(t.accessToken).exp;
     return typeof exp === 'number' && exp * 1000 - this.now() < REFRESH_MARGIN_MS;
@@ -136,33 +173,40 @@ export class TokenManager {
   }
 
   refresh(): Promise<Tokens> {
-    this.refreshing ??= (async () => {
-      try {
-        const t = this.tokens;
-        if (!t) throw new AuthError('signed out');
-        let res: Response;
-        try {
-          res = await this.fetchFn(`${this.baseUrl}/auth/refresh`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ refreshToken: t.refreshToken }),
-          });
-        } catch (e) {
-          // Network error: keep the session, the caller retries later.
-          throw e instanceof Error ? e : new Error(String(e));
-        }
-        if (res.status === 400 || res.status === 401 || res.status === 403) {
-          await this.signOut();
-          throw new AuthError('session expired');
-        }
-        if (!res.ok) throw new Error(`refresh ${res.status}`);
-        const next = (await res.json()) as Tokens;
-        await this.setTokens({ accessToken: next.accessToken, refreshToken: next.refreshToken ?? t.refreshToken });
-        return this.tokens!;
-      } finally {
-        this.refreshing = null;
+    this.refreshing ??= this.lock(async () => {
+      const mine = this.tokens;
+      if (!mine) throw new AuthError('signed out');
+      // Another tab (or an earlier run) may have rotated the tokens already: use the stored ones if they're newer.
+      const stored = await this.store.load().catch(() => null);
+      if (stored && stored.refreshToken !== mine.refreshToken) {
+        const before = this.user()?.id;
+        this.tokens = stored;
+        if (this.user()?.id !== before) this.emit();
+        if (!this.expiresSoon(stored)) return stored;
       }
-    })();
+      const t = this.tokens!;
+      let res: Response;
+      try {
+        res = await this.fetchFn(`${this.baseUrl}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ refreshToken: t.refreshToken }),
+        });
+      } catch (e) {
+        // Network error: keep the session, the caller retries later.
+        throw e instanceof Error ? e : new Error(String(e));
+      }
+      if (res.status === 400 || res.status === 401 || res.status === 403) {
+        await this.signOut();
+        throw new AuthError('session expired');
+      }
+      if (!res.ok) throw new Error(`refresh ${res.status}`);
+      const next = (await res.json()) as Tokens;
+      await this.setTokens({ accessToken: next.accessToken, refreshToken: next.refreshToken ?? t.refreshToken });
+      return this.tokens!;
+    }).finally(() => {
+      this.refreshing = null;
+    });
     return this.refreshing;
   }
 

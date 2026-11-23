@@ -21,43 +21,60 @@ export function extractMagicToken(input: string): string | null {
   return null;
 }
 
-/** GET /auth/email/verify?token= (JSON) → tokens. The link is single-use. */
-export async function verifyMagicLink(fetchFn: FetchFn, serverUrl: string, token: string): Promise<Tokens> {
-  const res = await fetchFn(`${serverUrl}/auth/email/verify?token=${encodeURIComponent(token)}`, {
-    headers: { accept: 'application/json' },
-  });
-  if (!res.ok) {
-    let msg = 'This sign-in link is invalid or has expired';
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) msg = body.error;
-    } catch {
-      /* not JSON */
-    }
-    throw new Error(msg);
-  }
-  const t = (await res.json()) as Partial<Tokens>;
-  if (!t.accessToken || !t.refreshToken) throw new Error('Sign-in returned no tokens');
-  return { accessToken: t.accessToken, refreshToken: t.refreshToken };
+/** A 6-digit sign-in code typed by the user (spaces and dashes allowed), or null. */
+export function extractCode(input: string): string | null {
+  const s = input.trim();
+  return /^\d{3}[\s-]?\d{3}$/.test(s) ? s.replace(/\D/g, '') : null;
 }
 
-/** POST /auth/email/start {email}. */
-export async function startMagicLink(fetchFn: FetchFn, serverUrl: string, email: string): Promise<void> {
-  const res = await fetchFn(`${serverUrl}/auth/email/start`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: email.trim() }),
-  });
+async function postJson(fetchFn: FetchFn, url: string, body: unknown, fallback: string): Promise<unknown> {
+  const res = await fetchFn(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) {
-    let msg = `Couldn't send the link (${res.status})`;
+    let msg = res.status === 429 ? 'Too many sign-in emails. Try again later.' : fallback;
     try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) msg = body.error;
+      const b = (await res.json()) as { error?: string };
+      if (b.error) msg = b.error;
     } catch {
       /* not JSON */
     }
     throw new Error(msg);
   }
+  return res.json();
+}
+
+export interface EmailTokens extends Tokens {
+  email: string;
+}
+
+function asTokens(t: Partial<EmailTokens>): EmailTokens {
+  if (!t.accessToken || !t.refreshToken) throw new Error('Sign-in returned no tokens');
+  return { accessToken: t.accessToken, refreshToken: t.refreshToken, email: t.email ?? '' };
+}
+
+/** POST /auth/email/start {email, nonceHash}. */
+export async function startMagicLink(fetchFn: FetchFn, serverUrl: string, email: string, nonceHash: string): Promise<void> {
+  await postJson(fetchFn, `${serverUrl}/auth/email/start`, { email: email.trim(), nonceHash }, "Couldn't send the link");
+}
+
+/** POST /auth/email/lookup {token} → the account the link signs in to. Doesn't use the link up. */
+export async function lookupMagicLink(fetchFn: FetchFn, serverUrl: string, token: string): Promise<string> {
+  const r = (await postJson(fetchFn, `${serverUrl}/auth/email/lookup`, { token }, 'This sign-in link is invalid or has expired')) as { email?: string };
+  if (!r.email) throw new Error('This sign-in link is invalid or has expired');
+  return r.email;
+}
+
+/**
+ * POST /auth/email/verify → tokens; uses the link up. Pass this device's `nonce` when it asked for the link,
+ * otherwise `confirm: true` after the user confirmed the account.
+ */
+export async function verifyMagicLink(fetchFn: FetchFn, serverUrl: string, token: string, opts: { nonce?: string | null; confirm?: boolean } = {}): Promise<EmailTokens> {
+  const body = opts.nonce ? { token, nonce: opts.nonce } : { token, confirm: !!opts.confirm };
+  return asTokens((await postJson(fetchFn, `${serverUrl}/auth/email/verify`, body, 'This sign-in link is invalid or has expired')) as Partial<EmailTokens>);
+}
+
+/** POST /auth/email/verify {email, code, nonce}: the 6-digit code from the email, on the device that asked. */
+export async function verifyCode(fetchFn: FetchFn, serverUrl: string, email: string, code: string, nonce: string): Promise<EmailTokens> {
+  return asTokens((await postJson(fetchFn, `${serverUrl}/auth/email/verify`, { email: email.trim(), code, nonce }, 'That code is wrong or has expired')) as Partial<EmailTokens>);
 }
 
 export const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
