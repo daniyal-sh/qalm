@@ -149,7 +149,7 @@ export function CommentsPanel({
 }
 
 const styles = StyleSheet.create({
-  panel: { width: 340, maxWidth: '100%', borderLeftWidth: StyleSheet.hairlineWidth },
+  panel: { flex: 1, width: 340, maxWidth: '100%', borderLeftWidth: StyleSheet.hairlineWidth },
   top: { flexDirection: 'row', alignItems: 'center', paddingLeft: 16, paddingRight: 6, height: 56 },
   card: { borderRadius: radius.panel, borderWidth: 1, padding: 12, gap: 8 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 10 },
