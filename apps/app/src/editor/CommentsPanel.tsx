@@ -17,7 +17,7 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
   const [reply, setReply] = React.useState<string | null>(null);
   const agent = cm.author.kind === 'agent';
   const quote = lineQuote(data.lines, cm.lineKey);
-  const hasLine = data.lines.some((l) => l.key === cm.lineKey);
+  const hasLine = !!cm.anchor || data.lines.some((l) => l.key === cm.lineKey);
   return (
     <Pressable
       accessibilityRole="button"
@@ -43,7 +43,7 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
         </View>
       </View>
       <Text variant="meta" tone="muted" numberOfLines={2} style={{ fontStyle: 'italic' }}>
-        {quote ? `“${quote}”` : hasLine ? 'Handwritten line' : 'The line was erased'}
+        {quote ? `“${quote}”` : cm.anchor ? 'On a selection' : hasLine ? 'Handwritten line' : 'The line was erased'}
       </Text>
       <Text>{cm.text}</Text>
       {cm.replies.map((r, i) => (
@@ -159,7 +159,7 @@ export function CommentsPanel({
           <EmptyState
             icon="message-square"
             title={filter === 'resolved' ? 'Nothing resolved yet' : 'No comments here'}
-            body="Connected agents pin comments next to your lines. They can read and comment, but never change your ink."
+            body="Select something with the lasso to comment on it or ask about it. Connected agents can read and comment, but never change your ink."
           />
         )}
       </ScrollView>
