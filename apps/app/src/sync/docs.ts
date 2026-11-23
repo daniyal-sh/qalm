@@ -13,7 +13,8 @@ export interface DocHandle {
   release(): void;
 }
 
-export type RemoteFactory = (docId: string, doc: Y.Doc) => SyncProvider;
+/** Creates the sync provider for a doc, or null for docs that never sync (e.g. the signed-out library). */
+export type RemoteFactory = (docId: string, doc: Y.Doc) => SyncProvider | null;
 
 export interface DocManagerDeps {
   persist: (docId: string, doc: Y.Doc) => DocPersistence;

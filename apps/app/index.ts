@@ -6,8 +6,10 @@ import { Platform } from 'react-native';
 if (Platform.OS === 'web') {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { LoadSkiaWeb } = require('@shopify/react-native-skia/lib/module/web') as typeof import('@shopify/react-native-skia/lib/module/web');
-  // Relative to the page, so the build also works when Electron loads it from disk.
-  void LoadSkiaWeb({ locateFile: (file: string) => new URL(file, document.baseURI).href }).then(() => {
+  // Next to index.html (found from our own script URL), so deep links like /notebook/x and Electron's file:// both work.
+  const script = [...document.scripts].find((s) => s.src.includes('/_expo/static/'))?.src;
+  const base = script ? script.slice(0, script.indexOf('_expo/static/')) : document.baseURI;
+  void LoadSkiaWeb({ locateFile: (file: string) => new URL(file, base).href }).then(() => {
     require('expo-router/entry');
   });
 } else {

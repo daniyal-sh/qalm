@@ -47,7 +47,7 @@ const Ctx = React.createContext<Session | null>(null);
 
 function remoteFor(tm: TokenManager, serverUrl: string): RemoteFactory {
   const authed = (p: string, i?: RequestInit) => tm.fetch(p, i);
-  return (docId, doc) => new SyncProvider(doc, docId, { serverUrl, getTicket: (id) => fetchTicket(authed, id) });
+  return (docId, doc) => (docId === LOCAL_LIBRARY ? null : new SyncProvider(doc, docId, { serverUrl, getTicket: (id) => fetchTicket(authed, id) }));
 }
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {

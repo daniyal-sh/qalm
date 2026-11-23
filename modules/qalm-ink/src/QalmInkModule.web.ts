@@ -14,10 +14,16 @@ const pages = new Map<string, Promise<string>>();
  * `pdfjs-dist/build/pdf.worker.min.mjs` next to its web build (e.g. copy it into `public/`).
  * Set `GlobalWorkerOptions.workerSrc` yourself before the first call to use another location.
  */
+/** The directory index.html is served from: Expo's bundle URLs contain `/_expo/static/`. Falls back to the page URL. */
+function appBase(): string {
+  const src = Array.from(document.scripts).find((s) => s.src.includes('/_expo/static/'))?.src;
+  return src ? src.slice(0, src.indexOf('_expo/static/')) : document.baseURI;
+}
+
 function loadPdfJs(): Promise<PdfJs> {
   pdfjsPromise ??= import('pdfjs-dist').then((pdfjs) => {
     if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdf.worker.min.mjs', document.baseURI).href;
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdf.worker.min.mjs', appBase()).href;
     }
     return pdfjs;
   });
