@@ -76,7 +76,7 @@ interface ShapeItem { id: string; type: 'shape'; kind: 'line'|'arrow'|'double-ar
 // shapes) or the 4 corners of its turned box. Moving or rotating a 2-point rect or ellipse stores 4 corners.
 type Item = StrokeItem | TextItem | ImageItem | ShapeItem;
 type BBox = [x0: number, y0: number, x1: number, y1: number];
-interface Line { key: string /* = id of the line's first item; globally unique */; kind: 'line' | 'drawing'; itemIds: string[]; bbox: BBox; text?: string; textSrc?: 'device'|'agent'|'user'; conf?: number }
+interface Line { key: string /* = id of the line's first item; globally unique */; kind: 'line' | 'drawing'; itemIds: string[]; bbox: BBox; text?: string; textSrc?: 'device'|'agent'|'user'; conf?: number; by?: string /* the agent that transcribed it */ }
 interface Comment { id: string; lineKey: string /* '' if a selection has no ink line */; author: { kind: 'agent'|'user'; name: string }; text: string; createdAt: number; resolved: boolean; replies: { author: {kind:'agent'|'user'; name:string}; text: string; at: number }[]; anchor?: BBox /* selection box */; anchorIds?: string[] /* the selected items: box and labels are derived from them live */; ask?: boolean /* started by an Ask */ }
 interface Ask { id: string; pageId: string; text: string; at: number; sel?: { itemIds: string[]; bbox: BBox }; commentId?: string }
 ```
@@ -101,7 +101,8 @@ class Page {                         // wraps one page doc
   addItems(items: Item[]): void; updateItems(patches: Iterable<[id, patch]>): void   // one transaction (one undo step) each; same result as one call per item
   reorder(ids: string[], to: 'front' | 'back'): void   // z-order; keeps their order among themselves
   lines(): Line[]                    // maintained automatically on add/update/remove
-  setLineText(lineKey, text, src: 'device'|'agent'|'user', conf?): void
+  setLineText(lineKey, text, src: 'device'|'agent'|'user', conf?, by?): void
+  clearLineText(lineKey): void   // back to automatic: no reading
   comments(): Comment[]; addComment(c: Omit<Comment,'id'|'createdAt'|'resolved'|'replies'>): string
   replyToComment(id, author, text): boolean   // a student's reply reopens a resolved thread; false if it's gone
   resolveComment(id): void
@@ -134,7 +135,12 @@ parts). An edit that leaves the line with the same items under the same key keep
 whole line (or a selection of whole lines), recolouring, reordering. "An edit" is one transaction (one undo step): the
 items are reassigned one by one, which splits and re-merges a moved line on the way, and the reading is settled against
 the line's items at the start of the transaction. Moving a line's items in separate transactions is a change per step.
-A reading saved during a transaction is of the items at that point. Two offline devices may create two separate lines that overlap. That's fine, because keys never collide.
+A reading saved during a transaction is of the items at that point.
+**Editing a reading** (app): select a handwritten line (or tap it with the lasso) → **Reading** on the selection bar.
+The sheet shows the saved text and its source (on-device guess, "Read by {agent}", or yours) with an edit field.
+Saving writes `textSrc: 'user'`, which device guesses and agents can't overwrite (the server refuses `transcribe`); an
+empty field or "Use automatic" calls `clearLineText`. Unchanged text stays automatic. Drawings, images and text boxes
+have no reading. One undo step per save. Two offline devices may create two separate lines that overlap. That's fine, because keys never collide.
 Short labels (`L7`, `D2`) exist **only in Q-ink**, and the server assigns them (§4).
 
 Items are assigned one at a time, in the order they are added or changed, so a bulk edit (moving, duplicating or

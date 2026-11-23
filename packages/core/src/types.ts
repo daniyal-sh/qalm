@@ -66,6 +66,8 @@ export interface Line {
   text?: string;
   textSrc?: TextSrc;
   conf?: number;
+  /** Who saved an agent reading (the connected agent's name). */
+  by?: string;
 }
 
 export interface Author { kind: 'agent' | 'user'; name: string }

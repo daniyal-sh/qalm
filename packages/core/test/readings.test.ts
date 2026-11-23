@@ -101,3 +101,62 @@ describe('line readings', () => {
     expect(reading(p, 'a')).toMatchObject({ itemIds: ['a', 'b', 'c'], text: 'x^2' });
   });
 });
+
+describe('editing a reading', () => {
+  const full = (p: Page, key: string) => {
+    const l = p.lines().find((x) => x.key === key)!;
+    return { text: l.text, textSrc: l.textSrc, conf: l.conf, by: l.by };
+  };
+
+  it("keeps the agent's name with its reading, and survives a whole-line move", () => {
+    const p = twoLines();
+    p.setLineText('a', 'x^2 + 1', 'agent', undefined, 'Claude');
+    expect(full(p, 'a')).toEqual({ text: 'x^2 + 1', textSrc: 'agent', conf: undefined, by: 'Claude' });
+    move(p, ['a', 'b', 'c'], moveBy(0, 400));
+    expect(full(p, 'a')).toMatchObject({ text: 'x^2 + 1', by: 'Claude' });
+  });
+
+  it("the student's text replaces it, drops the agent's name and the confidence, and outlives item changes", () => {
+    const p = twoLines();
+    p.setLineText('a', 'x^2', 'agent', undefined, 'Claude');
+    p.setLineText('a', 'x² + 1', 'user');
+    expect(full(p, 'a')).toEqual({ text: 'x² + 1', textSrc: 'user', conf: undefined, by: undefined });
+    p.setLineText('a', 'guess', 'device', 0.5); // device guesses never overwrite it
+    expect(full(p, 'a').text).toBe('x² + 1');
+    p.addItem(stroke('d', 82, 100, 90, 120)); // joins a: user text stays
+    expect(full(p, 'a')).toMatchObject({ text: 'x² + 1', textSrc: 'user' });
+    p.setLineText('z', 'dy', 'user');
+    expect(full(p, 'z')).toEqual({ text: 'dy', textSrc: 'user', conf: undefined, by: undefined });
+  });
+
+  it('clearing goes back to automatic: no text, so the device or an agent can read it again', () => {
+    const p = twoLines();
+    p.setLineText('a', 'mine', 'user');
+    p.clearLineText('a');
+    expect(full(p, 'a')).toEqual({ text: undefined, textSrc: undefined, conf: undefined, by: undefined });
+    p.setLineText('a', 'x^2', 'device', 0.9);
+    expect(full(p, 'a')).toMatchObject({ text: 'x^2', textSrc: 'device' });
+    p.clearLineText('nope'); // unknown line: no-op
+  });
+
+  it('an edit is one undo step', () => {
+    const p = twoLines();
+    const um = createUndoManager(p);
+    p.setLineText('a', 'mine', 'user');
+    um.stopCapturing();
+    p.clearLineText('a');
+    um.undo();
+    expect(full(p, 'a')).toMatchObject({ text: 'mine', textSrc: 'user' });
+    um.undo();
+    expect(full(p, 'a')).toMatchObject({ text: 'x^2', textSrc: 'agent' });
+  });
+
+  it('syncs', () => {
+    const a = twoLines();
+    const b = new Page(new Y.Doc());
+    sync(a.doc, b.doc);
+    a.setLineText('a', 'mine', 'user');
+    sync(a.doc, b.doc);
+    expect(full(b, 'a')).toMatchObject({ text: 'mine', textSrc: 'user' });
+  });
+});

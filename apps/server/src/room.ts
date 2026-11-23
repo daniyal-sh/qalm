@@ -403,7 +403,7 @@ export class DocRoom extends DurableObject<Env> {
     if (!line) throw new Error(`Line ${edit.ref} no longer exists`);
     if (edit.op === 'transcribe') {
       if (line.textSrc === 'user') throw new Error(`The student typed ${edit.ref} themselves; leave a comment instead`);
-      page.setLineText(edit.lineKey, edit.text, 'agent');
+      page.setLineText(edit.lineKey, edit.text, 'agent', undefined, edit.agentName);
       return { text: `Saved ${edit.ref}` };
     }
     const id = page.addComment({ lineKey: edit.lineKey, author: { kind: 'agent', name: edit.agentName }, text: edit.text });

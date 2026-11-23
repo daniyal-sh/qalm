@@ -31,7 +31,7 @@ export type AgentEdit =
   | { op: 'comment'; ref?: string; thread?: string; text: string; agentName: string; resolve?: boolean };
 /** What the notebook room asks a page room to do. Agents never touch ink. */
 export type PageEdit =
-  | { op: 'transcribe'; ref: string; text: string; lineKey: string }
+  | { op: 'transcribe'; ref: string; text: string; lineKey: string; agentName?: string }
   | { op: 'comment'; ref: string; text: string; agentName: string; lineKey: string }
   | { op: 'reply'; ref: string; text: string; agentName: string; commentId: string; resolve?: boolean };
 
@@ -316,7 +316,7 @@ export class AgentHub {
     }
     if (!edit.ref) throw new Error('Pass ref (a line, e.g. "p3:L4") or thread (e.g. "C3")');
     const { pageId, lineKey } = resolveRef(this.labels(), this.nb(), edit.ref);
-    if (edit.op === 'transcribe') return this.applyOn(pageId, { op: 'transcribe', ref: edit.ref, text: edit.text, lineKey });
+    if (edit.op === 'transcribe') return this.applyOn(pageId, { op: 'transcribe', ref: edit.ref, text: edit.text, lineKey, agentName: who.name });
     return this.applyOn(pageId, { op: 'comment', ref: edit.ref, text: edit.text, agentName: edit.agentName, lineKey });
   }
 
