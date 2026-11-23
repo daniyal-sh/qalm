@@ -4,6 +4,7 @@
 
 Handwritten notes, on pages, that feel like paper and that AI agents can read live over MCP.
 
+- `handover.md`: start here: status, decisions, gaps and next steps
 - `docs/decisions.md`: v1 scope
 - `docs/tech-spec.md`: architecture and contracts between packages
 - `docs/qink-live.md`: the AI-readable live format and MCP tools
