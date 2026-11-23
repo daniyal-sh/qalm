@@ -11,21 +11,45 @@ type YItem = Y.Map<unknown>;
 const GEOMETRY_KEYS = new Set(['points', 'bbox', 'x', 'y', 'w', 'h', 'pts']);
 const isInkType = (t: unknown) => t === 'stroke' || t === 'shape';
 
+/** A fresh reading as a transaction found it, kept up to date as its strokes move (see `InkChanges`). */
+interface ReadState {
+  ids: Set<string>;
+  /** Its strokes' boxes now. */
+  boxes: Map<string, BBox>;
+  /** Its box when the transaction started. */
+  before: BBox;
+  /** Everywhere its strokes have been in this transaction (contains its box now): a cheap "can't be near" test. */
+  hull: BBox;
+  /** ½ unit of its own handwriting. */
+  near: number;
+  stale: boolean;
+}
+
 /**
- * Ink changes in the current outermost `Page` call, settled against the page's readings when it returns: a reading
- * goes stale when strokes are erased from it or added to it (tech-spec §2, readings).
+ * Ink changes in the current transaction, settled against the page's readings at the end of each outermost `Page`
+ * call (a reading goes stale when strokes are erased from it or added to it; tech-spec §2, readings). Built once per
+ * transaction, so a bulk edit made of many `Page` calls in one transaction costs about the same as one call.
  */
 interface InkChanges {
-  /** Each reading's box when the call started (before any change). */
-  before: Map<string, BBox | null>;
-  /** Ink added or moved: its box before (null if it is new). */
+  tx: Y.Transaction;
+  reads: Map<string, ReadState>;
+  /** Ink added or moved in this transaction: its box before (null if it is new). */
   touched: Map<string, BBox | null>;
+  /** Ink touched since the last settle. */
+  queue: string[];
+  /** Ink removed since the last settle. */
   removed: Set<string>;
 }
 
 /** How deep each doc is in `Page` calls (ink changes are settled when it returns to 0). */
 const depths = new WeakMap<Y.Doc, number>();
 const changes = new WeakMap<Y.Doc, InkChanges>();
+
+function union(boxes: Iterable<BBox>): BBox {
+  let bb: BBox | null = null;
+  for (const b of boxes) bb = unionBBox(bb, b);
+  return bb ?? [0, 0, 0, 0];
+}
 
 function readItem(m: YItem): Item {
   const o: Record<string, unknown> = {};
@@ -289,64 +313,85 @@ export class Page {
   /** Notes a change of ink item `id` (call before changing it). */
   private noteInk(id: string): void {
     const ch = this.inkChanges();
-    if (ch && !ch.touched.has(id)) ch.touched.set(id, this.box(id));
+    if (!ch) return;
+    if (!ch.touched.has(id)) ch.touched.set(id, this.box(id));
+    ch.queue.push(id);
   }
 
-  /** This call's ink changes (none while the page has no readings: nothing can go stale). */
+  /** This transaction's ink changes (none while the page has no readings: nothing can go stale). */
   private inkChanges(): InkChanges | undefined {
     if (!this.readingMap.size) return undefined;
+    const tx = this.doc._transaction;
+    if (!tx) return undefined;
     let ch = changes.get(this.doc);
-    if (!ch) {
-      ch = { before: new Map(), touched: new Map(), removed: new Set() };
-      for (const r of this.readings()) ch.before.set(r.id, this.readingBox(r.ids));
+    if (!ch || ch.tx !== tx) {
+      ch = { tx, reads: new Map(), touched: new Map(), queue: [], removed: new Set() };
+      for (const r of this.readings()) {
+        const boxes = new Map<string, BBox>();
+        for (const id of r.ids) {
+          const b = this.box(id);
+          if (b) boxes.set(id, b);
+        }
+        if (!boxes.size) continue;
+        const before = union(boxes.values());
+        ch.reads.set(r.id, { ids: new Set(r.ids), boxes, before, hull: before, near: NEAR * pageUnit(undefined, [...boxes.values()]), stale: !!r.stale });
+      }
       changes.set(this.doc, ch);
     }
     return ch;
   }
 
-  private readingBox(ids: readonly string[]): BBox | null {
-    let bb: BBox | null = null;
-    for (const id of ids) {
-      const b = this.box(id);
-      if (b) bb = unionBBox(bb, b);
-    }
-    return bb;
-  }
-
   /**
    * At the end of an outermost `Page` call: a reading goes **stale** when any of its strokes was erased, or ink that
-   * isn't part of it came within ½ unit of it (written, pasted or moved there; ink that moved along with it doesn't
-   * count). A reading whose strokes are all gone is deleted. Moving, resizing or recolouring a read region keeps it.
+   * isn't part of it came within ½ unit of it (written, pasted or moved there; ink that was next to it before, e.g.
+   * moved along with it, doesn't count). A reading whose strokes are all gone is deleted. Moving, resizing or
+   * recolouring a read region keeps it fresh.
    */
   private settleReadings(): void {
     const ch = changes.get(this.doc);
-    changes.delete(this.doc);
-    if (!ch || (!ch.touched.size && !ch.removed.size)) return;
-    for (const r of this.readings()) {
-      const live = r.ids.filter((id) => this.itemMap.has(id));
-      if (!live.length) {
-        this.readingMap.delete(r.id);
-        continue;
+    if (!ch || ch.tx !== this.doc._transaction || (!ch.queue.length && !ch.removed.size)) return;
+    const queue = ch.queue;
+    const removed = ch.removed;
+    ch.queue = [];
+    ch.removed = new Set();
+    const nowStale = new Set<string>();
+    // First where every reading's strokes are now (so ink moved along with a reading in this call counts as such),
+    // then which other ink came near one.
+    const moved: [string, BBox][] = [];
+    for (const id of queue) {
+      const b = this.box(id);
+      if (!b) continue;
+      moved.push([id, b]);
+      for (const r of ch.reads.values()) {
+        if (!r.ids.has(id)) continue;
+        r.boxes.set(id, b);
+        r.hull = unionBBox(r.hull, b);
       }
-      if (r.stale) continue;
-      let stale = r.ids.some((id) => ch.removed.has(id));
-      if (!stale && ch.touched.size) {
-        const now = this.readingBox(live)!;
-        const was = ch.before.get(r.id) ?? null;
-        const boxes = live.map((id) => this.box(id)!);
-        const near = NEAR * pageUnit(undefined, boxes);
-        const mine = new Set(r.ids);
-        for (const [id, old] of ch.touched) {
-          if (mine.has(id)) continue;
-          const b = this.box(id);
-          if (!b || boxGap(b, now) > near) continue;
-          if (old && was && boxGap(old, was) <= near) continue; // it was next to the reading already (moved together)
-          stale = true;
-          break;
+    }
+    for (const [id, b] of moved) {
+      const old = ch.touched.get(id) ?? null;
+      for (const [rid, r] of ch.reads) {
+        if (r.ids.has(id) || r.stale || boxGap(b, r.hull) > r.near) continue;
+        if (old && boxGap(old, r.before) <= r.near) continue;
+        if (boxGap(b, union(r.boxes.values())) > r.near) continue;
+        r.stale = true;
+        nowStale.add(rid);
+      }
+    }
+    for (const id of removed) {
+      for (const [rid, r] of ch.reads) {
+        if (!r.ids.has(id) || !r.boxes.delete(id)) continue;
+        if (!r.boxes.size) {
+          this.readingMap.delete(rid);
+          ch.reads.delete(rid);
+          nowStale.delete(rid);
+        } else if (!r.stale) {
+          r.stale = true;
+          nowStale.add(rid);
         }
       }
-      if (stale) this.readingMap.get(r.id)!.set('stale', true);
     }
+    for (const rid of nowStale) this.readingMap.get(rid)?.set('stale', true);
   }
 
   // ---- comments ----

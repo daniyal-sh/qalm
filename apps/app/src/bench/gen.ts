@@ -1,6 +1,6 @@
 /**
  * Benchmark data: deterministic handwriting-like page docs and big notebooks (scripts/bench, test/*.bench.ts).
- * Writes the page doc layout of `Page` directly (items, order, lines with keys = first item id), because building
+ * Writes the page doc layout of `Page` directly (items, order and, optionally, a reading per row), because building
  * thousands of strokes through `addItem` one by one would take minutes.
  */
 import { createNotebookDoc, encodePoints, LOCAL_ORIGIN, Notebook, type BBox, type InkPoint, type Size } from '@qalm/core';
@@ -52,32 +52,36 @@ function bboxOf(pts: InkPoint[], width: number): BBox {
 
 /**
  * Fills a page doc with `strokes` handwriting-like strokes in rows (wrapping back to the top when the page is full,
- * so dense pages overlap like heavily annotated ones). Each row is one line.
+ * so dense pages overlap like heavily annotated ones). With `readings`, each row gets an agent's reading.
  */
-export function fillPage(doc: Y.Doc, strokes: number, size: Size, seed = 1, pointsPerStroke = 32): void {
+export function fillPage(doc: Y.Doc, strokes: number, size: Size, seed = 1, pointsPerStroke = 32, readings = false): void {
   const r = rng(seed);
   const items = doc.getMap<Y.Map<unknown>>('items');
   const order = doc.getArray<string>('order');
-  const lines = doc.getMap<Y.Map<unknown>>('lines');
+  const readingMap = doc.getMap<Y.Map<unknown>>('readings');
   const rowH = 28;
   const rows = Math.floor((size.h - 80) / rowH);
   doc.transact(() => {
     let x = 40;
     let row = 0;
     let pass = 0;
-    let lineKey: string | null = null;
+    let rowIds: string[] = [];
     const ids: string[] = [];
+    const endRow = () => {
+      if (!readings || !rowIds.length) return;
+      const e = new Y.Map<unknown>();
+      readingMap.set(`r-${rowIds[0]}`, e);
+      e.set('id', `r-${rowIds[0]}`);
+      e.set('ids', rowIds);
+      e.set('text', 'x + 1');
+      e.set('src', 'agent');
+      e.set('updatedAt', 1);
+    };
     for (let i = 0; i < strokes; i++) {
       const id = `s${seed}-${i}`;
       const y = 50 + row * rowH + pass * 5;
       const pts = glyph(r, x, y, pointsPerStroke + Math.floor(r() * 12));
       const width = 1.8;
-      if (!lineKey) {
-        lineKey = id;
-        const e = new Y.Map<unknown>();
-        lines.set(id, e);
-        e.set('kind', 'line');
-      }
       const m = new Y.Map<unknown>();
       items.set(id, m);
       m.set('id', id);
@@ -90,12 +94,13 @@ export function fillPage(doc: Y.Doc, strokes: number, size: Size, seed = 1, poin
       m.set('createdAt', 1_700_000_000_000 + i);
       m.set('style', 'fountain');
       m.set('smoothing', 2);
-      m.set('line', lineKey);
       ids.push(id);
+      rowIds.push(id);
       x += 12 + r() * 6;
       if (x > size.w - 50) {
         x = 40;
-        lineKey = null;
+        endRow();
+        rowIds = [];
         row++;
         if (row >= rows) {
           row = 0;
@@ -103,6 +108,7 @@ export function fillPage(doc: Y.Doc, strokes: number, size: Size, seed = 1, poin
         }
       }
     }
+    endRow();
     order.push(ids);
   }, LOCAL_ORIGIN);
 }
