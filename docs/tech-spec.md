@@ -165,7 +165,8 @@ There is no line grouping in the model. Ink (strokes and shapes) is just items; 
 
 **Readings** (`readings` map) are someone's reading of some strokes: an agent's `transcribe` or the student's own text. An agent's reading
 is refused where the student's covers any of the strokes, and replaces agent readings of a subset of its strokes. A reading goes **stale**
-(kept, flagged) when one of its strokes is erased, or ink that isn't part of it comes within ½ unit of it (written, pasted or moved there;
+(kept, flagged) when one of its strokes is erased, or ink that isn't part of it is added to it: within ½ unit, or on its row within 1½
+units with vertical overlap, as for context (written, pasted or moved there;
 ink that was already next to it, e.g. moved along with it, doesn't count). Moving, resizing, rotating or recolouring the read ink keeps it
 fresh; a reading whose strokes are all erased is deleted. `Page` tracks this per transaction: a fresh reading's box and unit are taken once,
 updated as its strokes move, and each outermost `Page` call checks only the ink it touched against them (a bulk edit stays linear).

@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { LOCAL_ORIGIN } from '../origin';
 import { encodePoints, decodePoints } from '../points';
 import { itemBBox, unionBBox } from '../geometry/bbox';
-import { boxGap, NEAR, pageUnit } from '../geometry/regions';
+import { boxGap, NEAR, pageUnit, ROW_GAP, ROW_OVERLAP } from '../geometry/regions';
 import { newId } from '../ids';
 import type { Author, BBox, Comment, InkPoint, Item, Reading, ReadingSrc } from '../types';
 
@@ -20,8 +20,8 @@ interface ReadState {
   before: BBox;
   /** Everywhere its strokes have been in this transaction (contains its box now): a cheap "can't be near" test. */
   hull: BBox;
-  /** ½ unit of its own handwriting. */
-  near: number;
+  /** One unit of its own handwriting. */
+  unit: number;
   stale: boolean;
 }
 
@@ -44,6 +44,17 @@ interface InkChanges {
 /** How deep each doc is in `Page` calls (ink changes are settled when it returns to 0). */
 const depths = new WeakMap<Y.Doc, number>();
 const changes = new WeakMap<Y.Doc, InkChanges>();
+
+/**
+ * Whether ink at `b` is "added to" a reading whose strokes span `r`: within ½ unit of it, or on its row (horizontal
+ * gap under 1½ units, vertical overlap ≥ 30% of the smaller height). The same test that makes ink context of a region.
+ */
+function joins(b: BBox, r: BBox, unit: number): boolean {
+  if (boxGap(b, r) <= NEAR * unit) return true;
+  const dx = Math.max(0, b[0] - r[2], r[0] - b[2]);
+  const over = Math.min(b[3], r[3]) - Math.max(b[1], r[1]);
+  return dx < ROW_GAP * unit && over >= ROW_OVERLAP * Math.min(b[3] - b[1], r[3] - r[1]);
+}
 
 function union(boxes: Iterable<BBox>): BBox {
   let bb: BBox | null = null;
@@ -334,7 +345,7 @@ export class Page {
         }
         if (!boxes.size) continue;
         const before = union(boxes.values());
-        ch.reads.set(r.id, { ids: new Set(r.ids), boxes, before, hull: before, near: NEAR * pageUnit(undefined, [...boxes.values()]), stale: !!r.stale });
+        ch.reads.set(r.id, { ids: new Set(r.ids), boxes, before, hull: before, unit: pageUnit(undefined, [...boxes.values()]), stale: !!r.stale });
       }
       changes.set(this.doc, ch);
     }
@@ -343,8 +354,8 @@ export class Page {
 
   /**
    * At the end of an outermost `Page` call: a reading goes **stale** when any of its strokes was erased, or ink that
-   * isn't part of it came within ½ unit of it (written, pasted or moved there; ink that was next to it before, e.g.
-   * moved along with it, doesn't count). A reading whose strokes are all gone is deleted. Moving, resizing or
+   * isn't part of it was added to it: within ½ unit, or on its row within 1½ units (`joins`; written, pasted or moved
+   * there; ink that was there before, e.g. moved along with it, doesn't count). A reading whose strokes are all gone is deleted. Moving, resizing or
    * recolouring a read region keeps it fresh.
    */
   private settleReadings(): void {
@@ -371,9 +382,9 @@ export class Page {
     for (const [id, b] of moved) {
       const old = ch.touched.get(id) ?? null;
       for (const [rid, r] of ch.reads) {
-        if (r.ids.has(id) || r.stale || boxGap(b, r.hull) > r.near) continue;
-        if (old && boxGap(old, r.before) <= r.near) continue;
-        if (boxGap(b, union(r.boxes.values())) > r.near) continue;
+        if (r.ids.has(id) || r.stale || boxGap(b, r.hull) >= ROW_GAP * r.unit) continue;
+        if (old && joins(old, r.before, r.unit)) continue;
+        if (!joins(b, union(r.boxes.values()), r.unit)) continue;
         r.stale = true;
         nowStale.add(rid);
       }

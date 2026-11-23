@@ -146,7 +146,8 @@ updatedAt }`, stored per page.
 
 - `transcribe(R7, "u = x^2")` saves the agent's reading of R7's strokes (those still on the page), replacing earlier
   agent readings of a subset of them. It is **refused** where the student's own reading covers any of them.
-- When strokes are **added to** a read region (new or moved ink within ½ unit of it) or **erased from** it, its
+- When strokes are **added to** a read region (new or moved ink within ½ unit of it, or on its row within 1½ units: the
+  same test that makes ink context) or **erased from** it, its
   reading is marked **stale**: kept and shown as stale in the app, but not trusted, so the region goes out as an image
   again. Moving, resizing or recolouring the read ink itself keeps it fresh. A reading whose strokes are all erased is
   deleted.
