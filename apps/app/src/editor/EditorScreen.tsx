@@ -1,4 +1,4 @@
-import { createNotebookUndoManager, LOCAL_ORIGIN, Notebook, Page, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem } from '@qalm/core';
+import { createNotebookUndoManager, Notebook, Page, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem } from '@qalm/core';
 import { router } from 'expo-router';
 import { QalmInk, renderThumbnail } from 'qalm-ink';
 import * as React from 'react';
@@ -345,7 +345,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       if (!cl || !target || !notebook) return;
       for (const a of cl.assets) if (!notebook.asset(a.id)) notebook.addAsset(a); // images pasted from another notebook
       const copies = pasteItems(cl, target.pageId, newId);
-      target.page.doc.transact(() => copies.forEach((it) => target.page.addItem(it)), LOCAL_ORIGIN);
+      target.page.addItems(copies);
       touchPage(target.pageId);
       setTool('lasso');
       setSelection({ pageId: target.pageId, ids: copies.map((x) => x.id) });
@@ -353,17 +353,17 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     duplicate: () => {
       if (!selection || !selectionPage) return;
       const copies = cloneItems(selectedItems(), 16, 16, newId);
-      selectionPage.doc.transact(() => copies.forEach((it) => selectionPage.addItem(it)), LOCAL_ORIGIN);
+      selectionPage.addItems(copies);
       setSelection({ pageId: selection.pageId, ids: copies.map((x) => x.id) });
     },
     recolor: (hex: string) => {
       if (!selection || !selectionPage) return;
-      selectionPage.doc.transact(() => {
-        for (const it of selectedItems()) {
+      selectionPage.updateItems(
+        selectedItems().flatMap((it) => {
           const patch = recolorPatch(it, hex);
-          if (patch) selectionPage.updateItem(it.id, patch);
-        }
-      }, LOCAL_ORIGIN);
+          return patch ? [[it.id, patch] as const] : [];
+        }),
+      );
     },
     order: (to: 'front' | 'back') => {
       if (selection && selectionPage) selectionPage.reorder(selection.ids, to);
