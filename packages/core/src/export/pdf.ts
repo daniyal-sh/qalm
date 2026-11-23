@@ -1,4 +1,4 @@
-import { BlendMode, LineCapStyle, PDFDocument, StandardFonts, rgb, type PDFEmbeddedPage, type PDFFont, type PDFImage, type RGB } from 'pdf-lib';
+import { BlendMode, LineCapStyle, PDFDocument, StandardFonts, degrees, rgb, type PDFEmbeddedPage, type PDFFont, type PDFImage, type RGB } from 'pdf-lib';
 import { strokeSvgPath, HIGHLIGHTER_ALPHA } from '../geometry/stroke';
 import { paperPattern, DOT_RADIUS, RULE_WIDTH } from '../geometry/paper';
 import { TEXT_LINE_HEIGHT } from '../geometry/bbox';
@@ -100,14 +100,23 @@ export async function exportPdf(
           break;
         case 'image': {
           const img = await image(item.assetId);
-          if (img) out.drawImage(img, { x: item.x, y: H - item.y - item.h, width: item.w, height: item.h });
+          if (!img) break;
+          // pdf-lib turns about the bottom-left corner, counter-clockwise (y points up); ours turn about the top-left.
+          const r = item.rot ?? 0;
+          const bl = { x: item.x - item.h * Math.sin(r), y: item.y + item.h * Math.cos(r) };
+          out.drawImage(img, { x: bl.x, y: H - bl.y, width: item.w, height: item.h, ...(r ? { rotate: degrees((-r * 180) / Math.PI) } : {}) });
           break;
         }
         case 'text': {
           const rows = wrapText(sanitize(font, item.text), item.w, (s) => font.widthOfTextAtSize(s, item.fontSize));
           const color = parseColor(item.color);
+          const rot = item.rot ?? 0;
           rows.forEach((r, i) => {
-            if (r) out.drawText(r, { x: item.x, y: H - (item.y + item.fontSize + i * item.fontSize * TEXT_LINE_HEIGHT), size: item.fontSize, font, color });
+            if (!r) return;
+            const down = item.fontSize + i * item.fontSize * TEXT_LINE_HEIGHT; // baseline below the top-left corner
+            const x = item.x - down * Math.sin(rot);
+            const y = item.y + down * Math.cos(rot);
+            out.drawText(r, { x, y: H - y, size: item.fontSize, font, color, ...(rot ? { rotate: degrees((-rot * 180) / Math.PI) } : {}) });
           });
           break;
         }

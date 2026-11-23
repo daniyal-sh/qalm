@@ -22,6 +22,10 @@ function fill(page: Page) {
   page.addItem({ id: 'sh', type: 'shape', kind: 'ellipse', pts: [[200, 200], [300, 260]], color: '#1d4ed8', width: 2 });
   page.addItem({ id: 'tx', type: 'text', x: 50, y: 300, w: 200, text: 'Area ∫ under the curve & more <words>', fontSize: 14, color: '#27272a' });
   page.addItem({ id: 'im', type: 'image', assetId: 'png1', x: 300, y: 300, w: 40, h: 40 });
+  // Turned by the selection's rotate handle; a rotated ellipse is stored as its 4 box corners.
+  page.addItem({ id: 'im2', type: 'image', assetId: 'png1', x: 400, y: 300, w: 40, h: 20, rot: Math.PI / 2 });
+  page.addItem({ id: 'tx2', type: 'text', x: 400, y: 400, w: 100, text: 'turned', fontSize: 12, color: '#27272a', rot: -Math.PI / 6 });
+  page.addItem({ id: 'el2', type: 'shape', kind: 'ellipse', pts: [[100, 500], [140, 540], [120, 560], [80, 520]], color: '#000', width: 2 });
 }
 
 describe('renderPageSvg', () => {
@@ -36,6 +40,8 @@ describe('renderPageSvg', () => {
     expect(svg).toContain('fill-opacity="0.45"');
     expect(svg).toContain('&amp;</tspan><tspan x="50" y="332.2">more &lt;words&gt;'); // escaped and wrapped
     expect(svg).toContain('href="https://x/png1"');
+    expect(svg).toContain('transform="rotate(90 400 300)"');
+    expect(svg).toContain('transform="rotate(-30 400 400)"');
     expect(svg.indexOf('fill="#27272a"')).toBeLessThan(svg.indexOf('fill="#fde68a"'));
     expect(renderPageSvg(nb.pages()[0]!, page, { paper: false })).not.toContain('#d9dce3');
   });

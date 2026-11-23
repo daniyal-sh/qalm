@@ -124,6 +124,19 @@ export class Page {
     });
   }
 
+  /** Moves items to the top (`front`) or bottom (`back`) of the z-order, keeping their order among themselves. */
+  reorder(ids: string[], to: 'front' | 'back'): void {
+    this.tx(() => {
+      const move = new Set(ids.filter((id) => this.itemMap.has(id)));
+      if (!move.size) return;
+      const moved = this.orderedIds().filter((id) => move.has(id));
+      const arr = this.order.toArray();
+      for (let i = arr.length - 1; i >= 0; i--) if (move.has(arr[i]!)) this.order.delete(i, 1);
+      if (to === 'front') this.order.push(moved);
+      else this.order.insert(0, moved);
+    });
+  }
+
   removeItems(ids: string[]): void {
     this.tx(() => {
       const gone = new Set(ids);
