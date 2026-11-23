@@ -45,16 +45,49 @@ describe('export wiring', () => {
     expect(released()).toBe(2);
   });
 
-  it('round-trips a .qalm backup into local docs', async () => {
-    const { src, first } = source();
+  it('restores a .qalm backup as a new notebook with new ids, leaving the original untouched', async () => {
+    const { src, first, nb } = source();
+    const second = nb.addPage({ paper: 'grid' });
+    const asset: Asset = { id: 'a1', sha256: 'e'.repeat(64), mime: 'image/png', name: 'fig.png', bytes: 3 };
+    nb.addAsset(asset);
+    const page1 = await src.loadPage(first);
+    const p1 = new Page(page1.doc);
+    const lineKey = p1.lines()[0]!.key;
+    p1.setLineText(lineKey, 'x^2', 'user');
+    p1.addComment({ lineKey, author: { kind: 'agent', name: 'Tutor' }, text: 'Nice' });
+    src.assetBytes = async () => new Uint8Array([1, 2, 3]);
+    const before = { index: Y.encodeStateAsUpdate(nb.doc), page: Y.encodeStateAsUpdate(page1.doc) };
+
     const bytes = await buildQalm(src);
     const written = new Map<string, Uint8Array>();
-    const meta = await restoreQalm(bytes, async (id, u) => void written.set(id, u), async () => {});
-    expect(meta.title).toBe('Calc');
-    expect([...written.keys()].sort()).toEqual([docIds.notebook('nb1'), docIds.page('nb1', first)].sort());
+    const assets: string[] = [];
+    let n = 0;
+    const meta = await restoreQalm(bytes, async (id, u) => void written.set(id, u), async (a) => void assets.push(a.id), () => `new${++n}`);
+
+    expect(meta.id).not.toBe('nb1');
+    expect(meta.title).toBe('Calc (restored)');
+    const index = new Notebook(new Y.Doc());
+    Y.applyUpdate(index.doc, written.get(docIds.notebook(meta.id))!);
+    expect(index.meta()).toMatchObject({ id: meta.id, title: 'Calc (restored)', cover: '#4338ca', paper: 'ruled' });
+    const pages = index.pages();
+    expect(pages).toHaveLength(2);
+    expect(pages.map((p) => p.id)).not.toContain(first);
+    expect(pages.map((p) => p.id)).not.toContain(second);
+    expect(pages[1]!.paper).toBe('grid');
+    expect(index.asset('a1')).toEqual(asset);
+    expect(assets).toEqual(['a1']);
+    // Only the new ids were written: nothing under the original notebook.
+    expect([...written.keys()].every((k) => !k.includes('nb1'))).toBe(true);
+
     const page = new Page(new Y.Doc());
-    Y.applyUpdate(page.doc, written.get(docIds.page('nb1', first))!);
+    Y.applyUpdate(page.doc, written.get(docIds.page(meta.id, pages[0]!.id))!);
     expect(page.items().map((i) => i.type)).toEqual(['stroke', 'text']);
+    expect(page.lines().find((l) => l.key === lineKey)).toMatchObject({ text: 'x^2', textSrc: 'user' });
+    expect(page.comments().map((c) => c.text)).toEqual(['Nice']);
+
+    // The original docs are unchanged.
+    expect(Y.encodeStateAsUpdate(nb.doc)).toEqual(before.index);
+    expect(Y.encodeStateAsUpdate(page1.doc)).toEqual(before.page);
   });
 
   it('makes safe file names', () => {

@@ -65,23 +65,45 @@ export function exportFileName(title: string, ext: 'pdf' | 'qalm'): string {
   return `${base}.${ext}`;
 }
 
-/** Restores a `.qalm` into local docs. Returns the notebook's meta (its id is kept, so restoring twice merges). */
+/**
+ * Restores a `.qalm` backup as a NEW notebook: fresh notebook and page ids, title suffixed " (restored)". Items, lines,
+ * comments, pages, assets and meta are copied; the original notebook (if it still exists) is never touched.
+ * Returns the new notebook's meta.
+ */
 export async function restoreQalm(
   bytes: Uint8Array,
   writeDoc: (docId: string, update: Uint8Array) => Promise<void>,
   putAsset: (asset: Asset, bytes: Uint8Array) => Promise<void>,
+  newId: () => string,
 ): Promise<NotebookMeta> {
   const b = unpackQalm(bytes);
-  const nb = new Notebook(b.index);
-  const meta = nb.meta();
-  if (!meta.id) throw new Error('not a Qalm backup');
-  await writeDoc(docIds.notebook(meta.id), Y.encodeStateAsUpdate(b.index));
-  for (const [pageId, doc] of b.pages) await writeDoc(docIds.page(meta.id, pageId), Y.encodeStateAsUpdate(doc));
-  for (const [id, data] of b.assets) {
-    const a = nb.asset(id);
+  const src = new Notebook(b.index);
+  const old = src.meta();
+  if (!old.id) throw new Error('not a Qalm backup');
+  const id = newId();
+  const pageIds = new Map(src.pages().map((p) => [p.id, newId()]));
+
+  const index = new Y.Doc();
+  const nb = new Notebook(index);
+  index.transact(() => {
+    const meta: NotebookMeta = { ...old, id, title: `${old.title || 'Notebook'} (restored)`, updatedAt: Date.now() };
+    const m = index.getMap('meta');
+    for (const [k, v] of Object.entries(meta)) if (v !== undefined) m.set(k, v);
+    for (const p of src.pages()) nb.addPage({ ...p, id: pageIds.get(p.id)! });
+    for (const a of src.assets()) nb.addAsset(a);
+  }, LOCAL_ORIGIN);
+
+  // Assets first, so pages never reference bytes this device lacks.
+  for (const [aid, data] of b.assets) {
+    const a = src.asset(aid);
     if (a) await putAsset(a, data);
   }
-  return meta;
+  for (const [oldPage, newPage] of pageIds) {
+    const doc = b.pages.get(oldPage);
+    if (doc) await writeDoc(docIds.page(id, newPage), Y.encodeStateAsUpdate(doc));
+  }
+  await writeDoc(docIds.notebook(id), Y.encodeStateAsUpdate(index));
+  return nb.meta();
 }
 
 /** Page sizes (PDF points) of a PDF, read with pdf-lib. */

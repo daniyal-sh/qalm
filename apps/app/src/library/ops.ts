@@ -15,6 +15,8 @@ export interface Ctx {
   dm: DocManager;
   assets: AssetService;
   library: Library;
+  /** Signed-in API access (Bearer); null when offline-only or signed out. */
+  server?: { fetch(path: string, init?: RequestInit): Promise<Response> } | null;
 }
 
 async function writeDoc(dm: DocManager, docId: string, source: Y.Doc | Uint8Array): Promise<void> {
@@ -47,6 +49,7 @@ export async function importPdf(ctx: Ctx, file: PickedFile, folderId: string | n
   return id;
 }
 
+/** Restores a `.qalm` backup as a new notebook (new ids), so it never collides with the original. */
 export async function importQalm(ctx: Ctx, file: PickedFile, folderId: string | null): Promise<string> {
   const meta: NotebookMeta = await restoreQalm(
     file.bytes,
@@ -54,9 +57,9 @@ export async function importQalm(ctx: Ctx, file: PickedFile, folderId: string | 
     async (asset, bytes) => {
       await ctx.assets.put(bytes, asset.mime, asset.name);
     },
+    newId,
   );
-  const existing = ctx.library.entry(meta.id);
-  ctx.library.putEntry({ ...entryFor(meta, existing?.folderId ?? folderId), favorite: existing?.favorite ?? false });
+  ctx.library.putEntry(entryFor(meta, folderId));
   return meta.id;
 }
 
@@ -71,8 +74,20 @@ export async function updateNotebookMeta(ctx: Ctx, id: string, patch: Partial<Pi
   ctx.library.updateEntry(id, { ...patch, updatedAt: Date.now() });
 }
 
-/** Permanently deletes a notebook from this device and the library (synced docs stay on the server). */
+/**
+ * Permanently deletes a notebook: on the server first when signed in (DELETE /notebooks/{id} tombstones it and purges
+ * its docs; 404 means it was never synced), then from this device and the library.
+ */
 export async function deleteForever(ctx: Ctx, id: string): Promise<void> {
+  if (ctx.server) {
+    let res: Response;
+    try {
+      res = await ctx.server.fetch(`/notebooks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch {
+      throw new Error('Couldn’t reach the server. Try again when you’re online.');
+    }
+    if (!res.ok && res.status !== 404) throw new Error(`Couldn’t delete on the server (${res.status})`);
+  }
   const nbId = docIds.notebook(id);
   const h = await openLoaded(ctx.dm, nbId);
   const pageIds = new Notebook(h.doc).pages().map((p) => p.id);

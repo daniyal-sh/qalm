@@ -80,7 +80,7 @@ export default function LibraryScreen() {
 
   if (s.ready && s.serverUrl && !s.user && !s.skipped) return <Redirect href="/sign-in" />;
 
-  const ctx: Ctx | null = library ? { dm: s.dm, assets: s.assets, library } : null;
+  const ctx: Ctx | null = library ? { dm: s.dm, assets: s.assets, library, server: s.user ? s.tm : null } : null;
   const folderId = filter.kind === 'folder' ? filter.id : null;
   const shown = visibleEntries(entries, filter, query);
   const counts = folderCounts(entries);
@@ -135,7 +135,7 @@ export default function LibraryScreen() {
             label: 'Delete forever',
             icon: 'trash-2',
             tone: 'bad',
-            onPress: () => confirm('Delete forever?', `"${e.title}" will be removed from this device. This can't be undone.`, 'Delete', () => void run('Deleting…', () => deleteForever(ctx, e.id))),
+            onPress: () => confirm('Delete forever?', `"${e.title}" will be removed from this device and your account. This can't be undone.`, 'Delete', () => void run('Deleting…', () => deleteForever(ctx, e.id))),
           },
         ]
       : [
