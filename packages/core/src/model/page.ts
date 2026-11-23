@@ -39,6 +39,8 @@ interface LineIndex {
   pending: Map<string, string | null>;
   /** `fingerprint` of the doc when the last `Page` call in `tx` returned (or the index was built). */
   mark: number;
+  /** `medianLineHeight` of the groups; null when a group was added or removed or a line's height or kind changed. */
+  median: number | null;
 }
 
 /**
@@ -489,7 +491,7 @@ export class Page {
     const ix = this.peek();
     if (ix) return ix;
     const tx = this.doc._transaction;
-    const built: LineIndex = { tx, pos: new Map(), next: 0, ghosts: new Set(), lineOf: new Map(), bb: new Map(), groups: new Map(), dirty: new Set(), pending: new Map(), mark: 0 };
+    const built: LineIndex = { tx, pos: new Map(), next: 0, ghosts: new Set(), lineOf: new Map(), bb: new Map(), groups: new Map(), dirty: new Set(), pending: new Map(), mark: 0, median: null };
     for (const id of this.order.toArray()) {
       if (built.pos.has(id) || built.ghosts.has(id)) continue;
       const m = this.itemMap.get(id);
@@ -571,8 +573,12 @@ export class Page {
   }
 
   private refreshKind(key: string): void {
-    const g = this.peek()?.groups.get(key);
-    if (g) g.kind = this.kindOf(g);
+    const ix = this.peek();
+    const g = ix?.groups.get(key);
+    if (!ix || !g) return;
+    const kind = this.kindOf(g);
+    if (kind !== g.kind) ix.median = null;
+    g.kind = kind;
   }
 
   /**
@@ -583,9 +589,11 @@ export class Page {
   private regroup(ix: LineIndex, g: Group, gone: BBox[] | null, added: BBox[] = []): void {
     if (!g.ids.length) {
       ix.groups.delete(g.key);
+      ix.median = null;
       return;
     }
     const b = g.bbox;
+    const kind = g.kind;
     if (gone && gone.every((o) => o[0] > b[0] && o[1] > b[1] && o[2] < b[2] && o[3] < b[3])) {
       let bb = b;
       for (const a of added) bb = unionBBox(bb, a);
@@ -597,6 +605,7 @@ export class Page {
     }
     g.first = ix.pos.get(g.ids[0]!)!;
     g.kind = this.kindOf(g);
+    if (gone === null || g.kind !== kind || g.bbox[3] - g.bbox[1] !== b[3] - b[1]) ix.median = null;
   }
 
   /** Takes items out of their groups in the index. */
@@ -773,7 +782,9 @@ export class Page {
   private assign(id: string): void {
     const b = this.bboxOf(id);
     const groups = this.groups();
-    const drawing = this.itemMap.get(id)!.get('type') === 'shape' || b[3] - b[1] > 2.5 * medianLineHeight([...groups.values()]);
+    const ix = this.ix();
+    ix.median ??= medianLineHeight([...groups.values()]);
+    const drawing = this.itemMap.get(id)!.get('type') === 'shape' || b[3] - b[1] > 2.5 * ix.median;
     if (!drawing) {
       const target = this.bestLine(b, groups);
       if (target) {
