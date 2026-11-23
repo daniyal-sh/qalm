@@ -1,6 +1,7 @@
 import type { Notebook } from './model/notebook';
 import type { Page } from './model/page';
 import { intersects } from './geometry/bbox';
+import { anchorLines } from './anchor';
 import type { Ask, BBox, Comment, Line } from './types';
 
 /** Short labels per page. Stored by the server (notebook DocRoom), never in Yjs. */
@@ -114,7 +115,10 @@ function selectionLines(sorted: Line[], itemIds: string[]): { lines: Line[]; ali
 /** The `p3:L4` (or `p3:L4-6`, or `p3`) a thread is about. */
 function threadRef(pos: number, c: Comment, sorted: Line[], byKey: Record<string, string>): string {
   let keys = c.lineKey && byKey[c.lineKey] ? [c.lineKey] : [];
-  if (c.anchor) {
+  if (c.anchorIds?.length) {
+    // Live: the lines that hold the selected items now (they may have moved); none once the ink is gone.
+    keys = anchorLines(c, sorted).map((l) => l.key);
+  } else if (c.anchor) {
     const box = c.anchor;
     const inBox = sorted.filter((l) => intersects(l.bbox, box)).map((l) => l.key);
     if (inBox.length) keys = inBox;

@@ -67,6 +67,11 @@ export interface Comment {
   replies: { author: Author; text: string; at: number }[];
   /** Page-space box of the selection a thread is about (a student's comment or Ask on a selection). */
   anchor?: BBox;
+  /**
+   * The selected item ids a thread is about. The pin box and the agent's line labels are derived from these items
+   * live (`threadBox`), so the thread follows its ink; `anchor` stays as the fallback for threads made before this.
+   */
+  anchorIds?: string[];
   /** The thread was started by an Ask: its question reaches agents as the `ask`, not as a `note`. */
   ask?: boolean;
 }

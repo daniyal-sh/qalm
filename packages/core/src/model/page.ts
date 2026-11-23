@@ -192,6 +192,8 @@ export class Page {
       };
       const anchor = m.get('anchor');
       if (Array.isArray(anchor) && anchor.length === 4) c.anchor = anchor as BBox;
+      const anchorIds = m.get('anchorIds');
+      if (Array.isArray(anchorIds) && anchorIds.length) c.anchorIds = anchorIds.filter((x): x is string => typeof x === 'string');
       if (m.get('ask') === true) c.ask = true;
       out.push(c);
     });
@@ -215,6 +217,7 @@ export class Page {
       m.set('resolved', false);
       m.set('replies', new Y.Array());
       if (c.anchor) m.set('anchor', [...c.anchor]);
+      if (c.anchorIds?.length) m.set('anchorIds', [...c.anchorIds]);
       if (c.ask) m.set('ask', true);
     });
     return id;

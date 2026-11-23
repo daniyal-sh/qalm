@@ -1,5 +1,5 @@
 /** Pure editor view maths: zoom, page layout and virtualization, PDF width buckets, pen-button tool switching. */
-import type { BBox, Comment, Line, PageInfo } from '@qalm/core';
+import { threadBox, type BBox, type Comment, type Item, type Line, type PageInfo } from '@qalm/core';
 
 export const MIN_ZOOM = 0.75;
 export const MAX_ZOOM = 4;
@@ -113,15 +113,15 @@ export interface Anchor {
  * Comment pins for a page: one per line with an open comment, one per open thread on a selection (at its box),
  * plus the active comment's, even if resolved.
  */
-export function commentAnchors(lines: Line[], comments: Comment[], activeCommentId: string | null): Anchor[] {
-  const byKey = new Map(lines.map((l) => [l.key, l]));
-  const keyOf = (c: Comment) => (c.anchor ? c.id : c.lineKey);
+export function commentAnchors(lines: Line[], comments: Comment[], activeCommentId: string | null, items: readonly Item[] = []): Anchor[] {
+  const keyOf = (c: Comment) => (c.anchor || c.anchorIds?.length ? c.id : c.lineKey);
   const active = comments.find((c) => c.id === activeCommentId);
   const activeKey = active ? keyOf(active) : undefined;
   const out = new Map<string, Anchor>();
   for (const c of comments) {
     if (c.resolved && c.id !== activeCommentId) continue;
-    const bbox = c.anchor ?? byKey.get(c.lineKey)?.bbox;
+    // Live: a selection thread's pin follows its ink, and has none once that ink is deleted.
+    const bbox = threadBox(c, items, lines);
     if (!bbox) continue;
     const key = keyOf(c);
     out.set(key, { lineKey: key, bbox, active: activeKey === key });

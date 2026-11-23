@@ -403,7 +403,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       const ids = new Set(scope.ids);
       const first = data.lines.filter((l) => l.itemIds.some((id) => ids.has(id))).sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0])[0];
       const asking = scope.mode === 'ask';
-      const commentId = data.page.addComment({ lineKey: first?.key ?? '', author: { kind: 'user', name: 'You' }, text, anchor: scope.bbox, ask: asking || undefined });
+      const commentId = data.page.addComment({ lineKey: first?.key ?? '', author: { kind: 'user', name: 'You' }, text, anchor: scope.bbox, anchorIds: scope.ids, ask: asking || undefined });
       if (asking) {
         notebook.addAsk(scope.pageId, text, { sel: { itemIds: scope.ids, bbox: scope.bbox }, commentId });
         askThread = commentId;
@@ -555,7 +555,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                       const info = pages[i]!;
                       const left = (contentW - slot.width) / 2;
                       const data = i >= first && i <= last ? pageData.get(info.id) : undefined;
-                      const cards = wideMargin && data ? marginCards(data.lines, data.comments, slot.width / info.size.w, MARGIN_CARD_H, 8, activeCommentId, slot.height) : [];
+                      const cards = wideMargin && data ? marginCards(data.lines, data.comments, slot.width / info.size.w, MARGIN_CARD_H, 8, activeCommentId, slot.height, data.items) : [];
                       return (
                         <React.Fragment key={slot.id}>
                           <View style={[styles.page, { left, top: slot.top, width: slot.width, height: slot.height, borderColor: c.line }]}>

@@ -41,3 +41,4 @@ export {
   type QinkSeen,
   type QinkAsk,
 } from './qink';
+export { threadBox, anchorInkRemoved, anchorLines } from './anchor';

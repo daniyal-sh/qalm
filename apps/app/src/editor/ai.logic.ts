@@ -1,4 +1,4 @@
-import type { BBox, Comment, Line } from '@qalm/core';
+import { threadBox as coreThreadBox, type BBox, type Comment, type Item, type Line } from '@qalm/core';
 
 import type { PageData } from './context';
 
@@ -54,10 +54,12 @@ export function markAllSeen(pages: Iterable<PageData>, seen: SeenThreads): SeenT
   return out;
 }
 
-/** Where a thread sits on its page: its selection box, else its line's box. */
-export function threadBox(c: Comment, lines: Line[]): BBox | null {
-  if (c.anchor) return c.anchor;
-  return lines.find((l) => l.key === c.lineKey)?.bbox ?? null;
+/**
+ * Where a thread sits on its page, live: a selection thread follows its items (null once they are all deleted),
+ * an older one keeps its stored box, a line thread sits at its line.
+ */
+export function threadBox(c: Comment, lines: Line[], items: readonly Item[] = []): BBox | null {
+  return coreThreadBox(c, items, lines);
 }
 
 export interface MarginCard {
@@ -79,10 +81,11 @@ export function marginCards(
   gap = 8,
   activeId: string | null = null,
   pageH?: number,
+  items: readonly Item[] = [],
 ): MarginCard[] {
   const placed = comments
     .filter((c) => !c.resolved || c.id === activeId)
-    .map((c) => ({ c, box: threadBox(c, lines) }))
+    .map((c) => ({ c, box: threadBox(c, lines, items) }))
     .filter((x): x is { c: Comment; box: BBox } => x.box !== null)
     .sort((a, b) => a.box[1] - b.box[1] || a.c.createdAt - b.c.createdAt);
   const out: MarginCard[] = [];

@@ -120,9 +120,9 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
   // Comments and lines for the comments panel.
   React.useEffect(() => {
     if (!page) return;
-    ed.reportPage(info.id, { page, index, lines, comments });
+    ed.reportPage(info.id, { page, index, lines, comments, items });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, lines, comments, index]);
+  }, [page, lines, comments, items, index]);
   React.useEffect(() => () => ed.reportPage(info.id, null), [info.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pdf = usePdfBackground(info, width, zoom);
@@ -181,7 +181,7 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
   const t = ed.tools;
   const inkTool = t.tool === 'text' ? 'none' : t.tool;
   const nightInk = info.paperColor === 'night' && t.penColor === '#27272a' ? '#e4e4e7' : t.penColor;
-  const anchors = commentAnchors(lines, comments, ed.activeCommentId);
+  const anchors = commentAnchors(lines, comments, ed.activeCommentId, items);
 
   const tapText = (x: number, y: number) => {
     const hit = hitText(items, x, y);
@@ -269,7 +269,7 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
         />
       ) : null}
       {anchors.map((a) => {
-        const c = comments.find((x) => x.id === a.lineKey) ?? comments.find((x) => x.lineKey === a.lineKey && !x.anchor && !x.resolved) ?? comments.find((x) => x.lineKey === a.lineKey);
+        const c = comments.find((x) => x.id === a.lineKey) ?? comments.find((x) => x.lineKey === a.lineKey && !x.anchor && !x.anchorIds?.length && !x.resolved) ?? comments.find((x) => x.lineKey === a.lineKey);
         return c ? (
           <Pressable
             key={a.lineKey}

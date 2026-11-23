@@ -12,7 +12,7 @@ const you = { kind: 'user' as const, name: 'You' };
 function pageWith(build: (p: Page) => void): PageData {
   const page = new Page(new Y.Doc());
   build(page);
-  return { page, index: 0, lines: page.lines(), comments: page.comments() };
+  return { page, index: 0, lines: page.lines(), comments: page.comments(), items: page.items() };
 }
 
 const line = (key: string, y: number): Line => ({ key, kind: 'line', itemIds: [key], bbox: [50, y, 200, y + 20] });
@@ -114,5 +114,22 @@ describe('selection threads', () => {
       { lineKey: 'a', bbox: [50, 100, 200, 120], active: false },
       { lineKey: 's1', bbox: [300, 300, 340, 330], active: true },
     ]);
+  });
+
+  it('follow their ink when it moves, and lose their pin and margin card once it is deleted', async () => {
+    const { commentAnchors } = await import('../src/editor/view');
+    const { anchorInkRemoved, LOCAL_ORIGIN } = await import('@qalm/core');
+    const page = new Page(new Y.Doc());
+    const pts = (x: number, y: number) => [0, 1, 2, 3].map((i) => ({ x: x + i * 10, y: y + i * 5, p: 0.5, tilt: Math.PI / 2, az: 0, t: i * 8 }));
+    page.addItem({ id: 'w', type: 'stroke', tool: 'pen', color: '#000', width: 2, points: pts(100, 100), bbox: [99, 99, 131, 116], createdAt: 0 });
+    const id = page.addComment({ lineKey: 'w', author: you, text: 'this', anchor: [99, 99, 131, 116], anchorIds: ['w'] });
+    page.doc.transact(() => page.updateItem('w', { points: pts(100, 400), bbox: [99, 399, 131, 416] }), LOCAL_ORIGIN);
+    const at = () => commentAnchors(page.lines(), page.comments(), null, page.items());
+    expect(at()).toEqual([{ lineKey: id, bbox: [99, 399, 131, 416], active: false }]);
+    expect(marginCards(page.lines(), page.comments(), 1, 64, 8, null, undefined, page.items()).map((c) => c.top)).toEqual([395]);
+    page.removeItems(['w']);
+    expect(at()).toEqual([]);
+    expect(marginCards(page.lines(), page.comments(), 1, 64, 8, null, undefined, page.items())).toEqual([]);
+    expect(anchorInkRemoved(page.comments()[0]!, page.items())).toBe(true);
   });
 });
