@@ -135,8 +135,13 @@ export class Notebook {
     this.tx(() => this.assetMap.set(a.id, a));
   }
 
-  addAsk(pageId: string, text: string): void {
-    this.tx(() => this.askArr.push([{ id: newId(), pageId, text, at: Date.now() }]));
+  /** Adds an Ask (optionally about a selection, answered in thread `commentId`). Returns its id. */
+  addAsk(pageId: string, text: string, extra: Pick<Ask, 'sel' | 'commentId'> = {}): string {
+    const ask: Ask = { id: newId(), pageId, text, at: Date.now() };
+    if (extra.sel) ask.sel = { itemIds: [...extra.sel.itemIds], bbox: [...extra.sel.bbox] };
+    if (extra.commentId) ask.commentId = extra.commentId;
+    this.tx(() => this.askArr.push([ask]));
+    return ask.id;
   }
 
   asks(): Ask[] {

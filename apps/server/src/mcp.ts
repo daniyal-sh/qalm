@@ -15,7 +15,8 @@ const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05
 const INSTRUCTIONS =
   'qalm notebooks in Q-ink Live format. Call wait() to list sessions, then wait(s) in a loop to follow live writing. ' +
   'Lines marked [n] are row n of the attached image; ~"…" is the device guess. Save your reading of a line with transcribe, ' +
-  'pin feedback with comment. You can never change ink.';
+  'pin feedback with comment. "note C5 …", "re C3 …" and "ask C6 …" are the student writing to you: answer with comment(thread). ' +
+  'You can never change ink.';
 
 const sArg = { type: 'string', description: 'Session (from wait with no arguments). Defaults to the last session you waited on.' };
 const TOOLS = [
@@ -38,8 +39,21 @@ const TOOLS = [
   },
   {
     name: 'comment',
-    description: 'Pins a comment next to a line (e.g. ref "p3:L4"). Never changes ink.',
-    inputSchema: { type: 'object', properties: { ref: { type: 'string' }, text: { type: 'string' }, s: sArg }, required: ['ref', 'text'], additionalProperties: false },
+    description:
+      'Starts a comment thread next to a line (ref "p3:L4"), or replies in a thread (thread "C3", e.g. to answer a note, re or ask). ' +
+      'Set resolve only when the thread is trivially done (e.g. the student said thanks). Never changes ink.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Line to start a thread on, e.g. "p3:L4" or "p3:D1"' },
+        thread: { type: 'string', description: 'Thread to reply in, e.g. "C3" (instead of ref)' },
+        text: { type: 'string' },
+        resolve: { type: 'boolean', description: 'With thread: also mark it resolved' },
+        s: sArg,
+      },
+      required: ['text'],
+      additionalProperties: false,
+    },
   },
 ];
 
@@ -169,18 +183,25 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
     const r = await stub.agentRead(docId, ref);
     return result(env, g, 'read', `${nb.title} ${ref}`, r);
   }
-  const ref = str(args.ref, 'ref', 64);
   const text = str(args.text, 'text');
+  if (name === 'comment') {
+    if (!g.can_comment) throw new ToolError('This connection may not leave comments. The student can turn this on in Settings → AI access.');
+    const thread = args.thread === undefined || args.thread === '' ? undefined : str(args.thread, 'thread', 16);
+    const cref = thread ? undefined : str(args.ref, 'ref', 64);
+    if (args.resolve !== undefined && typeof args.resolve !== 'boolean') throw new ToolError('resolve must be true or false');
+    const resolve = thread ? args.resolve === true : undefined;
+    const msg = await edited(stub.agentEdit(docId, { op: 'comment', ref: cref, thread, text, resolve, agentName: g.client_name }));
+    await log(env, g, 'comment', `${nb.title} ${thread ?? cref}`, text, null);
+    return { content: [{ type: 'text', text: msg }] };
+  }
+  const ref = str(args.ref, 'ref', 64);
   if (name === 'transcribe') {
     if (!g.can_transcribe) throw new ToolError('This connection may not save transcriptions. The student can turn this on in Settings → AI access.');
     const msg = await edited(stub.agentEdit(docId, { op: 'transcribe', ref, text }));
     await log(env, g, 'transcribe', `${nb.title} ${ref}`, text, null);
     return { content: [{ type: 'text', text: msg }] };
   }
-  if (!g.can_comment) throw new ToolError('This connection may not leave comments. The student can turn this on in Settings → AI access.');
-  const msg = await edited(stub.agentEdit(docId, { op: 'comment', ref, text, agentName: g.client_name }));
-  await log(env, g, 'comment', `${nb.title} ${ref}`, text, null);
-  return { content: [{ type: 'text', text: msg }] };
+  throw new ToolError(`Unknown tool: ${name}`);
 }
 
 async function edited(p: Promise<{ ok: boolean; text: string }>): Promise<string> {

@@ -1,13 +1,44 @@
 import type { Notebook } from './model/notebook';
 import type { Page } from './model/page';
-import type { Ask, Line } from './types';
+import { intersects } from './geometry/bbox';
+import type { Ask, BBox, Comment, Line } from './types';
 
 /** Short labels per page. Stored by the server (notebook DocRoom), never in Yjs. */
 export interface QinkLabels { [pageId: string]: { nextL: number; nextD: number; byKey: Record<string, string> } }
 /** What an agent session last saw: per page, line key -> hash of itemIds + text. */
 export interface QinkSnapshot { [pageId: string]: Record<string, string> }
-/** Lines to render with `renderLinesStripSvg(page, lineKeys, labels)`. */
-export interface QinkImage { pageId: string; lineKeys: string[]; labels: string[] }
+/** Rows to render with `renderLinesStripSvg(page, lineKeys, labels)`: line keys, or a page box for a crop row. */
+export interface QinkImage { pageId: string; lineKeys: (string | BBox)[]; labels: string[] }
+/** Short thread labels (`C1`, `C2`, …), notebook-wide and never reused. Stored by the server, never in Yjs. */
+export interface QinkThreads { next: number; byId: Record<string, { label: string; pageId: string }> }
+/** What one agent has seen of each thread: comment id -> number of entries (the comment plus its replies). */
+export type QinkSeen = Record<string, number>;
+/** An Ask as the encoder needs it. */
+export type QinkAsk = Pick<Ask, 'pageId' | 'text' | 'sel' | 'commentId'>;
+
+export const emptyThreads = (): QinkThreads => ({ next: 1, byId: {} });
+
+/** The thread's label, assigning the next one if it has none. */
+export function threadLabel(threads: QinkThreads, commentId: string, pageId: string): string {
+  const hit = threads.byId[commentId];
+  if (hit) return hit.label;
+  const label = `C${threads.next++}`;
+  threads.byId[commentId] = { label, pageId };
+  return label;
+}
+
+/** Resolves `C3` to its page and comment id, for `comment` with `thread`. */
+export function resolveThread(threads: QinkThreads, ref: string): { pageId: string; commentId: string } {
+  const want = ref.trim().toUpperCase();
+  if (!/^C\d+$/.test(want)) throw new Error(`Bad thread: ${ref} (expected e.g. C3)`);
+  const hit = Object.entries(threads.byId).find(([, v]) => v.label === want);
+  if (!hit) throw new Error(`No thread ${want}`);
+  return { pageId: hit[1].pageId, commentId: hit[0] };
+}
+
+/** Thread entries are quoted up to this many characters. */
+const MAX_NOTE = 1000;
+const clip = (t: string) => (t.length > MAX_NOTE ? `${t.slice(0, MAX_NOTE)}…` : t);
 
 const quote = (s: string) => JSON.stringify(s);
 
@@ -55,10 +86,59 @@ function labelOrder(a: string, b: string): number {
   return a[0] !== b[0] ? (a[0] === 'L' ? -1 : 1) : Number(a.slice(1)) - Number(b.slice(1));
 }
 
+/** `L4-6,D1`: labels in label order, consecutive numbers of the same kind folded into ranges. */
+export function labelList(labels: string[]): string {
+  const sorted = [...new Set(labels)].sort(labelOrder);
+  const out: string[] = [];
+  for (let i = 0; i < sorted.length; ) {
+    const k = sorted[i]![0]!;
+    const lo = Number(sorted[i]!.slice(1));
+    let hi = lo;
+    let j = i + 1;
+    while (j < sorted.length && sorted[j]![0] === k && Number(sorted[j]!.slice(1)) === hi + 1) hi = Number(sorted[j++]!.slice(1));
+    out.push(hi > lo ? `${k}${lo}-${hi}` : `${k}${lo}`);
+    i = j;
+  }
+  return out.join(',');
+}
+
+/** The lines a selection touches, and whether it is exactly those whole lines (otherwise it gets a crop row). */
+function selectionLines(sorted: Line[], itemIds: string[]): { lines: Line[]; aligned: boolean } {
+  const ids = new Set(itemIds);
+  const lines = sorted.filter((l) => l.itemIds.some((id) => ids.has(id)));
+  const covered = new Set(lines.flatMap((l) => l.itemIds));
+  const aligned = lines.length > 0 && lines.every((l) => l.itemIds.every((id) => ids.has(id))) && itemIds.every((id) => covered.has(id));
+  return { lines, aligned };
+}
+
+/** The `p3:L4` (or `p3:L4-6`, or `p3`) a thread is about. */
+function threadRef(pos: number, c: Comment, sorted: Line[], byKey: Record<string, string>): string {
+  let keys = c.lineKey && byKey[c.lineKey] ? [c.lineKey] : [];
+  if (c.anchor) {
+    const box = c.anchor;
+    const inBox = sorted.filter((l) => intersects(l.bbox, box)).map((l) => l.key);
+    if (inBox.length) keys = inBox;
+  }
+  const labels = keys.map((k) => byKey[k]).filter((x): x is string => !!x);
+  return labels.length ? `p${pos}:${labelList(labels)}` : `p${pos}`;
+}
+
+/** A row for a line that is in the image whatever its text: ` [n]`, then ` "trusted"` or ` ~"guess"`. */
+function rowBody(l: Line, row: number): string {
+  if (l.text === undefined) return ` [${row}]`;
+  return ` [${row}] ${needsImage(l) ? '~' : ''}${quote(l.text)}`;
+}
+
+/** A finite, ordered box (asks come from clients). */
+function cleanBox(b: BBox): BBox {
+  const v = b.map((x) => (Number.isFinite(x) ? x : 0));
+  return [Math.min(v[0]!, v[2]!), Math.min(v[1]!, v[3]!), Math.max(v[0]!, v[2]!), Math.max(v[1]!, v[3]!)];
+}
+
 class Rows {
-  readonly keys: string[] = [];
+  readonly keys: (string | BBox)[] = [];
   readonly labels: string[] = [];
-  add(key: string): number {
+  add(key: string | BBox): number {
     this.keys.push(key);
     this.labels.push(`[${this.keys.length}]`);
     return this.keys.length;
@@ -79,8 +159,10 @@ export function encodeQinkUpdate(
   pages: Record<string, Page>,
   labels: QinkLabels,
   prev: QinkSnapshot,
-  opts: { session: string; rev: number; asks?: Pick<Ask, 'pageId' | 'text'>[] },
-): { text: string; image: QinkImage | null; snapshot: QinkSnapshot } {
+  opts: { session: string; rev: number; asks?: QinkAsk[]; threads?: QinkThreads; seen?: QinkSeen },
+): { text: string; image: QinkImage | null; snapshot: QinkSnapshot; seen: QinkSeen } {
+  const threads = opts.threads ?? emptyThreads();
+  const seen: QinkSeen = { ...opts.seen };
   const pos = new Map(nb.pages().map((p, i) => [p.id, i + 1]));
   const snapshot: QinkSnapshot = { ...prev };
   const all: Section[] = [];
@@ -110,6 +192,16 @@ export function encodeQinkUpdate(
   const askPage = opts.asks?.length ? opts.asks[opts.asks.length - 1]!.pageId : undefined;
   const current = all.find((s) => s.pageId === askPage) ?? changedSections[changedSections.length - 1] ?? all[0];
 
+  // Selection asks on the current page: their lines always go into the image (even unchanged or trusted ones).
+  const asks = opts.asks ?? [];
+  const selected = new Set<string>();
+  if (current) {
+    for (const a of asks) {
+      if (a.pageId !== current.pageId || !a.sel) continue;
+      for (const l of selectionLines(current.sorted, a.sel.itemIds).lines) selected.add(l.key);
+    }
+  }
+
   const out: string[] = [];
   const rows = new Rows();
   const diff = (s: Section, image: boolean) => {
@@ -118,13 +210,18 @@ export function encodeQinkUpdate(
     if (first) {
       const i = s.sorted.indexOf(first);
       const ctx = s.sorted.slice(0, i).reverse().find((l) => l.kind === 'line');
-      if (ctx) out.push(` ${byKey[ctx.key]}${ctx.text ? ` ${ctx.text}` : ''}`);
+      if (ctx && !(image && selected.has(ctx.key))) out.push(` ${byKey[ctx.key]}${ctx.text ? ` ${ctx.text}` : ''}`);
     }
     for (const l of s.changed) {
-      const row = image && needsImage(l) ? rows.add(l.key) : undefined;
-      out.push(`${s.added.has(l.key) ? '+' : '~'}${byKey[l.key]}${body(l, row)}`);
+      const forced = image && selected.has(l.key);
+      const row = image && (needsImage(l) || forced) ? rows.add(l.key) : undefined;
+      out.push(`${s.added.has(l.key) ? '+' : '~'}${byKey[l.key]}${forced ? rowBody(l, row!) : body(l, row)}`);
     }
     for (const label of s.removed) out.push(`-${label}`);
+    if (!image) return;
+    // Selected lines that didn't change, so the agent sees what the question is about.
+    const changed = new Set(s.changed.map((l) => l.key));
+    for (const l of s.sorted) if (selected.has(l.key) && !changed.has(l.key)) out.push(` ${byKey[l.key]}${rowBody(l, rows.add(l.key))}`);
   };
 
   out.push(`#q s=${opts.session} r=${opts.rev}${current ? ` p${current.pos}${title(current.sorted)}` : ''}`);
@@ -134,12 +231,48 @@ export function encodeQinkUpdate(
     out.push(`p${s.pos}${title(s.sorted)}`);
     diff(s, false);
   }
-  for (const a of opts.asks ?? []) out.push(`ask ${quote(a.text)}`);
+
+  // An ask's thread is delivered as the ask; its first entry never comes back as a note.
+  for (const a of asks) if (a.commentId) seen[a.commentId] = Math.max(seen[a.commentId] ?? 0, 1);
+
+  // The student's new comments and replies, on every page in this update.
+  for (const s of all) {
+    const byKey = labels[s.pageId]!.byKey;
+    for (const c of pages[s.pageId]!.comments()) {
+      const entries = [{ author: c.author, text: c.text }, ...c.replies];
+      const from = Math.max(seen[c.id] ?? 0, c.ask ? 1 : 0);
+      for (let i = from; i < entries.length; i++) {
+        const e = entries[i]!;
+        if (e.author.kind !== 'user' || (i === 0 && c.resolved)) continue;
+        const label = threadLabel(threads, c.id, s.pageId);
+        out.push(i === 0 ? `note ${label} ${threadRef(s.pos, c, s.sorted, byKey)} ${quote(clip(e.text))}` : `re ${label} ${quote(clip(e.text))}`);
+      }
+      seen[c.id] = Math.max(seen[c.id] ?? 0, entries.length);
+    }
+  }
+
+  for (const a of asks) {
+    const parts = ['ask'];
+    if (a.commentId) parts.push(threadLabel(threads, a.commentId, a.pageId));
+    const p = pos.get(a.pageId);
+    if (a.sel && p !== undefined) {
+      const sec = all.find((x) => x.pageId === a.pageId);
+      const sl = sec ? selectionLines(sec.sorted, a.sel.itemIds) : { lines: [], aligned: false };
+      const byKey = labels[a.pageId]?.byKey ?? {};
+      const ls = sl.lines.map((l) => byKey[l.key]).filter((x): x is string => !!x);
+      parts.push(ls.length ? `p${p}:${labelList(ls)}` : `p${p}`);
+      // Not whole lines (part of a line, a text box, a picture): the selected region goes in as its own row.
+      if (sec && sec === current && !sl.aligned) parts.push(`[${rows.add(cleanBox(a.sel.bbox))}]`);
+    }
+    parts.push(quote(a.text));
+    out.push(parts.join(' '));
+  }
 
   return {
     text: out.join('\n'),
     image: current && rows.keys.length ? { pageId: current.pageId, lineKeys: rows.keys, labels: rows.labels } : null,
     snapshot,
+    seen,
   };
 }
 

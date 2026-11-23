@@ -6,7 +6,7 @@ import * as decoding from 'lib0/decoding';
 import { Notebook, Page } from '@qalm/core';
 import type { Env } from './env';
 import { parseDocId, nbDocId, pgDocId, room, type DocRef } from './docs';
-import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit } from './agent';
+import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit, type PageEdit } from './agent';
 
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
@@ -21,6 +21,12 @@ interface Attachment {
   userId: string;
   /** Awareness client ids announced on this socket, with their last clock. */
   aw: Record<string, number>;
+}
+
+/** Whether Yjs type `t` is `root` or nested inside it. */
+function isUnder(t: Y.AbstractType<any>, root: Y.AbstractType<any>): boolean {
+  for (let x: Y.AbstractType<any> | null = t; x; x = (x._item?.parent as Y.AbstractType<any> | undefined) ?? null) if (x === root) return true;
+  return false;
 }
 
 const isSocket = (o: unknown): o is WebSocket => typeof o === 'object' && o !== null && 'send' in o && 'serializeAttachment' in o;
@@ -38,6 +44,8 @@ export class DocRoom extends DurableObject<Env> {
   private ref: DocRef | null = null;
   private hub: AgentHub | null = null;
   private syncedMeta = '';
+  /** A client's transaction touched this page's comments (set just before the update event reports it). */
+  private commentTouched = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -50,6 +58,11 @@ export class DocRoom extends DurableObject<Env> {
   }
 
   private listen(): void {
+    const comments = this.doc.getMap('comments');
+    // afterTransaction runs before the transaction's 'update' event, so onClientUpdate sees the flag.
+    this.doc.on('afterTransaction', (tx: Y.Transaction) => {
+      if (isSocket(tx.origin) && [...tx.changed.keys()].some((t) => isUnder(t, comments))) this.commentTouched = true;
+    });
     this.doc.on('update', (update: Uint8Array, origin: unknown) => this.onUpdate(update, origin));
   }
 
@@ -142,8 +155,10 @@ export class DocRoom extends DurableObject<Env> {
     if (!ref) return;
     const at = Date.now();
     if (ref.kind === 'pg') {
+      const comment = this.commentTouched;
+      this.commentTouched = false;
       room(this.env, nbDocId(ref.notebookId))
-        .pageChanged(nbDocId(ref.notebookId), ref.pageId, at)
+        .pageChanged(nbDocId(ref.notebookId), ref.pageId, at, comment)
         .catch((e: unknown) => console.error('pageChanged failed', e));
     } else if (ref.kind === 'nb') {
       this.agents().onIndexChanged();
@@ -316,9 +331,9 @@ export class DocRoom extends DurableObject<Env> {
   }
 
   /** Page room → notebook room, on every client update of a page. */
-  pageChanged(docId: string, pageId: string, at: number): void {
+  pageChanged(docId: string, pageId: string, at: number, comment = false): void {
     this.setDocId(docId);
-    this.agents().onPageChanged(pageId, at);
+    this.agents().onPageChanged(pageId, at, comment);
   }
 
   lastClientUpdateAt(docId: string): number {
@@ -360,27 +375,32 @@ export class DocRoom extends DurableObject<Env> {
     }
   }
 
-  /** Notebook room → page room: an agent's transcription or comment. Agents never touch ink. */
-  applyAgentEdit(docId: string, edit: AgentEdit & { lineKey: string }): { ok: boolean; text: string } {
+  /** Notebook room → page room: an agent's transcription, comment or reply. Agents never touch ink. */
+  applyAgentEdit(docId: string, edit: PageEdit): { ok: boolean; text: string; id?: string } {
     try {
-      return { ok: true, text: this.applyAgentEditOrThrow(docId, edit) };
+      return { ok: true, ...this.applyAgentEditOrThrow(docId, edit) };
     } catch (e) {
       return { ok: false, text: e instanceof Error ? e.message : String(e) };
     }
   }
 
-  private applyAgentEditOrThrow(docId: string, edit: AgentEdit & { lineKey: string }): string {
+  private applyAgentEditOrThrow(docId: string, edit: PageEdit): { text: string; id?: string } {
     this.setDocId(docId);
     if (this.ref?.kind !== 'pg') throw new Error('Not a page room');
     const page = new Page(this.doc);
+    if (edit.op === 'reply') {
+      if (!page.replyToComment(edit.commentId, { kind: 'agent', name: edit.agentName }, edit.text)) throw new Error(`Thread ${edit.ref} no longer exists`);
+      if (edit.resolve) page.resolveComment(edit.commentId);
+      return { text: `Replied in ${edit.ref}${edit.resolve ? ' and resolved it' : ''}` };
+    }
     const line = page.lines().find((l) => l.key === edit.lineKey);
     if (!line) throw new Error(`Line ${edit.ref} no longer exists`);
     if (edit.op === 'transcribe') {
       if (line.textSrc === 'user') throw new Error(`The student typed ${edit.ref} themselves; leave a comment instead`);
       page.setLineText(edit.lineKey, edit.text, 'agent');
-      return `Saved ${edit.ref}`;
+      return { text: `Saved ${edit.ref}` };
     }
-    page.addComment({ lineKey: edit.lineKey, author: { kind: 'agent', name: edit.agentName }, text: edit.text });
-    return `Commented on ${edit.ref}`;
+    const id = page.addComment({ lineKey: edit.lineKey, author: { kind: 'agent', name: edit.agentName }, text: edit.text });
+    return { text: `Commented on ${edit.ref}`, id };
   }
 }
