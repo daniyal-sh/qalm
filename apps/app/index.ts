@@ -19,5 +19,6 @@ if (Platform.OS === 'web') {
     require('expo-router/entry');
   });
 } else {
+  require('./src/lib/nativeCrypto'); // Web Crypto for Hermes, before any module asks for randomness
   require('expo-router/entry');
 }
