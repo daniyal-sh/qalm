@@ -5,7 +5,7 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import { Notebook, Page } from '@qalm/core';
 import type { Env } from './env';
-import { parseDocId, nbDocId, room, type DocRef } from './docs';
+import { parseDocId, nbDocId, pgDocId, room, type DocRef } from './docs';
 import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit } from './agent';
 
 const MSG_SYNC = 0;
@@ -31,7 +31,7 @@ const isSocket = (o: unknown): o is WebSocket => typeof o === 'object' && o !== 
  * Notebook rooms also hold Q-ink labels and per-agent state (see agent.ts).
  */
 export class DocRoom extends DurableObject<Env> {
-  readonly doc = new Y.Doc({ gc: true });
+  doc = new Y.Doc({ gc: true });
   private sql: SqlStorage;
   private updateCount = 0;
   private docId: string | null = null;
@@ -42,16 +42,24 @@ export class DocRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS updates (seq INTEGER PRIMARY KEY AUTOINCREMENT, data BLOB NOT NULL)`);
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS snapshot (part INTEGER PRIMARY KEY, data BLOB NOT NULL)`);
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
+    this.createTables();
     this.load();
     const id = this.kvGet<string>('docId');
     if (id) this.setDocId(id);
+    this.listen();
+  }
+
+  private listen(): void {
     this.doc.on('update', (update: Uint8Array, origin: unknown) => this.onUpdate(update, origin));
   }
 
   // ---- storage ----
+
+  private createTables(): void {
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS updates (seq INTEGER PRIMARY KEY AUTOINCREMENT, data BLOB NOT NULL)`);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS snapshot (part INTEGER PRIMARY KEY, data BLOB NOT NULL)`);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
+  }
 
   kvGet<T>(k: string): T | undefined {
     const row = this.sql.exec<{ v: string }>('SELECT v FROM kv WHERE k = ?', k).toArray()[0];
@@ -151,9 +159,13 @@ export class DocRoom extends DurableObject<Env> {
     this.syncedMeta = key;
     this.ctx.waitUntil(
       this.env.DB.prepare('UPDATE notebooks SET title = ?2, ai_access = ?3, updated_at = ?4 WHERE id = ?1')
-        .bind(notebookId, meta.title ?? '', meta.aiAccess ? 1 : 0, Date.now())
+        .bind(notebookId, meta.title ?? '', meta.aiAccess === true ? 1 : 0, Date.now())
         .run()
-        .catch((e: unknown) => console.error('notebook row sync failed', e)),
+        .catch((e: unknown) => {
+          // Retry on the next update.
+          if (this.syncedMeta === key) this.syncedMeta = '';
+          console.error('notebook row sync failed', e);
+        }),
     );
   }
 
@@ -262,6 +274,41 @@ export class DocRoom extends DurableObject<Env> {
 
   // ---- RPC ----
 
+  /** Notebook room: purges every page room it knows of, then itself ("Delete forever"). */
+  async purgeNotebook(docId: string): Promise<void> {
+    this.setDocId(docId);
+    if (this.ref?.kind !== 'nb') throw new Error('Not a notebook room');
+    const notebookId = this.ref.notebookId;
+    const pageIds = new Set([...new Notebook(this.doc).pages().map((p) => p.id), ...Object.keys(this.kvGet<Record<string, number>>('changed') ?? {})]);
+    await Promise.all(
+      [...pageIds].map(async (pid) => {
+        const id = pgDocId(notebookId, pid);
+        await room(this.env, id).purge(id);
+      }),
+    );
+    await this.purge(docId);
+  }
+
+  /** Closes every socket and deletes this room's storage. The in-memory doc goes when the object is evicted. */
+  async purge(docId: string): Promise<void> {
+    this.setDocId(docId);
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(4404, 'deleted');
+      } catch {
+        /* closing */
+      }
+    }
+    await this.ctx.storage.deleteAll();
+    this.createTables();
+    this.kvPut('docId', docId);
+    this.updateCount = 0;
+    this.hub = null;
+    this.doc.destroy();
+    this.doc = new Y.Doc({ gc: true });
+    this.listen();
+  }
+
   /** The whole doc as one Yjs update. */
   getState(docId: string): Uint8Array {
     this.setDocId(docId);
@@ -279,9 +326,19 @@ export class DocRoom extends DurableObject<Env> {
     return this.agents().lastClientUpdateAt();
   }
 
-  agentWait(docId: string, clientId: string, session: string, cfg: AgentConfig): Promise<AgentResult> {
+  /** For the session list: the live AI access switch (unknown → off) and the last client update. */
+  agentInfo(docId: string): { aiAccess: boolean; at: number } {
     this.setDocId(docId);
-    return this.agents().wait(clientId, session, cfg);
+    return { aiAccess: this.agents().aiAccess(), at: this.agents().lastClientUpdateAt() };
+  }
+
+  async agentWait(docId: string, clientId: string, session: string, cfg: AgentConfig): Promise<AgentResult> {
+    this.setDocId(docId);
+    try {
+      return await this.agents().wait(clientId, session, cfg);
+    } catch (e) {
+      return { text: e instanceof Error ? e.message : String(e), svg: null, changed: false, error: true };
+    }
   }
 
   async agentRead(docId: string, ref: string): Promise<AgentResult> {

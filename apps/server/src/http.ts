@@ -2,7 +2,7 @@ import type { Env } from './env';
 import { num } from './env';
 import { handleAuth, requireUser } from './auth';
 import { handleAuthorize, messagePage } from './consent';
-import { canAccess, parseDocId, room } from './docs';
+import { canAccess, deleteNotebook, parseDocId, room } from './docs';
 import { type GrantRow, userNotebooks } from './grants';
 import { HttpError, error, json, now, origin, randomToken, readJson, sha256Hex } from './util';
 
@@ -10,7 +10,7 @@ const TICKET_TTL_MS = 30_000;
 const SHA = /^[0-9a-f]{64}$/;
 
 /** Paths the app calls cross-origin (web build on another origin, Electron from file://). Bearer auth only, no cookies. */
-const CORS_PATHS = /^\/(auth\/(email\/start|email\/verify|apple|google|refresh)|sync\/ticket|assets\/[^/]+|ai\/.*|health)$/;
+const CORS_PATHS = /^\/(auth\/(email\/start|email\/verify|apple|google|refresh)|sync\/ticket|notebooks\/[^/]+|assets\/[^/]+|ai\/.*|health)$/;
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
@@ -88,6 +88,14 @@ async function route(req: Request, env: Env, url: URL): Promise<Response | null>
     headers.set('X-Doc-Id', docId);
     headers.set('X-User-Id', row.user_id);
     return room(env, docId).fetch(new Request(req.url, { headers }));
+  }
+
+  // ---- Delete forever (owner only) ----
+  const nm = /^\/notebooks\/([^/]+)$/.exec(path);
+  if (nm && req.method === 'DELETE') {
+    const userId = await requireUser(req, env);
+    if (!(await deleteNotebook(env, userId, decodeURIComponent(nm[1]!)))) throw new HttpError(404, 'Not found');
+    return json({ ok: true });
   }
 
   // ---- assets (content-addressed) ----

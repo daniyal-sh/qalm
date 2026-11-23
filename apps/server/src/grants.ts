@@ -37,27 +37,39 @@ export async function loadLibrary(env: Env, userId: string): Promise<{ folders: 
   return { folders: lib.folders(), entries: lib.entries().filter((e) => !e.deletedAt) };
 }
 
-export interface NotebookChoice { id: string; title: string; folderId: string | null }
+export interface NotebookChoice {
+  id: string;
+  title: string;
+  folderId: string | null;
+  /** The notebook's AI access switch as mirrored into D1 (unknown → off). Agent calls check the live value in the room. */
+  aiAccess: boolean;
+}
 
-/** Every notebook the user owns: library entries first, then rows only D1 knows about. */
+/**
+ * The user's live notebooks: library entries that are not in the trash, owned by the user in D1 and not deleted
+ * forever. D1 rows that are not in the library are never shown.
+ */
 export async function userNotebooks(env: Env, userId: string): Promise<{ folders: Folder[]; notebooks: NotebookChoice[] }> {
   const [lib, rows] = await Promise.all([
     loadLibrary(env, userId),
-    env.DB.prepare('SELECT id, title FROM notebooks WHERE owner_id = ?1 ORDER BY updated_at DESC').bind(userId).all<{ id: string; title: string }>(),
+    env.DB.prepare('SELECT id, title, ai_access FROM notebooks WHERE owner_id = ?1 AND deleted_at IS NULL')
+      .bind(userId)
+      .all<{ id: string; title: string; ai_access: number }>(),
   ]);
-  const owned = new Map(rows.results.map((r) => [r.id, r.title]));
+  const owned = new Map(rows.results.map((r) => [r.id, r]));
   const out: NotebookChoice[] = [];
-  const seen = new Set<string>();
   for (const e of lib.entries) {
-    if (!owned.has(e.id)) continue;
-    seen.add(e.id);
-    out.push({ id: e.id, title: e.title || owned.get(e.id) || 'Untitled', folderId: e.folderId });
+    const row = owned.get(e.id);
+    if (!row) continue;
+    out.push({ id: e.id, title: e.title || row.title || 'Untitled', folderId: e.folderId, aiAccess: row.ai_access === 1 });
   }
-  for (const [id, title] of owned) if (!seen.has(id)) out.push({ id, title: title || 'Untitled', folderId: null });
   return { folders: lib.folders, notebooks: out };
 }
 
-/** Notebooks a grant covers right now (folders are resolved live, so new notebooks in them are included). */
+/**
+ * Notebooks a grant covers right now (folders are resolved live, so new notebooks in them are included). An agent sees
+ * only those whose AI access is on; mcp.ts checks that live in each notebook's room.
+ */
 export async function grantedNotebooks(env: Env, g: GrantRow): Promise<NotebookChoice[]> {
   const ids = new Set<string>(JSON.parse(g.notebook_ids) as string[]);
   const folders = new Set<string>(JSON.parse(g.folder_ids) as string[]);

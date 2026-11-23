@@ -24,6 +24,8 @@ interface AgentState {
 
 const agentKey = (clientId: string) => `agent:${clientId}`;
 
+export const AI_OFF = 'AI access is off for this notebook. The student can turn it on in the notebook.';
+
 /**
  * Lives in a notebook's DocRoom. Only this object assigns Q-ink labels, so they stay stable and unique.
  * Storage: `labels` (QinkLabels), `changed` (pageId → last client update), `agent:{clientId}` (AgentState).
@@ -42,6 +44,15 @@ export class AgentHub {
 
   private labels(): QinkLabels {
     return this.r.kvGet<QinkLabels>('labels') ?? {};
+  }
+
+  /** The notebook's AI access switch, read live from the index doc. Unknown (never synced) counts as off. */
+  aiAccess(): boolean {
+    return this.nb().meta().aiAccess === true;
+  }
+
+  private requireAccess(): void {
+    if (!this.aiAccess()) throw new Error(AI_OFF);
   }
 
   lastClientUpdateAt(): number {
@@ -125,6 +136,8 @@ export class AgentHub {
   }
 
   private async tryDeliver(clientId: string, session: string, cfg: AgentConfig): Promise<AgentResult | { retryAt: number }> {
+    // Checked on every pass: turning AI access off ends a wait at once (meta changes wake waiters).
+    this.requireAccess();
     const st = this.state(clientId);
     const nb = this.nb();
     const allAsks = nb.asks();
@@ -141,6 +154,7 @@ export class AgentHub {
     }
 
     const pages = await this.loadPages([...changedIds, ...asks.map((a) => a.pageId).filter((id) => live.has(id))]);
+    this.requireAccess();
     // Re-read after the await: another call may have delivered meanwhile.
     const cur = this.state(clientId);
     if (cur.rev !== st.rev || cur.askCount !== st.askCount) return { retryAt: 0 };
@@ -161,6 +175,7 @@ export class AgentHub {
 
   /** `outline`, `p3`, `p3:L2-9`, `pdf:p2`. */
   async read(ref: string): Promise<AgentResult> {
+    this.requireAccess();
     const nb = this.nb();
     const infos = nb.pages();
     let ids: string[] = [];
@@ -171,6 +186,7 @@ export class AgentHub {
       if (info) ids = [info.id];
     }
     const pages = await this.loadPages(ids);
+    this.requireAccess();
     const labels = this.labels();
     const r = encodeQinkRead(nb, pages, labels, ref);
     this.r.kvPut('labels', labels);
@@ -178,6 +194,7 @@ export class AgentHub {
   }
 
   async edit(edit: AgentEdit): Promise<string> {
+    this.requireAccess();
     const { pageId, lineKey } = resolveRef(this.labels(), this.nb(), edit.ref);
     const docId = pgDocId(this.notebookId, pageId);
     const r = await room(this.env, docId).applyAgentEdit(docId, { ...edit, lineKey });

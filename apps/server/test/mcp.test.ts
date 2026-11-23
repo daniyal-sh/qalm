@@ -2,8 +2,8 @@ import { SELF } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { Notebook, Page, createNotebookDoc } from '@qalm/core';
-import { BASE, YClient, call, captureLink, cookieJar, signIn, stroke, until, type Tokens } from './helpers';
+import { Library, Notebook, Page, createNotebookDoc, type LibraryEntry } from '@qalm/core';
+import { BASE, YClient, call, captureLink, cookieJar, signIn, stroke, ticket, until, type Tokens } from './helpers';
 import { sessionOf } from '../src/grants';
 
 const REDIRECT = 'https://client.test/cb';
@@ -17,6 +17,7 @@ async function connectAgent(
   email: string,
   pick: { notebooks: string[]; comment: boolean; transcribe: boolean },
   clientName = 'Tutor',
+  onConsent?: (html: string) => void,
 ): Promise<string> {
   const reg = await call('/oauth/register', {
     method: 'POST',
@@ -48,6 +49,7 @@ async function connectAgent(
   jar.take(consent);
   const html = await consent.text();
   expect(html).toContain(`${clientName} wants to read your notes`);
+  onConsent?.(html);
   const handle = /name="handle" value="([^"]*)"/.exec(html)![1]!;
   const rid = /name="rid" value="([^"]*)"/.exec(html)![1]!;
 
@@ -88,13 +90,45 @@ async function tool(token: string, name: string, args: Record<string, unknown> =
 }
 const textOf = (r: Awaited<ReturnType<typeof tool>>) => r.content.filter((c) => c.type === 'text').map((c) => (c as { text: string }).text).join('\n');
 
-/** A synced notebook with one page; returns live clients for its index and first page. */
-async function notebook(t: Tokens, id: string, title: string) {
+async function serverDoc(docId: string): Promise<Y.Doc> {
+  const st = await env.DOC_ROOM.get(env.DOC_ROOM.idFromName(docId)).getState(docId);
+  const d = new Y.Doc();
+  Y.applyUpdate(d, st);
+  return d;
+}
+
+/** Edits the user's library doc over sync and waits until the server has it. */
+async function editLibrary(t: Tokens, fn: (lib: Library) => void): Promise<void> {
+  const docId = `lib:${t.userId}`;
+  const c = await YClient.connect(t.accessToken, docId);
+  fn(new Library(c.doc));
+  const key = (l: Library) => JSON.stringify(l.entries().sort((a, b) => a.id.localeCompare(b.id)));
+  const want = key(new Library(c.doc));
+  await until(async () => key(new Library(await serverDoc(docId))) === want);
+  c.close();
+}
+
+/** Waits until the server's index doc has this AI access value. */
+async function serverAi(id: string, on: boolean): Promise<void> {
+  await until(async () => new Notebook(await serverDoc(`nb:${id}`)).meta().aiAccess === on);
+}
+
+const aiRow = async (id: string) =>
+  (await env.DB.prepare('SELECT ai_access FROM notebooks WHERE id = ?1').bind(id).first<{ ai_access: number }>())?.ai_access;
+
+/** A synced notebook with one page, in the library, with AI access on unless `ai: false`. Returns live clients for its index and first page. */
+async function notebook(t: Tokens, id: string, title: string, opts: { ai?: boolean; entry?: Partial<LibraryEntry> } = {}) {
+  const ai = opts.ai ?? true;
   const init = createNotebookDoc({ id, title, cover: '#4338ca', paper: 'ruled', paperColor: 'white', size: { w: 595, h: 842 } });
+  new Notebook(init).setMeta({ aiAccess: ai });
   const nbc = await YClient.connect(t.accessToken, `nb:${id}`, init);
   const nb = new Notebook(nbc.doc);
   const pageId = nb.pages()[0]!.id;
   const pgc = await YClient.connect(t.accessToken, `pg:${id}:${pageId}`);
+  await editLibrary(t, (lib) =>
+    lib.putEntry({ id, title, cover: '#4338ca', folderId: null, updatedAt: Date.now(), aiAccess: ai, favorite: false, deletedAt: null, ...opts.entry }),
+  );
+  await serverAi(id, ai);
   return { nb, nbc, pageId, pgc, page: new Page(pgc.doc) };
 }
 
@@ -270,5 +304,110 @@ describe('mcp', () => {
     expect(n.page.lines()[0]!.text).toBe('my words');
     n.nbc.close();
     n.pgc.close();
+  });
+
+  it('the AI access switch hides a notebook from every tool at once; turning it on restores it', async () => {
+    const t = await signIn('aiswitch@example.com');
+    const n = await notebook(t, 'ainb', 'Physics');
+    const off = await notebook(t, 'aioffnb', 'Private', { ai: false });
+    n.page.addItem(stroke('a1', 50, 100, 200, 120));
+    let html = '';
+    const token = await connectAgent('aiswitch@example.com', { notebooks: ['ainb', 'aioffnb'], comment: true, transcribe: true }, 'Tutor', (h) => (html = h));
+    // The consent page marks notebooks whose AI access is off.
+    expect(html).toContain('Private <span class="m">· AI access off</span>');
+    expect(html).not.toContain('Physics <span class="m">· AI access off');
+    const s = sessionOf('ainb');
+
+    // Granted but switched off: never listed or readable.
+    let list = textOf(await tool(token, 'wait'));
+    expect(list).toContain(`s=${s} "Physics"`);
+    expect(list).not.toContain('Private');
+    const hidden = await tool(token, 'read', { ref: 'outline', s: sessionOf('aioffnb') });
+    expect(hidden.isError).toBe(true);
+    expect(textOf(hidden)).toContain('AI access is off');
+    expect(textOf(await tool(token, 'read', { ref: 'p1', s }))).toContain('L1 [1]');
+
+    // A pending wait ends as soon as the switch goes off.
+    const pending = tool(token, 'wait', { s });
+    await new Promise((r) => setTimeout(r, 50));
+    n.nb.setMeta({ aiAccess: false });
+    const w = await pending;
+    expect(w.isError).toBe(true);
+    expect(textOf(w)).toContain('AI access is off');
+    await serverAi('ainb', false);
+    list = textOf(await tool(token, 'wait'));
+    expect(list).not.toContain('Physics');
+    const calls: [string, Record<string, unknown>][] = [
+      ['wait', { s }],
+      ['read', { ref: 'p1', s }],
+      ['transcribe', { ref: 'p1:L1', text: 'x', s }],
+      ['comment', { ref: 'p1:L1', text: 'x', s }],
+    ];
+    for (const [name, args] of calls) {
+      const r = await tool(token, name, args);
+      expect(r.isError, name).toBe(true);
+      expect(textOf(r), name).toContain('AI access is off');
+    }
+    expect(n.page.comments()).toHaveLength(0);
+    expect(n.page.lines()[0]!.text).toBeUndefined();
+    // The D1 mirror follows the switch.
+    await until(async () => (await aiRow('ainb')) === 0);
+
+    // On again: everything works.
+    n.nb.setMeta({ aiAccess: true });
+    await serverAi('ainb', true);
+    expect(textOf(await tool(token, 'wait'))).toContain(`s=${s} "Physics"`);
+    expect(textOf(await tool(token, 'read', { ref: 'p1', s }))).toContain('L1 [1]');
+    expect((await tool(token, 'comment', { ref: 'p1:L1', text: 'back', s })).isError).toBeFalsy();
+    await until(() => n.page.comments().length === 1);
+    await until(async () => (await aiRow('ainb')) === 1);
+    for (const x of [n.nbc, n.pgc, off.nbc, off.pgc]) x.close();
+  });
+
+  it('trashed and deleted-forever notebooks are invisible to agents and consent; tickets are refused after delete', async () => {
+    const t = await signIn('trash@example.com');
+    const keep = await notebook(t, 'keepnb', 'Keep');
+    const trash = await notebook(t, 'trashnb', 'Trashed');
+    const gone = await notebook(t, 'gonenb', 'Gone');
+    gone.page.addItem(stroke('g1', 50, 100, 200, 120));
+    await until(async () => new Page(await serverDoc(`pg:gonenb:${gone.pageId}`)).items().length === 1);
+    const token = await connectAgent('trash@example.com', { notebooks: ['keepnb', 'trashnb', 'gonenb'], comment: true, transcribe: true });
+
+    // Trashed: hidden from agents and the consent page; restoring brings it back.
+    await editLibrary(t, (lib) => lib.updateEntry('trashnb', { deletedAt: Date.now() }));
+    let list = textOf(await tool(token, 'wait'));
+    expect(list).toContain('"Keep"');
+    expect(list).not.toContain('Trashed');
+    expect((await tool(token, 'read', { ref: 'outline', s: sessionOf('trashnb') })).isError).toBe(true);
+    let html = '';
+    await connectAgent('trash@example.com', { notebooks: ['keepnb'], comment: false, transcribe: false }, 'Other', (h) => (html = h));
+    expect(html).toContain('Keep');
+    expect(html).not.toContain('Trashed');
+    await editLibrary(t, (lib) => lib.updateEntry('trashnb', { deletedAt: null }));
+    expect(textOf(await tool(token, 'wait'))).toContain('"Trashed"');
+
+    // Delete forever is owner only; the app removes the library entry and calls DELETE /notebooks/{id}.
+    const stranger = await signIn('stranger@example.com');
+    expect((await call('/notebooks/gonenb', { method: 'DELETE', token: stranger.accessToken })).status).toBe(404);
+    expect((await call('/notebooks/gonenb', { method: 'DELETE' })).status).toBe(401);
+    await editLibrary(t, (lib) => lib.removeEntry('gonenb'));
+    expect((await call('/notebooks/gonenb', { method: 'DELETE', token: t.accessToken })).status).toBe(200);
+    const row = await env.DB.prepare('SELECT deleted_at FROM notebooks WHERE id = ?1').bind('gonenb').first<{ deleted_at: number | null }>();
+    expect(row?.deleted_at).toBeGreaterThan(0);
+    expect((await ticket(t.accessToken, 'nb:gonenb')).status).toBe(403);
+    expect((await ticket(t.accessToken, `pg:gonenb:${gone.pageId}`)).status).toBe(403);
+    // The rooms' storage is purged.
+    expect(new Notebook(await serverDoc('nb:gonenb')).pages()).toHaveLength(0);
+    expect(new Page(await serverDoc(`pg:gonenb:${gone.pageId}`)).items()).toHaveLength(0);
+    expect(textOf(await tool(token, 'wait'))).not.toContain('Gone');
+    expect((await tool(token, 'read', { ref: 'p1', s: sessionOf('gonenb') })).isError).toBe(true);
+
+    // A D1 row without a library entry is not resurrected.
+    await editLibrary(t, (lib) => lib.removeEntry('keepnb'));
+    expect(textOf(await tool(token, 'wait'))).not.toContain('Keep');
+    for (const x of [keep, trash, gone]) {
+      x.nbc.close();
+      x.pgc.close();
+    }
   });
 });

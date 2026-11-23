@@ -144,9 +144,9 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
   if (name === 'wait' && (args.s === undefined || args.s === '')) {
     const nbs = await grantedNotebooks(env, g);
     const t = now();
-    const rows = await Promise.all(
-      nbs.map(async (n) => ({ n, at: await room(env, nbDocId(n.id)).lastClientUpdateAt(nbDocId(n.id)) })),
-    );
+    const infos = await Promise.all(nbs.map(async (n) => ({ n, ...(await room(env, nbDocId(n.id)).agentInfo(nbDocId(n.id))) })));
+    // Only notebooks whose AI access is on right now.
+    const rows = infos.filter((r) => r.aiAccess);
     rows.sort((a, b) => b.at - a.at);
     const lines = ['#q sessions', ...rows.map(({ n, at }) => `s=${sessionOf(n.id)} ${JSON.stringify(n.title)}${t - at < LIVE_MS ? ' live' : ''}`)];
     const text = lines.join('\n');

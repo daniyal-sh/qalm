@@ -106,7 +106,8 @@ function consentPage(d: ConsentDescription, handle: string, rid: string, email: 
       return `<label class="ck"><input type="checkbox" name="folder" value="${e(f.id)}">Folder · ${e(f.name)} <span class="m">(${c} notebook${c === 1 ? '' : 's'})</span></label>`;
     })
     .join('');
-  const nbRows = nbs.map((n) => `<label class="ck"><input type="checkbox" name="notebook" value="${e(n.id)}">${e(n.title)}</label>`).join('');
+  // Notebooks with AI access off can be granted, but stay hidden from the agent until the switch is turned on.
+  const nbRows = nbs.map((n) => `<label class="ck"><input type="checkbox" name="notebook" value="${e(n.id)}">${e(n.title)}${n.aiAccess ? '' : ' <span class="m">· AI access off</span>'}</label>`).join('');
   const origin = d.clientDomain
     ? `Published by <b>${e(d.clientDomain)}</b>. `
     : '';
