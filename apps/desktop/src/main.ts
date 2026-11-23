@@ -1,7 +1,7 @@
 // Electron main process for qalm (tech-spec §6): serves the app's web export over app://qalm,
 // native open/save dialogs over IPC, qalm:// deep links (email magic-link sign-in), window state.
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, session, shell, type MenuItemConstructorOptions } from 'electron';
-import { promises as fs, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { promises as fs, cpSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 
 import {
@@ -33,14 +33,26 @@ app.setName(BRAND.systemName);
 if (process.env.QALM_USER_DATA) app.setPath('userData', path.resolve(process.env.QALM_USER_DATA));
 else moveLegacyUserData();
 
-/** The app was named "Apollo Qalm" in early builds; carry its profile (notebooks, window state) over once. */
+/**
+ * The app was named "Apollo Qalm" in early builds; carry its notebooks (web storage) and window state over once.
+ * Electron creates the new userData folder before this runs, so copy the stores in (nothing has opened them yet)
+ * rather than renaming the folder, then remove the old one so this happens only once.
+ */
 function moveLegacyUserData() {
   try {
     const legacy = path.join(app.getPath('appData'), 'Apollo Qalm');
     const current = app.getPath('userData');
-    if (legacy !== current && existsSync(legacy) && !existsSync(current)) renameSync(legacy, current);
+    if (legacy === current || !existsSync(legacy)) return;
+    for (const name of ['Local Storage', 'IndexedDB', 'WebStorage', 'window-state.json']) {
+      const from = path.join(legacy, name);
+      if (!existsSync(from)) continue;
+      const to = path.join(current, name);
+      rmSync(to, { recursive: true, force: true });
+      cpSync(from, to, { recursive: true });
+    }
+    rmSync(legacy, { recursive: true, force: true });
   } catch {
-    // Best effort: a fresh profile is still a working app.
+    // Best effort: a fresh profile is still a working app, and the old folder is kept if anything failed above.
   }
 }
 if (process.platform === 'win32') app.setAppUserModelId(BRAND.appId);
