@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { InkOverlay, PALM_MAJOR_MM } from 'qalm-ink';
 import * as React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { denyRequest, getAiOverview, grantSummary, revokeGrant, toggleId, updateGrant, type AiOverview, type Grant } from '../src/api/ai';
 import { rejectedTouchText } from '../src/lib/palm';
@@ -102,9 +102,9 @@ function PenSection() {
             value={input.palm}
             onChange={(palm) => setInput({ palm })}
             options={[
-              { value: 'relaxed', label: `Relaxed · ${PALM_MAJOR_MM.relaxed} mm` },
-              { value: 'standard', label: `Standard · ${PALM_MAJOR_MM.standard} mm` },
-              { value: 'strict', label: `Strict · ${PALM_MAJOR_MM.strict} mm` },
+              { value: 'relaxed', label: 'Relaxed', detail: `${PALM_MAJOR_MM.relaxed} mm` },
+              { value: 'standard', label: 'Standard', detail: `${PALM_MAJOR_MM.standard} mm` },
+              { value: 'strict', label: 'Strict', detail: `${PALM_MAJOR_MM.strict} mm` },
             ]}
           />
         </Row>
@@ -393,6 +393,7 @@ export default function Settings() {
   const showNav = wide || !picked;
   const showBody = wide || picked;
   const title = SECTIONS.find((x) => x.id === section)!.label;
+  const insets = useSafeAreaInsets();
 
   const back = () => {
     if (!wide && picked) setPicked(false);
@@ -401,16 +402,22 @@ export default function Settings() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top', 'left', 'right']}>
-      <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.line }]}>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      {/* The header's surface runs under the status bar and a landscape display cutout; its controls stay in the safe area. */}
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: c.surface, borderBottomColor: c.line, paddingTop: insets.top, paddingLeft: 6 + insets.left, paddingRight: 6 + insets.right, minHeight: 56 + insets.top },
+        ]}
+      >
         <IconButton icon="chevron-left" label="Back" onPress={back} />
         <Text variant="section" style={{ flex: 1 }}>
           {showBody && !wide ? title : 'Settings'}
         </Text>
       </View>
-      <View style={{ flex: 1, flexDirection: 'row' }}>
+      <View style={{ flex: 1, flexDirection: 'row', paddingRight: insets.right }}>
         {showNav ? (
-          <View style={[wide ? styles.nav : { flex: 1, padding: 16 }, wide && { borderRightColor: c.line, backgroundColor: c.surface }]}>
+          <View style={[wide ? styles.nav : { flex: 1, padding: 16 }, { paddingLeft: (wide ? 10 : 16) + insets.left }, wide && { width: 260 + insets.left, borderRightColor: c.line, backgroundColor: c.surface }]}>
             {SECTIONS.map((x) => {
               const on = wide && x.id === section;
               return (
@@ -451,7 +458,7 @@ export default function Settings() {
           </ScrollView>
         ) : null}
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
