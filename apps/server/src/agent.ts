@@ -48,6 +48,18 @@ interface AgentState {
 const agentKey = (clientId: string) => `agent:${clientId}`;
 
 export const AI_OFF = 'AI access is off for this notebook. The student can turn it on in the notebook.';
+export const PAUSED = 'The student paused sharing for this notebook. Keep calling wait: updates resume when they unpause.';
+/** An agent counts as following for this long after its last call. */
+export const PRESENCE_MS = 60_000;
+
+/** The calling agent: OAuth client id, display name and what its grant allows. */
+export interface AgentWho { clientId: string; name: string; canComment: boolean; canTranscribe: boolean }
+interface Seen { name: string; at: number; canComment?: boolean; canTranscribe?: boolean }
+export interface Presence {
+  aiAccess: boolean;
+  paused: boolean;
+  agents: { name: string; waiting: boolean; lastAt: number; canComment: boolean; canTranscribe: boolean }[];
+}
 
 /**
  * Lives in a notebook's DocRoom. Only this object assigns Q-ink labels, so they stay stable and unique.
@@ -79,8 +91,38 @@ export class AgentHub {
     return this.nb().meta().aiAccess === true;
   }
 
+  /** "Pause sharing" in the editor: no updates and no tool calls until the student resumes. The grant stays. */
+  paused(): boolean {
+    return this.nb().meta().aiPaused === true;
+  }
+
   private requireAccess(): void {
     if (!this.aiAccess()) throw new Error(AI_OFF);
+    if (this.paused()) throw new Error(PAUSED);
+  }
+
+  // ---- presence: who is following this notebook ----
+
+  /** Agent calls touch `presence` (kv: clientId → name, last call); pending waits are counted in memory. */
+  private waiting = new Map<string, number>();
+
+  private touch(who: AgentWho): void {
+    const p = this.r.kvGet<Record<string, Seen>>('presence') ?? {};
+    p[who.clientId] = { name: who.name, at: Date.now(), canComment: who.canComment, canTranscribe: who.canTranscribe };
+    this.r.kvPut('presence', p);
+  }
+
+  /** Agents with a pending wait or a call in the last minute. Nobody while AI access is off. */
+  presence(): Presence {
+    const t = Date.now();
+    const p = this.r.kvGet<Record<string, Seen>>('presence') ?? {};
+    const agents = this.aiAccess()
+      ? Object.entries(p)
+          .filter(([id, a]) => (this.waiting.get(id) ?? 0) > 0 || t - a.at < PRESENCE_MS)
+          .map(([id, a]) => ({ name: a.name, waiting: (this.waiting.get(id) ?? 0) > 0, lastAt: a.at, canComment: !!a.canComment, canTranscribe: !!a.canTranscribe }))
+          .sort((a, b) => b.lastAt - a.lastAt)
+      : [];
+    return { aiAccess: this.aiAccess(), paused: this.paused(), agents };
   }
 
   lastClientUpdateAt(): number {
@@ -153,21 +195,33 @@ export class AgentHub {
    * Long-polls for the next update (qink-live.md §1): resolves when the pen has been idle for `idleMs`, something
    * changed since the last delivery and `minIntervalMs` passed since the last wake, or at once on a new ask.
    */
-  async wait(clientId: string, session: string, cfg: AgentConfig): Promise<AgentResult> {
+  async wait(who: AgentWho, session: string, cfg: AgentConfig): Promise<AgentResult> {
+    const { clientId } = who;
     const deadline = Date.now() + cfg.timeoutMs;
     if (!this.r.kvGet(agentKey(clientId))) this.r.kvPut(agentKey(clientId), this.state(clientId));
-    for (;;) {
-      const r = await this.tryDeliver(clientId, session, cfg);
-      if ('text' in r) return r;
-      const t = Date.now();
-      if (t >= deadline) return { text: `#q s=${session} no changes`, svg: null, changed: false };
-      await this.sleep(Math.min(r.retryAt, deadline) - t);
+    this.touch(who);
+    this.waiting.set(clientId, (this.waiting.get(clientId) ?? 0) + 1);
+    try {
+      for (;;) {
+        const r = await this.tryDeliver(clientId, session, cfg);
+        if ('text' in r) return r;
+        const t = Date.now();
+        if (t >= deadline) return { text: `#q s=${session} ${this.paused() ? 'paused' : 'no changes'}`, svg: null, changed: false };
+        await this.sleep(Math.min(r.retryAt, deadline) - t);
+      }
+    } finally {
+      const n = (this.waiting.get(clientId) ?? 1) - 1;
+      if (n > 0) this.waiting.set(clientId, n);
+      else this.waiting.delete(clientId);
+      this.touch(who);
     }
   }
 
   private async tryDeliver(clientId: string, session: string, cfg: AgentConfig): Promise<AgentResult | { retryAt: number }> {
     // Checked on every pass: turning AI access off ends a wait at once (meta changes wake waiters).
-    this.requireAccess();
+    // While paused nothing goes out; resuming wakes the wait and the next update catches up.
+    if (!this.aiAccess()) throw new Error(AI_OFF);
+    if (this.paused()) return { retryAt: Infinity };
     const st = this.state(clientId);
     const nb = this.nb();
     const allAsks = nb.asks();
@@ -186,7 +240,8 @@ export class AgentHub {
     }
 
     const pages = await this.loadPages([...changedIds, ...asks.map((a) => a.pageId).filter((id) => live.has(id))]);
-    this.requireAccess();
+    if (!this.aiAccess()) throw new Error(AI_OFF);
+    if (this.paused()) return { retryAt: Infinity };
     // Re-read after the await: another call may have delivered meanwhile.
     const cur = this.state(clientId);
     if (cur.rev !== st.rev || cur.askCount !== st.askCount) return { retryAt: 0 };
@@ -208,7 +263,8 @@ export class AgentHub {
   }
 
   /** `outline`, `p3`, `p3:L2-9`, `pdf:p2`. */
-  async read(ref: string): Promise<AgentResult> {
+  async read(ref: string, who: AgentWho): Promise<AgentResult> {
+    this.touch(who);
     this.requireAccess();
     const nb = this.nb();
     const infos = nb.pages();
@@ -227,7 +283,8 @@ export class AgentHub {
     return { text: r.text, svg: this.stripSvg(pages, r.image), changed: false };
   }
 
-  async edit(edit: AgentEdit): Promise<string> {
+  async edit(edit: AgentEdit, who: AgentWho): Promise<string> {
+    this.touch(who);
     this.requireAccess();
     if (edit.op === 'comment' && edit.thread) {
       const ref = edit.thread.trim().toUpperCase();
