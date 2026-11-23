@@ -63,6 +63,14 @@ public class QalmInkModule: Module {
         view.setStrokeWidth(width)
       }
 
+      Prop("penStyle") { (view: QalmInkView, style: String?) in
+        view.setPenStyle(style ?? "fountain")
+      }
+
+      Prop("smoothing") { (view: QalmInkView, level: Int?) in
+        view.setSmoothing(level ?? 0)
+      }
+
       Prop("input") { (view: QalmInkView, input: [String: Any]) in
         view.setInput(
           drawWith: input["drawWith"] as? String ?? "pen",

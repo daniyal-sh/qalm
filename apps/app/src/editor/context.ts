@@ -1,4 +1,4 @@
-import { createUndoManager, type Comment, type Line, type Notebook, type Page } from '@qalm/core';
+import { createUndoManager, type Comment, type Line, type Notebook, type Page, type PenStyle } from '@qalm/core';
 import * as React from 'react';
 import type * as Y from 'yjs';
 
@@ -10,6 +10,7 @@ export interface ToolState {
   tool: ToolId;
   penColor: string;
   penWidth: number;
+  penStyle: PenStyle;
   hlColor: string;
   hlWidth: number;
   eraserRadius: number;

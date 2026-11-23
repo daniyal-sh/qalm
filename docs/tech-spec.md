@@ -56,7 +56,10 @@ type Tool = 'pen' | 'highlighter';
 type Paper = 'blank' | 'ruled' | 'dotted' | 'grid' | 'cornell' | 'weekly';
 type PaperColor = 'white' | 'cream' | 'night';
 interface InkPoint { x: number; y: number; p: number /*0..1*/; tilt: number /*altitude rad, π/2 = upright*/; az: number /*azimuth rad*/; t: number /*ms since stroke start*/ }
-interface StrokeItem { id: string; type: 'stroke'; tool: Tool; color: string; width: number; points: InkPoint[]; bbox: BBox; createdAt: number }
+type PenStyle = 'fountain' | 'ball' | 'brush';
+type Smoothing = 0 | 1 | 2 | 3;              // 0 = none
+interface StrokeItem { id: string; type: 'stroke'; tool: Tool; color: string; width: number; points: InkPoint[]; bbox: BBox; createdAt: number;
+  style?: PenStyle; smoothing?: Smoothing }  // pen strokes only; missing = 'fountain' / 0, the look of strokes made before these existed
 interface TextItem  { id: string; type: 'text'; x: number; y: number; w: number; text: string; fontSize: number; color: string }
 interface ImageItem { id: string; type: 'image'; assetId: string; x: number; y: number; w: number; h: number }
 interface ShapeItem { id: string; type: 'shape'; kind: 'line'|'arrow'|'rect'|'ellipse'|'triangle'; pts: [number, number][]; color: string; width: number }
@@ -108,9 +111,22 @@ Stroke outlines use **perfect-freehand** settings everywhere, so live and finish
 The native overlays use exact ports of this algorithm (Swift and Kotlin) with the same constants.
 ```ts
 const tiltPressure = (pt: InkPoint) => Math.min(1, pt.p * (1 + 0.6 * (1 - pt.tilt / (Math.PI / 2))));  // tilt shading
-pen:         getStroke(pts.map(q => [q.x, q.y, tiltPressure(q)]), { size: width, thinning: 0.6, smoothing: 0.5, streamline: 0.35, simulatePressure: false, last: true })
+PEN_STYLES = { fountain: { thinning: 0.6, curve: 1 }, ball: { thinning: 0.15, curve: 1 }, brush: { thinning: 0.75, curve: 0.6 } }
+SMOOTHING  = [ { minStep: 0, passes: 0, streamline: 0.35 },   // 0: none (the original pen)
+               { minStep: 0.3, passes: 1, streamline: 0.4 },  // 1: low
+               { minStep: 0.6, passes: 2, streamline: 0.45 }, // 2: medium (the default for new strokes)
+               { minStep: 1, passes: 4, streamline: 0.5 } ]   // 3: high
+pen:         st = PEN_STYLES[style ?? 'fountain'], sm = SMOOTHING[smoothing ?? 0]
+             input = pts.map(q => [q.x, q.y, st.curve === 1 ? tiltPressure(q) : tiltPressure(q) ** st.curve])
+             getStroke(stabilize(input, sm.minStep, sm.passes), { size: width, thinning: st.thinning, smoothing: 0.5, streamline: sm.streamline, simulatePressure: false, last: true })
 highlighter: getStroke(pts.map(q => [q.x, q.y, 0.5]),             { size: width, thinning: 0,   smoothing: 0.5, streamline: 0.5,  simulatePressure: false, last: true })  // drawn at 0.45 alpha, multiply
 ```
+`stabilize` (input stabilisation, before getStroke): keep the first point; keep each next point only if it is ≥ `minStep` (page units)
+from the last kept one; always keep the last point. Then `passes` rounds of `q[i] = (q[i-1] + 2 q[i] + q[i+1]) / 4` over x, y and
+pressure, with both ends pinned, so the line still ends under the pen (no lag) while jitter is evened out. Fewer than 3 points pass
+through unchanged. Each pen stroke stores the `style` and `smoothing` it was drawn with, so changing defaults never changes old
+strokes. The app sets the style from the toolbar (per device, with the other tool settings) and the smoothing in Settings → Pen
+(low / medium / high = 1 / 2 / 3, default medium). Highlighters ignore both.
 Default widths (page units): pen 1.2 / 1.8 / 2.8, highlighter 12.
 ```ts
 strokeOutline(s: StrokeItem): [number, number][]; strokeSvgPath(s: StrokeItem): string
@@ -166,9 +182,10 @@ type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'none';
 interface InkOverlayProps {
   pageSize: { w: number; h: number };          // page units; the overlay's laid-out size maps linearly onto the page
   tool: InkTool; color: string; width: number;
+  penStyle?: 'fountain' | 'ball' | 'brush'; smoothing?: 0 | 1 | 2 | 3;   // pen only; defaults 'fountain' / 0
   input: { drawWith: 'pen' | 'any'; hand: 'left' | 'right'; palm: 'relaxed' | 'standard' | 'strict' };
   committedIds: string[];                       // stroke ids already drawn by PageCanvas (from its onDrawn)
-  onStrokeEnd(e: { nativeEvent: { id: string; tool: 'pen'|'highlighter'; color: string; width: number; points: InkPoint[]; heldMs: number } }): void;
+  onStrokeEnd(e: { nativeEvent: { id: string; tool: 'pen'|'highlighter'; color: string; width: number; points: InkPoint[]; heldMs: number; style; smoothing } }): void;
   onErase(e: { nativeEvent: { path: {x:number;y:number}[] } }): void;
   onLasso(e: { nativeEvent: { polygon: {x:number;y:number}[] } }): void;
   onPenButton?(e: { nativeEvent: { kind: 'double-tap'|'squeeze'|'button' } }): void;

@@ -18,6 +18,9 @@ export interface InkPoint {
 }
 
 export type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'none';
+/** Same as PenStyle / Smoothing in @qalm/core (tech-spec §2). */
+export type InkPenStyle = 'fountain' | 'ball' | 'brush';
+export type InkSmoothing = 0 | 1 | 2 | 3;
 
 export interface InkInputSettings {
   drawWith: 'pen' | 'any';
@@ -32,6 +35,9 @@ export interface StrokeEndEvent {
   width: number;
   points: InkPoint[];
   heldMs: number;
+  /** pen strokes: the style and smoothing the overlay drew with; store them on the StrokeItem */
+  style: InkPenStyle;
+  smoothing: InkSmoothing;
 }
 export interface EraseEvent {
   path: { x: number; y: number }[];
@@ -53,6 +59,10 @@ export interface InkOverlayProps {
   color: string;
   /** page units */
   width: number;
+  /** pen only; default 'fountain' */
+  penStyle?: InkPenStyle;
+  /** pen only; default 0 (none) */
+  smoothing?: InkSmoothing;
   input: InkInputSettings;
   /**
    * Stroke ids already drawn by PageCanvas: pass the newest ids from PageCanvas's `onDrawn`, not the page's items (Skia

@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { denyRequest, getAiOverview, grantSummary, revokeGrant, toggleId, updateGrant, type AiOverview, type Grant } from '../src/api/ai';
 import { relativeTime } from '../src/library/actions';
 import { useLibraryData, useSession } from '../src/state/session';
-import { useTheme, type Appearance, type DrawWith, type Hand, type Palm, type PenGesture } from '../src/theme/ThemeProvider';
+import { smoothingLevel, useTheme, type Appearance, type DrawWith, type Hand, type Palm, type PenGesture, type SmoothingPref } from '../src/theme/ThemeProvider';
 import { BRAND, PEN_COLORS, radius } from '../src/theme/tokens';
 import { Lockup } from '../src/ui/brand';
 import { confirm } from '../src/ui/confirm';
@@ -107,6 +107,17 @@ function PenSection() {
             ]}
           />
         </Row>
+        <Row title="Stroke smoothing" description="Evens out shaky lines. Applies to new pen strokes">
+          <Segmented<SmoothingPref>
+            value={input.smoothing}
+            onChange={(smoothing) => setInput({ smoothing })}
+            options={[
+              { value: 'low', label: 'Low' },
+              { value: 'medium', label: 'Medium' },
+              { value: 'high', label: 'High' },
+            ]}
+          />
+        </Row>
         <Row title="Pen button, squeeze or double-tap" description="What the pen's shortcut does" last>
           <Segmented<PenGesture>
             value={input.penGesture}
@@ -129,6 +140,7 @@ function PenSection() {
           tool="pen"
           color={PEN_COLORS[0].hex}
           width={1.8}
+          smoothing={smoothingLevel(input.smoothing)}
           input={input}
           committedIds={[]}
           onStrokeEnd={() => setRejected(null)}

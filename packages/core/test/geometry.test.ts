@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getStroke } from 'perfect-freehand';
-import { hitTestErase, lassoSelect, paperPattern, snapShape, strokeOutline, strokeSvgPath, tiltPressure } from '../src';
+import { hitTestErase, lassoSelect, paperPattern, snapShape, stabilize, strokeOutline, strokeSvgPath, tiltPressure } from '../src';
 import type { InkPoint, Item, ShapeItem } from '../src';
 import { pts, stroke } from './helpers';
 
@@ -30,6 +30,41 @@ describe('stroke geometry', () => {
     expect(tiltPressure(q)).toBe(0.5);
     expect(tiltPressure({ ...q, tilt: 0 })).toBeCloseTo(0.8);
     expect(tiltPressure({ ...q, p: 0.9, tilt: 0 })).toBe(1);
+  });
+
+  it('old strokes (no style or smoothing) look exactly like fountain at smoothing 0', () => {
+    const s = stroke('s', 0, 0, 100, 40);
+    expect(strokeOutline({ ...s, style: 'fountain', smoothing: 0 })).toEqual(strokeOutline(s));
+  });
+
+  it('pen styles: ball barely varies with pressure, brush the most', () => {
+    const line = (p: number) => Array.from({ length: 20 }, (_, i) => ({ x: i * 3, y: 0, p, tilt: Math.PI / 2, az: 0, t: i }));
+    const height = (style: 'ball' | 'fountain' | 'brush', p: number) => {
+      const ys = strokeOutline({ tool: 'pen', width: 4, points: line(p), style, smoothing: 0 }).map((q) => q[1]);
+      return Math.max(...ys) - Math.min(...ys);
+    };
+    const spread = (style: 'ball' | 'fountain' | 'brush') => height(style, 1) - height(style, 0.1);
+    expect(spread('ball')).toBeLessThan(spread('fountain'));
+    expect(spread('fountain')).toBeLessThan(spread('brush'));
+  });
+
+  it('highlighters ignore style and smoothing', () => {
+    const hl = { ...stroke('s', 0, 0, 100, 40), tool: 'highlighter' as const, width: 12 };
+    expect(strokeOutline({ ...hl, style: 'brush', smoothing: 3 })).toEqual(strokeOutline(hl));
+  });
+
+  it('stabilize keeps both ends, drops tiny steps and smooths jitter', () => {
+    const jitter = Array.from({ length: 40 }, (_, i) => [i, i % 2 ? 0.4 : -0.4, 0.5]);
+    const out = stabilize(jitter, 0, 2);
+    expect(out[0]).toEqual(jitter[0]);
+    expect(out[out.length - 1]).toEqual(jitter[39]);
+    const dense = Array.from({ length: 40 }, (_, i) => [i * 0.1, 0, 0.5]);
+    const thin = stabilize(dense, 0.6, 0);
+    expect(thin.length).toBeLessThan(dense.length);
+    expect(thin[thin.length - 1]).toEqual(dense[39]);
+    const inner = out.slice(1, -1).map((q) => Math.abs(q[1]!));
+    expect(Math.max(...inner)).toBeLessThan(0.4);
+    expect(stabilize(jitter, 0, 0)).toEqual(jitter);
   });
 
   it('makes a closed SVG path', () => {

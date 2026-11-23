@@ -16,9 +16,15 @@ export interface InputPrefs {
   hand: Hand;
   palm: Palm;
   penGesture: PenGesture;
+  /** Pen stroke smoothing (tech-spec §2). Stored on each new stroke as a level, see `smoothingLevel`. */
+  smoothing: SmoothingPref;
 }
 
-export const DEFAULT_INPUT: InputPrefs = { drawWith: 'any', hand: 'right', palm: 'standard', penGesture: 'eraser' };
+export type SmoothingPref = 'low' | 'medium' | 'high';
+/** The `Smoothing` level (@qalm/core) stored on new pen strokes. */
+export const smoothingLevel = (s: SmoothingPref): 1 | 2 | 3 => (s === 'low' ? 1 : s === 'high' ? 3 : 2);
+
+export const DEFAULT_INPUT: InputPrefs = { drawWith: 'any', hand: 'right', palm: 'standard', penGesture: 'eraser', smoothing: 'medium' };
 
 interface Prefs {
   appearance: Appearance;

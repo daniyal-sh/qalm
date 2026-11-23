@@ -6,6 +6,7 @@ import { PanResponder, PixelRatio, Platform, Pressable, StyleSheet, TextInput, V
 import { newId } from '../lib/id';
 import { docIds } from '../sync/docs';
 import { useDoc, useSession, useVersion } from '../state/session';
+import { smoothingLevel } from '../theme/ThemeProvider';
 import { font } from '../theme/tokens';
 import { useEditor } from './context';
 import { DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, hitText, itemBBox, makeStroke, transformItem, transformPatch, unionBBox } from './items';
@@ -222,6 +223,8 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
         tool={inkTool}
         color={t.tool === 'highlighter' ? t.hlColor : nightInk}
         width={t.tool === 'highlighter' ? t.hlWidth : t.tool === 'eraser' ? t.eraserRadius * 2 : t.penWidth}
+        penStyle={t.penStyle}
+        smoothing={smoothingLevel(ed.input.smoothing)}
         input={ed.input}
         onStrokeEnd={({ nativeEvent: e }) => {
           ed.touchPage(info.id);

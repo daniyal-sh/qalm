@@ -5,7 +5,19 @@ export { Notebook, createNotebookDoc, type NotebookInit } from './model/notebook
 export { Page } from './model/page';
 export { Library, type Folder, type LibraryEntry } from './model/library';
 export { createUndoManager } from './model/undo';
-export { strokeOutline, strokeSvgPath, tiltPressure, PEN_WIDTHS, HIGHLIGHTER_WIDTH, HIGHLIGHTER_ALPHA } from './geometry/stroke';
+export {
+  strokeOutline,
+  strokeSvgPath,
+  tiltPressure,
+  stabilize,
+  PEN_WIDTHS,
+  PEN_STYLES,
+  SMOOTHING,
+  DEFAULT_PEN_STYLE,
+  DEFAULT_SMOOTHING,
+  HIGHLIGHTER_WIDTH,
+  HIGHLIGHTER_ALPHA,
+} from './geometry/stroke';
 export { snapShape } from './geometry/shape';
 export { hitTestErase, lassoSelect } from './geometry/hit';
 export { paperPattern, type PaperPattern } from './geometry/paper';

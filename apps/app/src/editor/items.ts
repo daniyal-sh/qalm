@@ -1,5 +1,5 @@
 import { newIdFallback } from '../lib/id';
-import type { BBox, InkPoint, Item, ShapeItem, StrokeItem, TextItem } from '@qalm/core';
+import type { BBox, InkPoint, Item, PenStyle, ShapeItem, Smoothing, StrokeItem, TextItem } from '@qalm/core';
 
 /** Text box line height (matches core's TEXT_LINE_HEIGHT). */
 export const TEXT_LINE_HEIGHT = 1.3;
@@ -53,6 +53,8 @@ export function makeStroke(e: {
   color: string;
   width: number;
   points: InkPoint[];
+  style?: PenStyle;
+  smoothing?: Smoothing;
 }): StrokeItem {
   return {
     id: e.id,
@@ -63,6 +65,8 @@ export function makeStroke(e: {
     points: e.points,
     bbox: pointsBBox(e.points, e.width / 2),
     createdAt: Date.now(),
+    // Pen strokes keep the style and smoothing they were drawn with, so later default changes never alter them.
+    ...(e.tool === 'pen' ? { style: e.style ?? 'fountain', smoothing: e.smoothing ?? 0 } : null),
   };
 }
 

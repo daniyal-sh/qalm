@@ -45,8 +45,67 @@ enum FreehandSettings {
     return min(1, p * (1 + 0.6 * (1 - tilt / (Double.pi / 2))))
   }
 
-  static func pen(width: Double) -> FreehandOptions {
-    return FreehandOptions(size: width, thinning: 0.6, smoothing: 0.5, streamline: 0.35, last: true)
+  /// Pen nibs, as PEN_STYLES in @qalm/core: thinning, and the pressure curve exponent (1 = none).
+  static let penStyles: [String: (thinning: Double, curve: Double)] = [
+    "fountain": (0.6, 1),
+    "ball": (0.15, 1),
+    "brush": (0.75, 0.6),
+  ]
+
+  /// Stabilisation levels 0...3, as SMOOTHING in @qalm/core. Level 0 is the original pen.
+  static let smoothingLevels: [(minStep: Double, passes: Int, streamline: Double)] = [
+    (0, 0, 0.35),
+    (0.3, 1, 0.4),
+    (0.6, 2, 0.45),
+    (1, 4, 0.5),
+  ]
+
+  static func pen(width: Double, style: String = "fountain", smoothing: Int = 0) -> FreehandOptions {
+    let st = penStyles[style] ?? penStyles["fountain"]!
+    let sm = smoothingLevels[(0...3).contains(smoothing) ? smoothing : 0]
+    return FreehandOptions(size: width, thinning: st.thinning, smoothing: 0.5, streamline: sm.streamline, last: true)
+  }
+
+  /// Pen pressure: tilt shading, then the style's curve (exactly @qalm/core `strokeOutline`).
+  static func penPressure(p: Double, tilt: Double, style: String) -> Double {
+    let pr = tiltPressure(p: p, tilt: tilt)
+    let curve = (penStyles[style] ?? penStyles["fountain"]!).curve
+    return curve == 1 ? pr : pow(pr, curve)
+  }
+
+  /// Exactly `stabilize` in @qalm/core: drop points closer than minStep, then [1 2 1]/4 passes with pinned ends.
+  /// Pen inputs always carry a pressure.
+  static func stabilize(_ pts: [FHInput], smoothing: Int) -> [FHInput] {
+    let sm = smoothingLevels[(0...3).contains(smoothing) ? smoothing : 0]
+    let n = pts.count
+    if n < 3 { return pts }
+    var out: [FHInput] = [pts[0]]
+    if sm.minStep > 0 {
+      let min2 = sm.minStep * sm.minStep
+      for i in 1..<(n - 1) {
+        let a = out[out.count - 1]
+        let b = pts[i]
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        if dx * dx + dy * dy >= min2 { out.append(b) }
+      }
+    } else {
+      for i in 1..<(n - 1) { out.append(pts[i]) }
+    }
+    out.append(pts[n - 1])
+    for _ in 0..<sm.passes {
+      let m = out.count
+      if m < 3 { break }
+      var next: [FHInput] = [out[0]]
+      for i in 1..<(m - 1) {
+        let a = out[i - 1], b = out[i], c = out[i + 1]
+        let ap = a.pressure ?? 0, bp = b.pressure ?? 0, cp = c.pressure ?? 0
+        next.append(FHInput(x: (a.x + 2 * b.x + c.x) / 4, y: (a.y + 2 * b.y + c.y) / 4, pressure: (ap + 2 * bp + cp) / 4))
+      }
+      next.append(out[m - 1])
+      out = next
+    }
+    return out
   }
 
   static func highlighter(width: Double) -> FreehandOptions {
