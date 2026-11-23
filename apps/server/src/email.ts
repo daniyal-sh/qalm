@@ -28,10 +28,13 @@ export async function sendEmail(env: Env, msg: EmailMessage): Promise<void> {
 export function magicLinkEmail(to: string, link: string, code: string | null = null): EmailMessage {
   const l = escapeHtml(link);
   const codeHtml = code
-    ? `<p style="margin:20px 0 0;font-size:13px;line-height:1.5;color:${T.muted}">Or enter this code in qalm:</p>
-<div style="margin:6px 0 0;font-size:26px;font-weight:600;letter-spacing:0.18em;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(code)}</div>`
+    ? `<p style="margin:24px 0 0;font-size:13px;line-height:1.5;color:${T.muted}">Or enter this code in qalm:</p>
+<div style="display:inline-block;margin:8px 0 0;padding:10px 16px;background:${T.surface2};border:1px solid ${T.line};border-radius:8px;font-size:26px;line-height:1.2;font-weight:600;letter-spacing:0.18em;font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(code)}</div>`
     : '';
+  // The inbox preview line (hidden in the message itself).
+  const preview = code ? `Your sign-in code is ${escapeHtml(code)}. The link works once.` : 'Your sign-in link works once and expires in 15 minutes.';
   const html = `<!doctype html><html><body style="margin:0;background:${T.bg};font-family:${BRAND_FONT_STACK};color:${T.ink}">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0">${preview}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};padding:32px 16px"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:440px;background:${T.surface};border:1px solid ${T.line};border-radius:12px">
 <tr><td style="padding:28px 28px 8px">
@@ -45,7 +48,8 @@ export function magicLinkEmail(to: string, link: string, code: string | null = n
 ${codeHtml}
 <p style="margin:20px 0 0;font-size:12px;line-height:1.5;color:${T.faint}">If the button doesn't work, paste this address into your browser:<br><span style="color:${T.accentInk};word-break:break-all">${l}</span></p>
 </td></tr>
-<tr><td style="padding:20px 28px 28px;font-size:12px;color:${T.faint}">If you didn't ask to sign in, you can ignore this email.</td></tr>
+<tr><td style="padding:0 28px"><div style="height:1px;background:${T.line2};margin-top:24px"></div></td></tr>
+<tr><td style="padding:16px 28px 24px;font-size:12px;line-height:1.5;color:${T.faint}">If you didn't ask to sign in, you can ignore this email.</td></tr>
 </table></td></tr></table></body></html>`;
   return {
     to,
