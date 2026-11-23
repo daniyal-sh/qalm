@@ -15,6 +15,7 @@ import {
   resolveTarget,
   toGrid,
   MAX_REGIONS,
+  MAX_ROW_AREA,
   type BBox,
   type InkSeen,
   type Page,
@@ -201,7 +202,7 @@ describe('Q-ink v1.0 updates', () => {
     }
     // Downscaled to stay near the budget, but never below the minimum scale.
     const { width, height } = renderRegionsSvg(pages, rows);
-    expect(width * height).toBeLessThan(560_000);
+    expect(width * height).toBeLessThan(MAX_ROW_AREA * 1.2); // the cap, plus the label column and padding
   });
 
   it('erased strokes are faint rows of their own regions (-n), with context around them', () => {

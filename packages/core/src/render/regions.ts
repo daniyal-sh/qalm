@@ -28,10 +28,10 @@ export interface RegionRow {
 const LABEL_W = 44;
 const PAD = 8;
 /** Pixels per unit (one line of handwriting): updates, first looks and reads. */
-export const UNIT_PX = { update: 36, first: 26, read: 44 } as const;
+export const UNIT_PX = { update: 64, first: 48, read: 72 } as const;
 /** Big regions are shrunk to at most this many pixels each, but never below MIN_UNIT_PX per unit. */
-export const MAX_ROW_AREA = 420_000;
-export const MIN_UNIT_PX = 18;
+export const MAX_ROW_AREA = 480_000;
+export const MIN_UNIT_PX = 24;
 export const MAX_W = 1600;
 
 const BLACK = '#000000';
