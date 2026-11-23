@@ -114,6 +114,8 @@ export function IconButton({ icon, label, selected, tone = 'default', size = CON
       accessibilityLabel={label}
       accessibilityState={{ selected, disabled: !!rest.disabled }}
       hitSlop={size < CONTROL_H ? Math.ceil((CONTROL_H - size) / 2) : undefined}
+      // Web: the name as a hover tooltip (icon-only control).
+      {...((Platform.OS === 'web' ? { title: label } : {}) as object)}
       {...rest}
       style={(s) => {
         const st = s as PressState;
