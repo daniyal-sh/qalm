@@ -63,7 +63,7 @@ describe('regions end to end', () => {
     n.page.updateItems(['e1', 'e2', 'e3'].map((id) => [id, transformPatch(n.page.item(id)!, { s: 1, r: 0, ox: 0, oy: 0, dx: 0, dy: 200 })] as const));
     expect(threadBox(n.page.comments()[0]!, n.page.items())).toEqual([49.1, 299.1, 170.9, 320.9]); // moved 200 down (transformPatch pads the bbox by half the width)
     expect(n.page.readings()[0]!.stale).toBeUndefined(); // moving read ink keeps its reading
-    await until(async () => (new Page(await serverDoc(`pg:regnb:${n.pageId}`)).item('e1') as { bbox: number[] }).bbox[1] > 290);
+    await until(async () => (new Page(await serverDoc(`pg:regnb:${n.pageId}`)).item('e1') as { bbox: number[] }).bbox[1]! > 290);
     expect(textOf(await tool(token, 'read', { ref: 'C1', s })).split('\n')[0]).toBe('#q C1 p1@82,502,206,38');
     expect(before).not.toBe(inkOf(n.page));
 
