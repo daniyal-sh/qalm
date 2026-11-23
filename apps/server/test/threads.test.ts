@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { signIn, stroke, until } from './helpers';
 import { connectAgent, inkOf, notebook, textOf, tool } from './mcp-helpers';
 import { sessionOf } from '../src/grants';
@@ -107,4 +107,80 @@ describe('comment threads and selection asks', () => {
     n.nbc.close();
     n.pgc.close();
   });
+
+  it('a malformed selection ask is skipped: wait keeps delivering, to every agent', async () => {
+    const t = await signIn('badask@example.com');
+    const n = await notebook(t, 'badnb', 'Bad ask');
+    const token = await connectAgent('badask@example.com', { notebooks: ['badnb'], comment: true, transcribe: false });
+    const s = sessionOf('badnb');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const first = tool(token, 'wait', { s });
+    await pause(50);
+    n.page.addItem(stroke('m1', 50, 100, 200, 120));
+    await first;
+    // A client writes a broken ask straight into Yjs: a selection without a box.
+    const asked = tool(token, 'wait', { s });
+    await pause(50);
+    n.nbc.doc.getArray('asks').push([{ id: 'bad', pageId: n.pageId, text: 'what?', at: Date.now(), sel: { itemIds: ['m1'] } }]);
+    const up = await asked;
+    expect(up.isError).toBeFalsy();
+    expect(textOf(up)).toMatch(/^ask "what\?"$/m);
+    await until(() => warn.mock.calls.some((c) => String(c[0]).includes('bad sel')));
+
+    // Later updates still flow, and a second agent connecting now isn't stuck on it either.
+    const next = tool(token, 'wait', { s });
+    await pause(50);
+    n.page.addItem(stroke('m2', 50, 200, 200, 220));
+    expect(textOf(await next)).toContain('+L2');
+    const other = await connectAgent('badask@example.com', { notebooks: ['badnb'], comment: false, transcribe: false });
+    const w2 = tool(other, 'wait', { s });
+    await pause(50);
+    n.nbc.doc.transact(() => {
+      n.nbc.doc.getArray('asks').push([null, { id: 'bad2', pageId: n.pageId, text: 'no box', sel: 'x' }]);
+      n.nb.addAsk(n.pageId, 'and now?');
+    });
+    const r2 = await w2;
+    expect(r2.isError).toBeFalsy();
+    expect(textOf(r2)).toMatch(/^ask "no box"\nask "and now\?"$/m);
+    warn.mockRestore();
+    n.nbc.close();
+    n.pgc.close();
+  });
+
+  it("a new agent's first update has only the open threads (latest message), and read(C1) shows a whole thread", async () => {
+    const t = await signIn('history@example.com');
+    const n = await notebook(t, 'histnb', 'History');
+    n.page.addItem(stroke('h1', 50, 100, 200, 120));
+    n.page.addItem(stroke('h2', 50, 200, 200, 220));
+    const old = n.page.addComment({ lineKey: 'h1', author: you, text: 'old comment from last week' });
+    n.page.resolveComment(old);
+    const open = n.page.addComment({ lineKey: 'h2', author: you, text: 'is this right?' });
+    n.page.replyToComment(open, { kind: 'agent', name: 'Earlier' }, 'Check the sign');
+    n.page.replyToComment(open, you, 'which sign?');
+    await pause(100);
+
+    const token = await connectAgent('history@example.com', { notebooks: ['histnb'], comment: true, transcribe: false });
+    const s = sessionOf('histnb');
+    const first = tool(token, 'wait', { s });
+    await pause(50);
+    n.page.addItem(stroke('h3', 50, 300, 200, 320));
+    const up = textOf(await first);
+    expect(up).toMatch(/^open C1 p1:L2 student "which sign\?"$/m);
+    expect(up).not.toContain('old comment');
+    expect(up).not.toContain('is this right');
+    expect(up).not.toMatch(/^(note|re) /m);
+
+    const th = textOf(await tool(token, 'read', { ref: 'C1' }));
+    expect(th).toBe(['#q C1 p1:L2', 'student "is this right?"', 'agent "Check the sign"', 'student "which sign?"'].join('\n'));
+
+    // From here on, only new entries.
+    const next = tool(token, 'wait', { s });
+    await pause(50);
+    n.page.replyToComment(open, you, 'the minus?');
+    expect(textOf(await next)).toMatch(/^re C1 "the minus\?"$/m);
+    n.nbc.close();
+    n.pgc.close();
+  });
 });
+
