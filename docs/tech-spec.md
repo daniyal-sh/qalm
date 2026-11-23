@@ -199,6 +199,8 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
 - **Sync auth:** `POST /sync/ticket {docId}` with `Authorization: Bearer <accessToken>` returns a single-use ticket that expires in 30 s. Then
   `GET /sync/{docId}?ticket=…` upgrades. Access tokens never appear in URLs.
 - **R2** `ASSETS`: `PUT /assets/{sha256}` and `GET /assets/{sha256}` (Bearer auth; content-addressed).
+- **App API** (Bearer, CORS `*` for the web/Electron build): `GET /ai/grants`, `PATCH /ai/grants/{id} {canComment?, canTranscribe?, notebookIds?, folderIds?}`,
+  `DELETE /ai/grants/{id}`, `GET /ai/requests`, `POST /ai/requests/{id}/deny`, `GET /ai/activity?limit=`.
 - **D1** tables: `users`, `sessions`, `magic_links`, `notebooks(id, owner_id, title, ai_access)`, `sync_tickets`, OAuth tables, and
   `grants(client_id, user_id, notebook_ids|folder_ids, can_comment, can_transcribe, expires_at)`.
 - **Auth:** `POST /auth/email/start`, `GET /auth/email/verify`, `POST /auth/apple`, `POST /auth/google`. These return `{accessToken (JWT, 1h), refreshToken}`,

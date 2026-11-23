@@ -3,15 +3,39 @@ import { num } from './env';
 import { handleAuth, requireUser } from './auth';
 import { handleAuthorize, messagePage } from './consent';
 import { canAccess, parseDocId, room } from './docs';
-import { type GrantRow } from './grants';
+import { type GrantRow, userNotebooks } from './grants';
 import { HttpError, error, json, now, origin, randomToken, readJson, sha256Hex } from './util';
 
 const TICKET_TTL_MS = 30_000;
 const SHA = /^[0-9a-f]{64}$/;
 
+/** Paths the app calls cross-origin (web build on another origin, Electron from file://). Bearer auth only, no cookies. */
+const CORS_PATHS = /^\/(auth\/(email\/start|email\/verify|apple|google|refresh)|sync\/ticket|assets\/[^/]+|ai\/.*|health)$/;
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+  'Access-Control-Max-Age': '86400',
+};
+
+function withCors(res: Response): Response {
+  if (res.status === 101 || res.headers.has('Access-Control-Allow-Origin')) return res;
+  const out = new Response(res.body, res);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) out.headers.set(k, v);
+  return out;
+}
+
 /** Everything that is not /mcp (OAuthProvider routes /mcp, /oauth/* and /.well-known/* itself). */
 export const appHandler = {
   async fetch(req: Request, env: Env): Promise<Response> {
+    const path = new URL(req.url).pathname;
+    if (!CORS_PATHS.test(path)) return handle(req, env);
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return withCors(await handle(req, env));
+  },
+};
+
+async function handle(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
     try {
@@ -25,8 +49,7 @@ export const appHandler = {
       console.error(e);
       return error(500, 'Internal error');
     }
-  },
-};
+}
 
 async function route(req: Request, env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
@@ -134,7 +157,7 @@ function grantJson(g: GrantRow) {
 
 /**
  * JSON API for the app's AI access screen (Bearer):
- * GET /ai/grants · DELETE /ai/grants/{id} · GET /ai/requests · POST /ai/requests/{id}/deny · GET /ai/activity?limit=
+ * GET /ai/grants · PATCH /ai/grants/{id} {canComment?, canTranscribe?, notebookIds?, folderIds?} · DELETE /ai/grants/{id} · GET /ai/requests · POST /ai/requests/{id}/deny · GET /ai/activity?limit=
  */
 async function aiApi(req: Request, env: Env, path: string): Promise<Response | null> {
   const userId = await requireUser(req, env);
@@ -146,6 +169,30 @@ async function aiApi(req: Request, env: Env, path: string): Promise<Response | n
     return json({ mcpUrl: `${origin(req, env.PUBLIC_URL)}/mcp`, grants: rows.results.map(grantJson) });
   }
   const gm = /^\/ai\/grants\/([^/]+)$/.exec(path);
+  if (gm && req.method === 'PATCH') {
+    const g = await env.DB.prepare('SELECT * FROM grants WHERE id = ?1 AND user_id = ?2 AND revoked_at IS NULL').bind(gm[1], userId).first<GrantRow>();
+    if (!g) throw new HttpError(404, 'Not found');
+    const body = await readJson<{ canComment?: unknown; canTranscribe?: unknown; notebookIds?: unknown; folderIds?: unknown }>(req);
+    const ids = (v: unknown, cur: string): string => {
+      if (v === undefined) return cur;
+      if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) throw new HttpError(400, 'Expected a list of ids');
+      return JSON.stringify([...new Set(v as string[])]);
+    };
+    const flag = (v: unknown, cur: number): number => (v === undefined ? cur : v ? 1 : 0);
+    let notebookIds = ids(body.notebookIds, g.notebook_ids);
+    const folderIds = ids(body.folderIds, g.folder_ids);
+    if (body.notebookIds !== undefined) {
+      // Only notebooks the user owns can be granted.
+      const { notebooks } = await userNotebooks(env, userId);
+      const own = new Set(notebooks.map((n) => n.id));
+      notebookIds = JSON.stringify((JSON.parse(notebookIds) as string[]).filter((id) => own.has(id)));
+    }
+    await env.DB.prepare('UPDATE grants SET can_comment = ?2, can_transcribe = ?3, notebook_ids = ?4, folder_ids = ?5 WHERE id = ?1')
+      .bind(g.id, flag(body.canComment, g.can_comment), flag(body.canTranscribe, g.can_transcribe), notebookIds, folderIds)
+      .run();
+    const next = await env.DB.prepare('SELECT * FROM grants WHERE id = ?1').bind(g.id).first<GrantRow>();
+    return json({ grant: grantJson(next!) });
+  }
   if (gm && req.method === 'DELETE') {
     const g = await env.DB.prepare('SELECT * FROM grants WHERE id = ?1 AND user_id = ?2').bind(gm[1], userId).first<GrantRow>();
     if (!g) throw new HttpError(404, 'Not found');

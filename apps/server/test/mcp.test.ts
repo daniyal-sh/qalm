@@ -228,9 +228,20 @@ describe('mcp', () => {
     expect(n.page.comments()).toHaveLength(0);
     expect(n.page.lines()[0]!.text).toBeUndefined();
 
-    // The student revokes access in Settings → AI access.
     const grants = (await (await call('/ai/grants', { token: t.accessToken })).json()) as { grants: { id: string; clientName: string }[] };
     const g = grants.grants.find((x) => x.clientName === 'Viewer')!;
+
+    // The student turns comments on in Settings → AI access.
+    const patch = await call(`/ai/grants/${g.id}`, { method: 'PATCH', token: t.accessToken, body: JSON.stringify({ canComment: true, notebookIds: ['locknb', 'not-mine'] }) });
+    expect(patch.status).toBe(200);
+    const pg = ((await patch.json()) as { grant: { canComment: boolean; canTranscribe: boolean; notebookIds: string[] } }).grant;
+    expect(pg).toMatchObject({ canComment: true, canTranscribe: false, notebookIds: ['locknb'] });
+    expect((await tool(token, 'comment', { ref: 'p1:L1', text: 'now allowed' })).isError).toBeFalsy();
+    const pre = await call('/ai/grants', { method: 'OPTIONS', headers: { Origin: 'null', 'Access-Control-Request-Method': 'PATCH' } });
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get('Access-Control-Allow-Origin')).toBe('*');
+
+    // Then revokes access.
     expect((await call(`/ai/grants/${g.id}`, { method: 'DELETE', token: t.accessToken })).status).toBe(200);
     const after = await call('/mcp', { method: 'POST', token, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
     expect(after.status).toBe(401);
