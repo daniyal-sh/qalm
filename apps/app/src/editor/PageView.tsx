@@ -75,6 +75,14 @@ function usePdfBackground(info: PageInfo, width: number, zoom: number, visible: 
 }
 
 /** Off-screen (overscan) pages open their doc a moment later, so the pages in view load and draw first. */
+/** `value`, or the previous one while its JSON is the same (small lists: comments, readings). */
+function useSameJson<T>(value: T): T {
+  const ref = React.useRef<{ value: T; json: string } | null>(null);
+  const json = JSON.stringify(value);
+  if (!ref.current || ref.current.json !== json) ref.current = { value, json };
+  return ref.current.value;
+}
+
 function useDeferred(ready: boolean, delayMs = 200): boolean {
   const [armed, setArmed] = React.useState(ready);
   if (ready && !armed) setArmed(true);
@@ -188,8 +196,9 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   const sub = React.useMemo(() => (page ? (cb: () => void) => page.observe(cb) : null), [page]);
   const v = useVersion(sub);
   const items = React.useMemo(() => page?.items() ?? [], [page, v]);
-  const readings = React.useMemo(() => page?.readings() ?? [], [page, v]);
-  const comments = React.useMemo(() => page?.comments() ?? [], [page, v]);
+  // Same arrays until their content changes: a stroke changes neither.
+  const readings = useSameJson(React.useMemo(() => page?.readings() ?? [], [page, v]));
+  const comments = useSameJson(React.useMemo(() => page?.comments() ?? [], [page, v]));
   const scale = width / info.size.w;
   const height = Math.round(info.size.h * scale);
 
@@ -200,12 +209,15 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, info.id]);
 
-  // Comments and readings for the comments panel.
+  // Comments and readings for the comments panel. Items only matter to the editor for comment cards (which follow
+  // their ink) and the selection: reporting every stroke on other pages re-rendered the whole editor per stroke.
+  const itemsMatter = comments.length > 0 || ed.selection?.pageId === info.id;
+  const reportedItems = itemsMatter ? items : null;
   React.useEffect(() => {
     if (!page) return;
     ed.reportPage(info.id, { page, index, readings, comments, items });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, readings, comments, items, index]);
+  }, [page, readings, comments, reportedItems, index]);
   React.useEffect(() => () => ed.reportPage(info.id, null), [info.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   React.useEffect(() => {

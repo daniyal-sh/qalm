@@ -118,8 +118,9 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   // ---- undo ----
   const undo = React.useMemo(() => new CrossPageUndo(), []);
   const registry = React.useMemo(() => new UndoRegistry(undo), [undo]);
+  // Re-render only when Undo/Redo become available or not, not on every stroke (that re-rendered the whole editor).
   const undoSub = React.useCallback((cb: () => void) => undo.onChange(cb), [undo]);
-  useVersion(undoSub);
+  React.useSyncExternalStore(undoSub, () => (undo.canUndo ? 1 : 0) + (undo.canRedo ? 2 : 0));
   React.useEffect(() => {
     const prefix = `pg:${notebookId}:`;
     const off = s.dm.onEvict((docId) => {
@@ -286,28 +287,39 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     onDeactivate: () => commitZoom(zoomRef.current * pinchScale.current),
   });
 
+  /**
+   * Zoom to `target` soon: shown at once as a transform, laid out once the input pauses. Each layout re-records every
+   * mounted page at the new width (100–500 ms on ink-heavy pages), so a burst of ±-clicks or wheel ticks lays out once.
+   */
+  const zoomTarget = React.useRef<number | null>(null);
+  const zoomTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zoomSoon = React.useCallback(
+    (target: number, delayMs = 180) => {
+      const z = clampZoom(target);
+      zoomTarget.current = z;
+      setLiveScale(z / zoomRef.current);
+      if (zoomTimer.current) clearTimeout(zoomTimer.current);
+      zoomTimer.current = setTimeout(() => {
+        zoomTimer.current = null;
+        zoomTarget.current = null;
+        commitZoom(z);
+      }, delayMs);
+    },
+    [commitZoom],
+  );
+  React.useEffect(() => () => void (zoomTimer.current && clearTimeout(zoomTimer.current)), []);
+
   // Web / Electron: trackpad pinch and ctrl+wheel zoom; keyboard shortcuts.
   React.useEffect(() => {
     if (Platform.OS !== 'web') return;
-    let pending = 1;
-    let timer: ReturnType<typeof setTimeout> | null = null;
     const onWheel = (ev: WheelEvent) => {
       if (!ev.ctrlKey && !ev.metaKey) return;
       ev.preventDefault();
-      pending = clampZoom(zoomRef.current * pending * Math.exp(-ev.deltaY * 0.01)) / zoomRef.current;
-      setLiveScale(pending);
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        commitZoom(zoomRef.current * pending);
-        pending = 1;
-      }, 180);
+      zoomSoon((zoomTarget.current ?? zoomRef.current) * Math.exp(-ev.deltaY * 0.01));
     };
     window.addEventListener('wheel', onWheel, { passive: false });
-    return () => {
-      window.removeEventListener('wheel', onWheel);
-      if (timer) clearTimeout(timer);
-    };
-  }, [commitZoom]);
+    return () => window.removeEventListener('wheel', onWheel);
+  }, [zoomSoon]);
 
   const selectionPage = selection ? pageData.get(selection.pageId)?.page : undefined;
   const selectionPaper = selection ? pages.find((p) => p.id === selection.pageId)?.paperColor : undefined;
@@ -318,7 +330,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     if (box) openAsk({ pageId: selection.pageId, ids: selection.ids, bbox: box, mode });
   };
   // Reading: what an agent (or the student) read in the selected ink (none for images or text boxes alone).
-  const selInk = selection && pageData.get(selection.pageId) ? selectionInk(pageData.get(selection.pageId)!.items, selection.ids) : [];
+  const selInk = selection && selectionPage ? selectionInk(selectionPage.items(), selection.ids) : [];
   const [reading, setReading] = React.useState<{ pageId: string; page: Page; ink: string[] } | null>(null);
   const openReading = () => {
     if (!selection || !selectionPage) return;
@@ -431,7 +443,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     },
     selectAll: () => {
       const target = pasteTarget();
-      const ids = target ? pageData.get(target.pageId)?.items.map((it) => it.id) : [];
+      const ids = target ? pageData.get(target.pageId)?.page.items().map((it) => it.id) : [];
       if (!target || !ids?.length) return;
       setTool('lasso');
       setSelection({ pageId: target.pageId, ids });
@@ -1041,8 +1053,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                 onChange={changeTools}
                 onImage={insertImage}
                 zoom={zoom * liveScale}
-                onZoom={(d) => commitZoom(stepZoom(zoom, d))}
-                onZoomReset={() => commitZoom(1)}
+                onZoom={(d) => zoomSoon(stepZoom(zoomTarget.current ?? zoom, d), 250)}
+                onZoomReset={() => zoomSoon(1, 0)}
               />
             </View>
 
