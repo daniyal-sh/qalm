@@ -1,12 +1,10 @@
-// Web: browser download. In Electron the preload may expose a native save dialog (tech-spec §6).
-interface DesktopBridge {
-  saveFile?: (name: string, bytes: Uint8Array, mime: string) => Promise<unknown>;
-}
+// Web: browser download. In Electron the preload exposes a native save dialog (tech-spec §6).
+import { desktop } from '../lib/desktop';
 
 export async function saveFile(name: string, mime: string, bytes: Uint8Array): Promise<void> {
-  const desktop = (globalThis as { qalmDesktop?: DesktopBridge }).qalmDesktop;
-  if (desktop?.saveFile) {
-    await desktop.saveFile(name, bytes, mime);
+  const d = desktop();
+  if (d) {
+    await d.saveFile(name, bytes, mime);
     return;
   }
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
