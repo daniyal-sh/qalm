@@ -12,7 +12,7 @@ import { NameSheet } from '../library/components';
 import { newId } from '../lib/id';
 import { kvGet, kvSet } from '../lib/kv';
 import { pickFile } from '../lib/files';
-import { docIds, openLoaded } from '../sync/docs';
+import { docIds, openLoaded, type DocHandle } from '../sync/docs';
 import { useDoc, useLibraryData, useSession, useSyncStatus, useVersion } from '../state/session';
 import { useTheme } from '../theme/ThemeProvider';
 import { PEN_COLORS, HIGHLIGHTER_COLORS, radius, shadow2 } from '../theme/tokens';
@@ -25,6 +25,7 @@ import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence } from './ai';
 import { markAllSeen, marginCards, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
 import { getClip, pasteItems, setClip, useClip } from './clipboard';
+import { entryMirror, notebookFound, pendingScrollY, type PendingScroll } from './editor.logic';
 import { cloneItems, recolorPatch, selectionBBox } from './items';
 import { trackModifiers } from './modifiers';
 import { SelectionThumb } from './SelectionThumb';
@@ -189,13 +190,15 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     QalmInk.ensureModel('en-US').catch(() => undefined);
   }, []);
 
+  // A bogus link, or a notebook deleted forever (maybe on another device): "not found", and never a new library entry.
+  const entry = library?.entry(notebookId);
+  const found = notebookFound(meta, notebookId, !!library, entry);
   // Mirror title / cover / AI access into the library entry (they may change on another device).
   React.useEffect(() => {
-    if (!meta || !library) return;
-    const e = library.entry(notebookId);
-    if (!e) library.putEntry({ id: notebookId, title: meta.title, cover: meta.cover, folderId: null, updatedAt: meta.updatedAt, aiAccess: meta.aiAccess, favorite: false, deletedAt: null });
-    else if (e.title !== meta.title || e.cover !== meta.cover || e.aiAccess !== meta.aiAccess) library.updateEntry(notebookId, { title: meta.title, cover: meta.cover, aiAccess: meta.aiAccess });
-  }, [meta, library, notebookId]);
+    if (!found || !meta || !library || !entry) return;
+    const patch = entryMirror(meta, entry);
+    if (patch) library.updateEntry(notebookId, patch);
+  }, [found, meta, library, entry, notebookId]);
 
   // ---- layout, scroll and zoom ----
   const [viewport, setViewport] = React.useState({ w: win.width, h: win.height });
@@ -305,6 +308,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const deleteSelection = () => {
     if (!selection || !selectionPage) return;
     selectionPage.removeItems(selection.ids);
+    touchPage(selection.pageId);
     setSelection(null);
   };
   // Items deleted elsewhere (undo, another device) drop out of the selection.
@@ -354,6 +358,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       if (!selection || !selectionPage) return;
       const copies = cloneItems(selectedItems(), 16, 16, newId);
       selectionPage.addItems(copies);
+      touchPage(selection.pageId);
       setSelection({ pageId: selection.pageId, ids: copies.map((x) => x.id) });
     },
     recolor: (hex: string) => {
@@ -364,9 +369,12 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
           return patch ? [[it.id, patch] as const] : [];
         }),
       );
+      touchPage(selection.pageId);
     },
     order: (to: 'front' | 'back') => {
-      if (selection && selectionPage) selectionPage.reorder(selection.ids, to);
+      if (!selection || !selectionPage) return;
+      selectionPage.reorder(selection.ids, to);
+      touchPage(selection.pageId);
     },
     selectAll: () => {
       const target = pasteTarget();
@@ -450,6 +458,22 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     setAskScope(scope);
     setAskOpen(true);
   };
+  // While a selection's sheet is open its page doc stays open, even if the page scrolls away or a zoom unmounts it,
+  // so the comment or Ask is always written (and its thumbnail keeps showing).
+  const scopeDocId = askOpen && askScope ? docIds.page(notebookId, askScope.pageId) : null;
+  const [scopeDoc, setScopeDoc] = React.useState<DocHandle | null>(null);
+  React.useEffect(() => {
+    if (!scopeDocId) return;
+    const hd = s.dm.open(scopeDocId);
+    let alive = true;
+    void hd.loaded.then(() => alive && setScopeDoc(hd));
+    return () => {
+      alive = false;
+      setScopeDoc(null);
+      hd.release();
+    };
+  }, [s.dm, scopeDocId]);
+  const heldPage = React.useMemo(() => (scopeDoc ? { docId: scopeDoc.docId, page: new Page(scopeDoc.doc) } : null), [scopeDoc]);
   const [renaming, setRenaming] = React.useState(false);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [toast, showToast] = useToast();
@@ -471,6 +495,16 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     // Nearby pages scroll smoothly; far ones jump (an animated scroll past hundreds of pages would load them all).
     if (slot) vScroll.current?.scrollTo({ y: Math.max(0, slot.top - 80), animated: Math.abs(i - current) <= 3 });
   };
+  // A scroll that waits for the page list to change (a page added or moved), applied once its slot exists.
+  const pendingScroll = React.useRef<PendingScroll | null>(null);
+  React.useEffect(() => {
+    const p = pendingScroll.current;
+    if (!p) return;
+    const y = pendingScrollY(slots, p);
+    if (y === null) return;
+    pendingScroll.current = null;
+    requestAnimationFrame(() => vScroll.current?.scrollTo({ y, animated: false }));
+  }, [slots]);
   const jumpTo = (index: number) => {
     const p = pages[index];
     if (p) scrollToPage(p.id);
@@ -524,9 +558,13 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     const p = pages[index];
     if (notebook && p) notebook.setBookmark(p.id, !p.bookmarked);
   };
+  /** Moves a page, keeping the page in view (and the spot on it) in view wherever it ends up. */
   const movePage = (from: number, to: number) => {
     const p = pages[from];
-    if (notebook && p && from !== to) notebook.movePage(p.id, to);
+    if (!notebook || !p || from === to || to < 0 || to >= pages.length) return;
+    const inView = slots[currentRef.current];
+    if (inView) pendingScroll.current = { pageId: inView.id, offset: scrollYRef.current - inView.top };
+    notebook.movePage(p.id, to);
   };
 
   const addPage = (afterIndex?: number) => {
@@ -534,7 +572,9 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     const after = afterIndex !== undefined ? pages[afterIndex] : pages[pages.length - 1];
     // A page after a PDF page gets the notebook's paper.
     const id = notebook.addPage(after && after.background.kind === 'paper' ? { size: after.size, paper: after.paper, paperColor: after.paperColor } : {}, afterIndex !== undefined ? afterIndex + 1 : undefined);
-    requestAnimationFrame(() => scrollToPage(id));
+    // The new page becomes the current one: scroll to it once it's laid out; Paste, Ask and images go there.
+    pendingScroll.current = { pageId: id };
+    lastPage.current = id;
   };
 
   const deletePage = (index: number) => {
@@ -542,7 +582,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     const p = pages[index];
     if (!p) return;
     confirm(`Delete page ${index + 1}?`, 'Its ink, text and comments go with it.', 'Delete', () => {
-      registry.drop(p.id);
+      // The page's ink history stays (eviction drops it), so undoing the delete brings back its undo steps too.
       notebook.removePage(p.id);
     });
   };
@@ -554,8 +594,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         { label: 'Add page after', icon: 'plus', onPress: () => addPage(index) },
         { label: 'Duplicate page', icon: 'copy', onPress: () => duplicatePage(index) },
         { label: pages[index]?.bookmarked ? 'Remove bookmark' : 'Bookmark page', icon: 'bookmark', onPress: () => toggleBookmark(index) },
-        { label: 'Move up', icon: 'arrow-up', onPress: () => index > 0 && notebook?.movePage(pages[index]!.id, index - 1) },
-        { label: 'Move down', icon: 'arrow-down', onPress: () => index < pages.length - 1 && notebook?.movePage(pages[index]!.id, index + 1) },
+        { label: 'Move up', icon: 'arrow-up', onPress: () => movePage(index, index - 1) },
+        { label: 'Move down', icon: 'arrow-down', onPress: () => movePage(index, index + 1) },
         { label: 'Delete page', icon: 'trash-2', tone: 'bad', onPress: () => deletePage(index) },
       ],
     });
@@ -608,21 +648,29 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     const text = askText.trim();
     if (!notebook || !text) return;
     const scope = askScope;
-    const data = scope ? pageData.get(scope.pageId) : undefined;
     let askThread: string | undefined;
-    if (scope && data) {
+    if (scope) {
+      const page = heldPage?.docId === docIds.page(notebookId, scope.pageId) ? heldPage.page : pageData.get(scope.pageId)?.page;
+      // Keep the text (and the sheet) when there's nowhere to write it.
+      if (!pages.some((p) => p.id === scope.pageId)) return showToast('That page was deleted. Your text is still here.');
+      if (!page) return showToast('Still loading the page. Try again in a moment.');
       // A thread anchored to the selection; for an Ask, the agent answers in it.
       const ids = new Set(scope.ids);
-      const first = data.lines.filter((l) => l.itemIds.some((id) => ids.has(id))).sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0])[0];
+      const first = page.lines().filter((l) => l.itemIds.some((id) => ids.has(id))).sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0])[0];
       const asking = scope.mode === 'ask';
-      const commentId = data.page.addComment({ lineKey: first?.key ?? '', author: { kind: 'user', name: 'You' }, text, anchor: scope.bbox, anchorIds: scope.ids, ask: asking || undefined });
+      const commentId = page.addComment({ lineKey: first?.key ?? '', author: { kind: 'user', name: 'You' }, text, anchor: scope.bbox, anchorIds: scope.ids, ask: asking || undefined });
       if (asking) {
         notebook.addAsk(scope.pageId, text, { sel: { itemIds: scope.ids, bbox: scope.bbox }, commentId });
         askThread = commentId;
       }
       setSelection(null);
       setActiveComment(commentId);
-    } else if (!scope) notebook.addAsk(lastPage.current ?? currentPageId ?? pages[0]!.id, text);
+    } else {
+      // The general Ask is about the page in view: the one the sheet names.
+      const pageId = currentPageId ?? pages[0]?.id;
+      if (!pageId) return;
+      notebook.addAsk(pageId, text);
+    }
     setAskText('');
     setAskOpen(false);
     setAskScope(null);
@@ -632,7 +680,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   };
 
   const scopeInfo = askScope ? pages.find((x) => x.id === askScope.pageId) : undefined;
-  const scopePage = askScope ? pageData.get(askScope.pageId)?.page : undefined;
+  const scopePage = askScope ? (heldPage?.page ?? pageData.get(askScope.pageId)?.page) : undefined;
   const commentCount = [...pageData.values()].reduce((n, d) => n + d.comments.filter((x) => !x.resolved).length, 0);
   React.useEffect(() => {
     if (!commentsOpen || !unread) return;
@@ -691,10 +739,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       </View>
     );
   }
-  if (!meta.id) {
+  if (!found) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
-        <EmptyState icon="alert-circle" title="Notebook not found" body="It may still be syncing, or it was deleted on another device." action={<Button label="Back to library" onPress={() => router.replace('/')} />} />
+        <EmptyState icon="alert-circle" title="Notebook not found" body="It may still be syncing, or it was deleted, maybe on another device." action={<Button label="Back to library" onPress={() => router.replace('/')} />} />
       </SafeAreaView>
     );
   }
