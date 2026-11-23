@@ -208,16 +208,17 @@ export function MarginCard({
             {latest.author.name}
             {replies ? <Text variant="meta" tone="faint">{`  · ${replies + 1}`}</Text> : null}
           </Text>
-          {unread ? <View style={[styles.dot, { backgroundColor: c.assistant }]} accessibilityLabel="New" /> : null}
+          {thinking ? (
+            <Text variant="meta" style={{ color: c.assistant }} numberOfLines={1}>
+              Thinking…
+            </Text>
+          ) : unread ? (
+            <View style={[styles.dot, { backgroundColor: c.assistant }]} accessibilityLabel="New" />
+          ) : null}
         </View>
-        <Text variant="meta" tone="ink" numberOfLines={thinking ? 1 : 2}>
+        <Text variant="meta" tone="ink" numberOfLines={2}>
           {latest.text}
         </Text>
-        {thinking ? (
-          <Text variant="meta" style={{ color: c.assistant }} numberOfLines={1}>
-            Thinking…
-          </Text>
-        ) : null}
       </Pressable>
     </AppearIn>
   );
