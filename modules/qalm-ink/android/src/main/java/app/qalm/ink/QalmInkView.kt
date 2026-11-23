@@ -16,6 +16,8 @@ import android.view.View
 import androidx.annotation.RequiresApi
 import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
 import androidx.input.motionprediction.MotionEventPredictor
+import com.facebook.react.views.scroll.ReactHorizontalScrollView
+import com.facebook.react.views.scroll.ReactScrollView
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -32,6 +34,44 @@ import kotlin.math.min
  */
 @SuppressLint("ViewConstructor")
 class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
+  private val input = InkInput(object : InkInput.Host {
+    override val mmPerPx get() = this@QalmInkView.mmPerPx
+    override fun start(ev: MotionEvent, idx: Int, isPen: Boolean, eraser: Boolean) = this@QalmInkView.start(ev, idx, isPen, eraser)
+    override fun move(ev: MotionEvent, idx: Int) = onMove(ev, idx)
+    override fun finish(ev: MotionEvent, idx: Int) = this@QalmInkView.finish(ev, idx)
+    override fun retract() = this@QalmInkView.retract()
+    override fun rejected(reason: String) = reject(reason)
+    override fun penButton() = onPenButton(mapOf("kind" to "button"))
+    override fun claim(disallow: Boolean) {
+      parent?.requestDisallowInterceptTouchEvent(disallow)
+    }
+    override fun holdScroll(hold: Boolean) = this@QalmInkView.holdScroll(hold)
+  })
+
+  /** Scroll views this view stopped for a finger stroke (see InkInput), to be restored when it ends. */
+  private val heldScrollViews = ArrayList<View>()
+
+  private fun holdScroll(hold: Boolean) {
+    if (!hold) {
+      for (v in heldScrollViews) {
+        when (v) {
+          is ReactScrollView -> v.scrollEnabled = true
+          is ReactHorizontalScrollView -> v.scrollEnabled = true
+        }
+      }
+      heldScrollViews.clear()
+      return
+    }
+    var p = parent
+    while (p != null) {
+      when {
+        p is ReactScrollView && p.scrollEnabled -> { p.scrollEnabled = false; heldScrollViews.add(p) }
+        p is ReactHorizontalScrollView && p.scrollEnabled -> { p.scrollEnabled = false; heldScrollViews.add(p) }
+      }
+      p = p.parent
+    }
+  }
+
   // ---- props ----
   var pageW = 595.0
   var pageH = 842.0
@@ -41,9 +81,9 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   var penStyle = "fountain"
   var smoothing = 0
   var lassoMode = "free" // free | rect
-  var drawWith = "pen"
-  var hand = "right"
-  var palm = "standard"
+  var drawWith by input::drawWith
+  var hand by input::hand
+  var palm by input::palm
 
   fun setCommittedIds(ids: List<String>) {
     val committed = ids.toHashSet()
@@ -94,13 +134,9 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   private var live: Live? = null
   private val pending = ArrayList<Pending>()
   private var hover: FloatArray? = null // view px
-  private var lastPenTime = Long.MIN_VALUE / 2
-  private var lastPenX = 0f
-  private var lastPenY = 0f
-  private var buttonDown = false
 
   private val mmPerPx: Double
-    get() = 25.4 / max(1f, resources.displayMetrics.xdpi)
+    get() = resources.displayMetrics.let { InkInput.mmPerPx(it.xdpi, it.densityDpi) }
 
   private val predictor = MotionEventPredictor.newInstance(this)
   private val layer: InkLayer =
@@ -124,6 +160,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   }
 
   override fun onDetachedFromWindow() {
+    input.reset()
     layer.release()
     super.onDetachedFromWindow()
   }
@@ -136,7 +173,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     val x = if (h < 0) ev.getX(idx) else ev.getHistoricalX(idx, h)
     val y = if (h < 0) ev.getY(idx) else ev.getHistoricalY(idx, h)
     val time = if (h < 0) ev.eventTime else ev.getHistoricalEventTime(h)
-    val stylus = isPenTool(ev.getToolType(idx))
+    val stylus = InkInput.isPenTool(ev.getToolType(idx))
     val pressure = if (h < 0) ev.getPressure(idx) else ev.getHistoricalPressure(idx, h)
     val tiltFromVertical = if (h < 0) ev.getAxisValue(MotionEvent.AXIS_TILT, idx) else ev.getHistoricalAxisValue(MotionEvent.AXIS_TILT, idx, h)
     val orientation = if (h < 0) ev.getOrientation(idx) else ev.getHistoricalOrientation(idx, h)
@@ -162,105 +199,22 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
   }
 
-  // ---- input ----
-  private fun isPenTool(t: Int) = t == MotionEvent.TOOL_TYPE_STYLUS || t == MotionEvent.TOOL_TYPE_ERASER
-
-  private fun penButtonPressed(ev: MotionEvent, idx: Int): Boolean =
-    ev.getToolType(idx) == MotionEvent.TOOL_TYPE_ERASER ||
-      (ev.buttonState and (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_STYLUS_SECONDARY)) != 0
-
-  private fun firePenButton(pressed: Boolean) {
-    if (pressed && !buttonDown) onPenButton(mapOf("kind" to "button"))
-    buttonDown = pressed
-  }
-
-  private fun notePen(ev: MotionEvent, idx: Int) {
-    lastPenTime = ev.eventTime
-    lastPenX = ev.getX(idx)
-    lastPenY = ev.getY(idx)
-  }
-
-  private fun reject(reason: String) = onRejectedTouch(mapOf("reason" to reason))
-
-  private fun handSide(x: Float, y: Float, time: Long): Boolean {
-    if (time - lastPenTime > HAND_SIDE_WINDOW_MS) return false
-    val margin = HAND_SIDE_MARGIN_MM / mmPerPx
-    val dx = x - lastPenX
-    val dy = y - lastPenY
-    val beside = if (hand == "right") dx > -margin else dx < margin
-    return beside && dy > -margin
-  }
-
+  // ---- input (palm rejection and the touch state machine live in InkInput) ----
   @SuppressLint("ClickableViewAccessibility")
   override fun onTouchEvent(ev: MotionEvent): Boolean {
     if (tool == "none") return false
     predictor.record(ev)
-    when (ev.actionMasked) {
-      MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> onDown(ev, ev.actionIndex)
-      MotionEvent.ACTION_MOVE -> onMove(ev)
-      MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_UP -> {
-        val idx = ev.actionIndex
-        if (isPenTool(ev.getToolType(idx))) {
-          notePen(ev, idx)
-          buttonDown = false
-        }
-        val l = live
-        if (l != null && ev.getPointerId(idx) == l.pointerId) {
-          // FLAG_CANCELED: the OS decided this pointer was accidental (palm). Retract instead of committing.
-          if ((ev.flags and FLAG_CANCELED) != 0) retract("cancelled") else finish(ev, idx, l)
-        }
-      }
-      MotionEvent.ACTION_CANCEL -> if (live != null) retract("cancelled")
-    }
+    input.onTouchEvent(ev)
     // Keep receiving the gesture (a pen may land after a rejected palm). A parent ScrollView can still intercept
     // finger drags until a stroke starts or a palm is rejected; ViewGroup clears that flag when the gesture ends.
     return true
   }
 
-  private fun onDown(ev: MotionEvent, idx: Int) {
-    val toolType = ev.getToolType(idx)
-    val x = ev.getX(idx)
-    val y = ev.getY(idx)
-    when {
-      isPenTool(toolType) -> {
-        notePen(ev, idx)
-        val button = penButtonPressed(ev, idx)
-        firePenButton(button)
-        if (live?.isPen == false) retract("pen-took-over") // the palm got there first
-        if (live == null) start(ev, idx, isPen = true, eraser = button)
-      }
-      toolType == MotionEvent.TOOL_TYPE_FINGER || toolType == MotionEvent.TOOL_TYPE_UNKNOWN -> {
-        if (drawWith == "pen") return reject("pen-only") // fingers scroll and zoom
-        val palmReason = when {
-          palmSizeExceeded(ev, idx) -> "palm-size"
-          ev.eventTime - lastPenTime < PEN_LOCKOUT_MS -> "pen-lockout"
-          handSide(x, y, ev.eventTime) -> "hand-side"
-          else -> null
-        }
-        if (palmReason != null) {
-          parent?.requestDisallowInterceptTouchEvent(true) // swallow the palm so it doesn't scroll the page
-          return reject(palmReason)
-        }
-        val l = live
-        when {
-          l == null -> start(ev, idx, isPen = false, eraser = false)
-          l.isPen -> reject("pen-active")
-          else -> {
-            // A second finger: this is a scroll / zoom, not ink.
-            retract("multi-touch")
-            parent?.requestDisallowInterceptTouchEvent(false)
-          }
-        }
-      }
-      else -> if (live == null) start(ev, idx, isPen = false, eraser = false) // mouse
-    }
-  }
+  private fun reject(reason: String) = onRejectedTouch(mapOf("reason" to reason))
 
-  private fun palmSizeExceeded(ev: MotionEvent, idx: Int) = ev.getTouchMajor(idx) * mmPerPx > (PALM_MAJOR_MM[palm] ?: 7.0)
-
-  private fun start(ev: MotionEvent, idx: Int, isPen: Boolean, eraser: Boolean) {
+  private fun start(ev: MotionEvent, idx: Int, isPen: Boolean, eraser: Boolean): Boolean {
     val t = if (eraser) "eraser" else tool
-    if (t == "none") return
+    if (t == "none") return false
     val kind = when (t) {
       "eraser" -> "erase"
       "lasso" -> "lasso"
@@ -281,25 +235,13 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     live = l
     hover = null
     addPoint(l, point(ev, idx, -1, l))
-    parent?.requestDisallowInterceptTouchEvent(true)
     requestUnbufferedDispatch(ev) // deliver every sample as it arrives, not batched per frame
     render(l)
+    return true
   }
 
-  private fun onMove(ev: MotionEvent) {
-    for (i in 0 until ev.pointerCount) {
-      if (isPenTool(ev.getToolType(i))) {
-        notePen(ev, i)
-        firePenButton(penButtonPressed(ev, i))
-      }
-    }
+  private fun onMove(ev: MotionEvent, idx: Int) {
     val l = live ?: return
-    val idx = ev.findPointerIndex(l.pointerId)
-    if (idx < 0) return
-    if (!l.isPen && ev.getToolType(idx) == MotionEvent.TOOL_TYPE_FINGER && palmSizeExceeded(ev, idx)) {
-      retract("palm-size") // the contact grew into a palm; keep swallowing it
-      return
-    }
     for (h in 0 until ev.historySize) addPoint(l, point(ev, idx, h, l))
     addPoint(l, point(ev, idx, -1, l))
     l.predicted = emptyList()
@@ -317,7 +259,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     render(l)
   }
 
-  private fun finish(ev: MotionEvent, idx: Int, l: Live) {
+  private fun finish(ev: MotionEvent, idx: Int) {
+    val l = live ?: return
     addPoint(l, point(ev, idx, -1, l))
     live = null
     when (l.kind) {
@@ -356,10 +299,9 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
   }
 
-  private fun retract(reason: String) {
+  private fun retract() {
     live = null
     layer.drawFrame(null)
-    reject(reason)
   }
 
   private fun emitErase(l: Live, final: Boolean) {
@@ -372,9 +314,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   // ---- hover (brush preview) ----
   override fun onHoverEvent(ev: MotionEvent): Boolean {
-    if (tool == "none" || !isPenTool(ev.getToolType(0))) return super.onHoverEvent(ev)
-    notePen(ev, 0)
-    firePenButton(penButtonPressed(ev, 0))
+    if (tool == "none" || !InkInput.isPenTool(ev.getToolType(0))) return super.onHoverEvent(ev)
+    input.onHoverEvent(ev)
     when (ev.actionMasked) {
       MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> {
         hover = floatArrayOf(ev.x, ev.y)
@@ -557,17 +498,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   }
 
   companion object {
-    // Tech-spec §3 palm rejection. Distances are mm, converted with DisplayMetrics.xdpi (px → mm = 25.4 / xdpi).
-    // 1. Pen always draws; with drawWith = "pen" fingers never draw (they are left to scroll / zoom).
-    // 2. A finger whose touchMajor exceeds PALM_MAJOR_MM[palm] is rejected.
-    // 3. A finger within PEN_LOCKOUT_MS of any pen activity (contact or hover) is rejected; a finger beside or
-    //    below the last pen position on the `hand` side (more than HAND_SIDE_MARGIN_MM past it does not count)
-    //    is rejected while the pen was seen within HAND_SIDE_WINDOW_MS.
-    // 4. ACTION_CANCEL / FLAG_CANCELED retracts the stroke in progress.
-    val PALM_MAJOR_MM = mapOf("relaxed" to 9.0, "standard" to 7.0, "strict" to 5.0)
-    const val PEN_LOCKOUT_MS = 600L
-    const val HAND_SIDE_WINDOW_MS = 3000L // same as iOS
-    const val HAND_SIDE_MARGIN_MM = 10.0
+    // Palm rejection constants live in InkInput (tech-spec §3).
     /** Movement below this counts as holding still (heldMs, for shape snapping). */
     const val HOLD_MOVE_MM = 1.0
     /** A finished stroke whose id never reaches committedIds is dropped after this (same as iOS). */
@@ -575,7 +506,6 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     /** How long a finished stroke stays after its id is in committedIds (same as iOS). */
     const val HANDOFF_MS = 50L
     const val HIGHLIGHTER_ALPHA = 0.45
-    const val FLAG_CANCELED = 0x20 // MotionEvent.FLAG_CANCELED (API 33)
     val LASSO_COLOR = Color.parseColor("#4338ca")
     val ERASER_CURSOR = Color.parseColor("#8b8b95")
 

@@ -15,6 +15,9 @@ android {
   lintOptions {
     abortOnError false
   }
+  testOptions {
+    unitTests.includeAndroidResources = true
+  }
 }
 
 dependencies {
@@ -22,7 +25,11 @@ dependencies {
   implementation 'androidx.graphics:graphics-core:1.0.4'
   // Motion prediction (MotionEventPredictor)
   implementation 'androidx.input:input-motionprediction:1.0.1'
+  // ReactScrollView / ReactHorizontalScrollView: a finger stroke holds the page's scroll views (QalmInkView)
+  implementation 'com.facebook.react:react-android'
 
-  // JVM tests (QalmFreehandTest compares the port against @qalm/core output)
+  // JVM tests (QalmFreehandTest compares the port against @qalm/core output; InkInputTest drives palm
+  // rejection with synthesized MotionEvents under Robolectric)
   testImplementation 'junit:junit:4.13.2'
+  testImplementation 'org.robolectric:robolectric:4.14.1'
 }
