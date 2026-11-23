@@ -11,7 +11,9 @@
     "export:web": "node scripts/web-assets.mjs && expo export -p web",
     "web-assets": "node scripts/web-assets.mjs",
     "typecheck": "tsc --noEmit -p .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bench:micro": "vitest run --config scripts/bench/vitest.micro.mts",
+    "bench": "node scripts/bench/run.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/figtree": "^0.4.1",
