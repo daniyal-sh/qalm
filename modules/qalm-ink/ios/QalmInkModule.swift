@@ -59,7 +59,7 @@ public class QalmInkModule: Module {
         view.setColor(color)
       }
 
-      Prop("width") { (view: QalmInkView, width: Double) in
+      Prop("strokeWidth") { (view: QalmInkView, width: Double) in  // not "width": Fabric would read that as layout width
         view.setStrokeWidth(width)
       }
 

@@ -77,7 +77,7 @@ class QalmInkModule : Module() {
       }
       Prop("tool") { view: QalmInkView, v: String -> view.tool = v }
       Prop("color") { view: QalmInkView, v: String -> view.colorString = v }
-      Prop("width") { view: QalmInkView, v: Double -> view.strokeWidth = v }
+      Prop("strokeWidth") { view: QalmInkView, v: Double -> view.strokeWidth = v } // not "width": Fabric would read that as layout width
       Prop("input") { view: QalmInkView, v: InputRecord ->
         view.drawWith = v.drawWith
         view.hand = v.hand
