@@ -294,8 +294,6 @@ interface InkOverlayProps {
   onRejectedTouch?(e: { nativeEvent: { reason: string } }): void;
 }
 // functions
-QalmInk.recognize(lines: { key: string; strokes: InkPoint[][] }[], lang: 'en-US'): Promise<{ key: string; text: string; score: number }[]>  // ML Kit; web/desktop resolve []
-QalmInk.ensureModel(lang: 'en-US'): Promise<void>
 QalmInk.renderPdfPage(fileUri: string, pageIndex: number, widthPx: number): Promise<string /*cached png file uri*/>
   // iOS PDFKit, Android android.graphics.pdf.PdfRenderer, web pdf.js (returns an object URL)
 ```
@@ -316,7 +314,9 @@ web CSS px = 0.2646 mm):
 
 Hover (where supported) shows a brush-size preview. The pen button, squeeze or double-tap fires `onPenButton`, and the app switches to the eraser.
 
-**Recognition** uses ML Kit Digital Ink on iPad and Android. On desktop there's **no recognizer in v1**: `recognize` resolves `[]`, and agents read the image.
+**No on-device recognition.** qalm-ink has no handwriting recognizer on any platform (ML Kit was removed): the user's agent reads handwriting
+from the page image. That keeps the app about 20 MB lighter per language and the same on every platform. (Until the app stops calling them,
+`QalmInk.recognize`/`ensureModel` remain as deprecated JS no-ops that resolve `[]` / nothing; they will be deleted.)
 
 ## 4. Server (`apps/server`, Cloudflare Workers)
 

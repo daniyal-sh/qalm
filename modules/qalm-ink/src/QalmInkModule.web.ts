@@ -1,6 +1,6 @@
 import { NativeModule, registerWebModule } from 'expo';
 
-import type { QalmInkModuleType, RecognizeLine, RecognizeResult } from './QalmInk.types';
+import type { QalmInkModuleType } from './QalmInk.types';
 
 type PdfJs = typeof import('pdfjs-dist');
 type PdfDoc = Awaited<ReturnType<PdfJs['getDocument']>['promise']>;
@@ -72,10 +72,6 @@ async function render(fileUri: string, pageIndex: number, widthPx: number): Prom
 }
 
 class QalmInkWebModule extends NativeModule implements QalmInkModuleType {
-  async recognize(_lines: RecognizeLine[], _lang: 'en-US'): Promise<RecognizeResult[]> {
-    return []; // no recognizer on web / desktop in v1 (tech-spec §3)
-  }
-  async ensureModel(_lang: 'en-US'): Promise<void> {}
   renderPdfPage(fileUri: string, pageIndex: number, widthPx: number): Promise<string> {
     const key = `${fileUri}#${pageIndex}@${Math.round(widthPx)}`;
     let png = pages.get(key);

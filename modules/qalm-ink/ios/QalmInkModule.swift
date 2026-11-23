@@ -6,30 +6,6 @@ public class QalmInkModule: Module {
   public func definition() -> ModuleDefinition {
     Name("QalmInk")
 
-    // QalmInk.recognize(lines, lang) -> [{ key, text, score }]
-    AsyncFunction("recognize") { (lines: [[String: Any]], lang: String, promise: Promise) in
-      let parsed = InkRecognizer.parseLines(lines)
-      InkRecognizer.shared.recognize(lines: parsed, lang: lang) { result in
-        switch result {
-        case .success(let rows):
-          promise.resolve(rows)
-        case .failure(let error):
-          promise.reject("ERR_QALM_RECOGNIZE", error.localizedDescription)
-        }
-      }
-    }
-
-    // QalmInk.ensureModel(lang) -> void (downloads the ML Kit model if needed)
-    AsyncFunction("ensureModel") { (lang: String, promise: Promise) in
-      InkRecognizer.shared.ensureModel(lang: lang) { error in
-        if let error = error {
-          promise.reject("ERR_QALM_MODEL", error.localizedDescription)
-        } else {
-          promise.resolve()
-        }
-      }
-    }
-
     // QalmInk.renderPdfPage(fileUri, pageIndex, widthPx) -> cached png file uri
     AsyncFunction("renderPdfPage") { (fileUri: String, pageIndex: Int, widthPx: Double, promise: Promise) in
       PdfPageRenderer.render(fileUri: fileUri, pageIndex: pageIndex, widthPx: widthPx) { result in
