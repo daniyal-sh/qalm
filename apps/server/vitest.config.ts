@@ -17,6 +17,7 @@ export default defineConfig(async () => {
             WAIT_TIMEOUT_MS: '2500',
             MAX_ASSET_BYTES: '1024',
             MAX_USER_STORAGE_BYTES: '1500',
+            GOOGLE_AUDIENCES: 'qalm-test.apps.googleusercontent.com',
           },
         },
       }),

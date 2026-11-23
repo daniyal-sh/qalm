@@ -57,6 +57,22 @@ describe('sync', () => {
     expect((await SELF.fetch(`${BASE}/sync/nb:owned1?ticket=${owner.accessToken}`, upgrade)).status).toBe(401);
   });
 
+  it('tickets expire after 30 s', async () => {
+    const owner = await signIn('expiry@example.com');
+    const r = await ticket(owner.accessToken, 'nb:exp1');
+    const { expiresAt } = (await r.json()) as { expiresAt: number };
+    expect(expiresAt - Date.now()).toBeGreaterThan(25_000);
+    expect(expiresAt - Date.now()).toBeLessThanOrEqual(30_000);
+    // A ticket that is past its expiry is refused (written directly so the test needn't wait 30 s).
+    const tk = 'expired-ticket-value';
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(tk)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    await env.DB.prepare('INSERT INTO sync_tickets (ticket_hash, user_id, doc_id, expires_at) VALUES (?1, ?2, ?3, ?4)').bind(hash, owner.userId, 'nb:exp1', Date.now() - 1).run();
+    expect((await SELF.fetch(`${BASE}/sync/nb:exp1?ticket=${tk}`, upgrade)).status).toBe(401);
+    // Missing ticket, and plain HTTP instead of an upgrade.
+    expect((await SELF.fetch(`${BASE}/sync/nb:exp1`, upgrade)).status).toBe(401);
+    expect((await SELF.fetch(`${BASE}/sync/nb:exp1?ticket=x`)).status).toBe(426);
+  });
+
   it('compacts the update log into a snapshot every 200 updates', async () => {
     const t = await signIn('compact@example.com');
     const docId = 'nb:compact1';
