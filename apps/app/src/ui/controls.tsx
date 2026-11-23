@@ -27,7 +27,8 @@ export function focusRing(c: Colors, focused: boolean | undefined): ViewStyle | 
     : { borderColor: c.accent };
 }
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'assistant';
+/** `danger` is a quiet red-text button; `destructive` is the solid red action of a confirm dialog. */
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'destructive' | 'assistant';
 
 export interface ButtonProps extends Omit<PressableProps, 'style' | 'children'> {
   label: string;
@@ -48,6 +49,7 @@ export function Button({ label, variant = 'secondary', icon, loading, size = 'md
     secondary: { bg: c.surface, bgPressed: c.soft, border: c.line, fg: c.ink },
     ghost: { bg: 'transparent', bgPressed: c.soft, border: 'transparent', fg: c.ink },
     danger: { bg: c.surface, bgPressed: c.badSoft, border: c.line, fg: c.bad },
+    destructive: { bg: c.bad, bgPressed: c.bad, border: c.bad, fg: c.surface },
   };
   const f = fill[variant];
   const h = size === 'sm' ? 36 : CONTROL_H;
@@ -86,11 +88,14 @@ export interface IconButtonProps extends Omit<PressableProps, 'style' | 'childre
   size?: number;
   color?: string;
   style?: StyleProp<ViewStyle>;
+  ref?: React.Ref<React.ComponentRef<typeof View>>;
 }
 
 export function IconButton({ icon, label, selected, tone = 'default', size = CONTROL_H, color, style, ...rest }: IconButtonProps) {
   const { c } = useTheme();
-  const fg = color ?? (selected ? c.onAccent : tone === 'assistant' ? c.assistant : tone === 'bad' ? c.bad : c.ink2);
+  // `selected` is an on/off state (a panel that's open): accent-soft with an accent-line border, not a solid fill,
+  // so the selected tool stays the one solid indigo control on screen.
+  const fg = color ?? (selected ? c.accentInk : tone === 'assistant' ? c.assistant : tone === 'bad' ? c.bad : c.ink2);
   return (
     <Pressable
       accessibilityRole="button"
@@ -101,7 +106,13 @@ export function IconButton({ icon, label, selected, tone = 'default', size = CON
         const st = s as PressState;
         return [
           styles.iconButton,
-          { width: size, height: size, backgroundColor: selected ? c.accent : st.pressed || st.hovered ? c.soft : 'transparent' },
+          {
+            width: size,
+            height: size,
+            backgroundColor: selected ? c.accentSoft : st.pressed || st.hovered ? c.soft : 'transparent',
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: selected ? c.accentLine : 'transparent',
+          },
           rest.disabled && { opacity: 0.4 },
           focusRing(c, st.focused),
           style,

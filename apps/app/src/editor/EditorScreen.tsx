@@ -648,6 +648,17 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     });
 
   const ctx = { dm: s.dm, assets: s.assets };
+  /** The selection bar's secondary actions: inline on wide screens, in a "…" menu on narrow ones. */
+  const selMore: MenuItem[] = [
+    { label: 'Duplicate', icon: 'plus-square', onPress: () => sel.duplicate() },
+    { label: 'Copy', icon: 'copy', onPress: () => sel.copy() },
+    { label: 'Cut', icon: 'scissors', onPress: () => sel.cut() },
+    ...(clip ? [{ label: 'Paste', icon: 'clipboard' as const, onPress: () => sel.paste() }] : []),
+    { label: 'Bring to front', icon: 'chevrons-up', onPress: () => sel.order('front') },
+    { label: 'Send to back', icon: 'chevrons-down', onPress: () => sel.order('back') },
+    { label: 'Comment on selection', icon: 'message-square', onPress: () => openSelection('comment') },
+  ];
+
   const moreMenu = (anchor: { x: number; y: number }) =>
     setMenu({
       anchor: { ...anchor, align: 'right' },
@@ -806,7 +817,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
           <IconButton icon="chevron-left" label="Back to library" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
           <IconButton icon={navWide ? 'sidebar' : 'grid'} label="Pages" selected={navOpen} onPress={() => setNavOpen((x) => !x)} />
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text variant="bodyStrong" numberOfLines={1} onPress={() => setRenaming(true)}>
+            <Text variant="bodyStrong" numberOfLines={1} onPress={() => setRenaming(true)} accessibilityRole="button" accessibilityHint="Rename the notebook">
               {meta.title}
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -837,10 +848,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               </View>
             ) : null}
           </View>
-          {narrow ? (
-            <IconButton icon="help-circle" label="Ask" tone="assistant" onPress={() => openAsk()} />
+          {win.width < 480 ? (
+            <IconButton icon="message-circle" label="Ask" tone="assistant" onPress={() => openAsk()} />
           ) : (
-            <Button label="Ask" icon="help-circle" variant="assistant" size="sm" onPress={() => openAsk()} />
+            <Button label="Ask" icon="message-circle" variant="assistant" size="sm" onPress={() => openAsk()} />
           )}
           <IconButton icon="more-vertical" label="More" onPress={(e) => moreMenu({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY + 20 })} />
         </View>
@@ -955,14 +966,17 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                         {selection.ids.length} selected
                       </Text>
                       <IconButton icon="droplet" label="Recolour" onPress={() => setRecoloring(true)} />
-                      <IconButton icon="plus-square" label="Duplicate" onPress={sel.duplicate} />
-                      <IconButton icon="copy" label="Copy" onPress={sel.copy} />
-                      <IconButton icon="scissors" label="Cut" onPress={sel.cut} />
-                      {clip ? <IconButton icon="clipboard" label="Paste" onPress={sel.paste} /> : null}
-                      <IconButton icon="chevrons-up" label="Bring to front" onPress={() => sel.order('front')} />
-                      <IconButton icon="chevrons-down" label="Send to back" onPress={() => sel.order('back')} />
-                      <IconButton icon="message-square" label="Comment on selection" onPress={() => openSelection('comment')} />
-                      <Button label="Ask" accessibilityLabel="Ask about selection" icon="help-circle" variant="assistant" size="sm" onPress={() => openSelection('ask')} />
+                      {narrow ? (
+                        // Under 640 px the secondary actions go in a menu so the bar stays one row (F27).
+                        <IconButton
+                          icon="more-horizontal"
+                          label="More selection actions"
+                          onPress={(e) => setMenu({ anchor: { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }, items: selMore })}
+                        />
+                      ) : (
+                        selMore.map((m) => <IconButton key={m.label} icon={m.icon!} label={m.label} onPress={m.onPress} />)
+                      )}
+                      <Button label="Ask" accessibilityLabel="Ask about selection" icon="message-circle" variant="assistant" size="sm" onPress={() => openSelection('ask')} />
                       <IconButton icon="trash-2" label="Delete selection" tone="bad" onPress={deleteSelection} />
                       <IconButton icon="x" label="Deselect" onPress={() => setSelection(null)} />
                     </>

@@ -53,12 +53,20 @@ export function NotebookCard({
   onMenu(anchor: { x: number; y: number }): void;
 }) {
   const { c } = useTheme();
+  const more = React.useRef<React.ComponentRef<typeof View>>(null);
+  // A deleted notebook can't open: tapping it shows its menu, anchored under the card's "…" button.
+  const press = () => {
+    if (!entry.deletedAt) return onOpen();
+    const el = more.current;
+    if (!el) return onMenu({ x: 16, y: 120 });
+    el.measureInWindow((x, y, _w, h) => onMenu({ x, y: y + h + 4 }));
+  };
   return (
     <View style={{ width, gap: 8 }}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Open ${entry.title || DEFAULT_TITLE}`}
-        onPress={onOpen}
+        accessibilityLabel={entry.deletedAt ? `Options for ${entry.title || DEFAULT_TITLE}` : `Open ${entry.title || DEFAULT_TITLE}`}
+        onPress={press}
         onLongPress={(e) => onMenu({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
         style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}
       >
@@ -66,7 +74,7 @@ export function NotebookCard({
       </Pressable>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 4 }}>
         {/* The title opens the notebook too; screen readers use the cover button above. */}
-        <Pressable accessible={false} onPress={onOpen} style={{ flex: 1, gap: 2 }}>
+        <Pressable accessible={false} onPress={press} style={{ flex: 1, gap: 2 }}>
           <Text variant="label" numberOfLines={1}>
             {entry.title || DEFAULT_TITLE}
           </Text>
@@ -79,6 +87,7 @@ export function NotebookCard({
           </View>
         </Pressable>
         <IconButton
+          ref={more}
           icon="more-horizontal"
           label={`More for ${entry.title || DEFAULT_TITLE}`}
           size={32}

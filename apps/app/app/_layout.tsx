@@ -12,6 +12,7 @@ import { persistClip } from '../src/editor/clipboard';
 import { desktop } from '../src/lib/desktop';
 import { kvGet, kvSet } from '../src/lib/kv';
 import { SessionProvider, useSession } from '../src/state/session';
+import { ConfirmHost } from '../src/ui/ConfirmHost';
 import { Button } from '../src/ui/controls';
 import { Sheet } from '../src/ui/layout';
 import { Text } from '../src/ui/Text';
@@ -84,6 +85,7 @@ function Shell() {
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: c.bg }, animation: 'fade' }} />
       <MoveLocalOffer />
+      <ConfirmHost />
     </>
   );
 }

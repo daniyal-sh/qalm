@@ -131,7 +131,7 @@ export function PresencePill({
               icon="x-circle"
               onPress={() => {
                 setAnchor(null);
-                confirm('Turn off AI access?', 'Agents can’t see this notebook until you turn it back on.', 'Turn off', () => notebook.setMeta({ aiAccess: false, aiPaused: false }));
+                confirm('Stop AI access?', 'Agents can’t see this notebook until you turn it back on.', 'Stop', () => notebook.setMeta({ aiAccess: false, aiPaused: false }));
               }}
             />
             <Button

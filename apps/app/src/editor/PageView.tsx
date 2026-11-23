@@ -405,7 +405,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
             key={a.lineKey}
             accessibilityLabel={`Comment from ${c.author.name}`}
             onPress={() => ed.setActiveComment(c.id)}
-            style={{ position: 'absolute', left: (a.bbox[2] + 9) * scale - 14, top: (a.bbox[1] + 5) * scale - 14, width: 28, height: 28 }}
+            style={{ position: 'absolute', left: (a.bbox[2] + 9) * scale - 22, top: (a.bbox[1] + 5) * scale - 22, width: 44, height: 44 }}
           />
         ) : null;
       })}

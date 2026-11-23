@@ -9,6 +9,7 @@ import { IconButton } from '../ui/controls';
 import { Text } from '../ui/Text';
 import type { ToolState } from './context';
 import { SwatchStrip } from './Swatches';
+import { toolbarOverflow } from './toolbar.logic';
 import type { ToolId } from './view';
 
 type MciName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -67,17 +68,38 @@ function SizeDot({ size, selected, label, onPress }: { size: number; selected: b
   );
 }
 
-function StyleOption({ icon, label, selected, onPress }: { icon: MciName; label: string; selected: boolean; onPress(): void }) {
+/** A tool option or an on/off toggle: accent-soft with an accent-line border when on (never a solid fill). */
+function StyleOption({ icon, label, selected, onPress, toggle }: { icon: MciName; label: string; selected: boolean; onPress(): void; toggle?: boolean }) {
   const { c } = useTheme();
   return (
     <Pressable
-      accessibilityRole="radio"
+      accessibilityRole={toggle ? 'switch' : 'radio'}
       accessibilityLabel={label}
       accessibilityState={{ checked: selected }}
       onPress={onPress}
       style={[styles.sizeHit, { backgroundColor: selected ? c.accentSoft : 'transparent', borderColor: selected ? c.accentLine : 'transparent' }]}
     >
       <MaterialCommunityIcons name={icon} size={19} color={selected ? c.accentInk : c.ink2} />
+    </Pressable>
+  );
+}
+
+function EdgeChevron({ side, onPress }: { side: 'left' | 'right'; onPress(): void }) {
+  const { c } = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={side === 'left' ? 'Show earlier tools' : 'Show more tools'}
+      onPress={onPress}
+      style={(s) => [
+        styles.edge,
+        side === 'left'
+          ? { left: 0, borderRightWidth: StyleSheet.hairlineWidth, borderTopLeftRadius: radius.panel, borderBottomLeftRadius: radius.panel }
+          : { right: 0, borderLeftWidth: StyleSheet.hairlineWidth, borderTopRightRadius: radius.panel, borderBottomRightRadius: radius.panel },
+        { backgroundColor: (s as { hovered?: boolean }).hovered || s.pressed ? c.soft : c.surface, borderColor: c.line },
+      ]}
+    >
+      <MaterialCommunityIcons name={side === 'left' ? 'chevron-left' : 'chevron-right'} size={20} color={c.ink2} />
     </Pressable>
   );
 }
@@ -99,9 +121,30 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
   const { c } = useTheme();
   const t = tools.tool;
   const [dragging, setDragging] = React.useState(false);
+  // When the bar is wider than the window, chevrons at the clipped edges show (and scroll) the rest.
+  const scroll = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const [m, setM] = React.useState({ x: 0, view: 0, content: 0 });
+  const more = toolbarOverflow(m.x, m.view, m.content);
+  const page = (dir: 1 | -1) => scroll.current?.scrollTo({ x: Math.max(0, m.x + dir * Math.max(120, m.view * 0.6)), animated: true });
   return (
     <View style={[styles.bar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
-      <ScrollView horizontal scrollEnabled={!dragging} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+      <ScrollView
+        ref={scroll}
+        horizontal
+        scrollEnabled={!dragging}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.row}
+        scrollEventThrottle={32}
+        onScroll={(e) => {
+          const x = e.nativeEvent.contentOffset.x;
+          setM((p) => (Math.abs(p.x - x) < 1 ? p : { ...p, x }));
+        }}
+        onLayout={(e) => {
+          const view = e.nativeEvent.layout.width;
+          setM((p) => (p.view === view ? p : { ...p, view }));
+        }}
+        onContentSizeChange={(content) => setM((p) => (p.content === content ? p : { ...p, content }))}
+      >
         {TOOLS.map((x) => (
           <ToolButton key={x.id} icon={x.icon} label={x.label} selected={t === x.id} onPress={() => onTool(x.id)} />
         ))}
@@ -121,7 +164,7 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
                   <SizeDot key={w} size={4 + i * 3} label={['Fine', 'Medium', 'Bold'][i]!} selected={tools.penWidth === w} onPress={() => onChange({ penWidth: w })} />
                 ))}
                 <Sep />
-                <ToolButton icon="shape-outline" label={tools.snapShapes ? 'Shape snapping on' : 'Shape snapping off'} selected={tools.snapShapes} onPress={() => onChange({ snapShapes: !tools.snapShapes })} />
+                <StyleOption toggle icon="shape-outline" label="Shape snapping" selected={tools.snapShapes} onPress={() => onChange({ snapShapes: !tools.snapShapes })} />
               </>
             ) : null}
           </>
@@ -160,6 +203,8 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
         </Pressable>
         <IconButton icon="zoom-in" label="Zoom in" size={40} onPress={() => onZoom(1)} />
       </ScrollView>
+      {more.left ? <EdgeChevron side="left" onPress={() => page(-1)} /> : null}
+      {more.right ? <EdgeChevron side="right" onPress={() => page(1)} /> : null}
     </View>
   );
 }
@@ -169,5 +214,6 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 4 },
   tool: { width: 44, height: 44, borderRadius: radius.control, alignItems: 'center', justifyContent: 'center' },
   sizeHit: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: radius.control, borderWidth: StyleSheet.hairlineWidth },
+  edge: { position: 'absolute', top: 0, bottom: 0, width: 32, alignItems: 'center', justifyContent: 'center' },
   zoomLabel: { minWidth: 52, height: 44, alignItems: 'center', justifyContent: 'center' },
 });

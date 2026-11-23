@@ -299,7 +299,7 @@ export default function LibraryScreen() {
               {shown.length ? (
                 <View style={[styles.grid, { rowGap: 28 }]}>
                   {shown.map((e) => (
-                    <NotebookCard key={e.id} entry={e} width={cardW} onOpen={() => (e.deletedAt ? entryMenu(e, { x: 40, y: 200 }) : open(e.id))} onMenu={(a) => entryMenu(e, a)} />
+                    <NotebookCard key={e.id} entry={e} width={cardW} onOpen={() => open(e.id)} onMenu={(a) => entryMenu(e, a)} />
                   ))}
                 </View>
               ) : (
