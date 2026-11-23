@@ -1,12 +1,18 @@
 import { setTextMeasure, TEXT_LINE_HEIGHT, type TextItem } from '@qalm/core';
 import { Skia, TextAlign, type SkParagraph, type SkTypefaceFontProvider } from '@shopify/react-native-skia';
 
+/**
+ * Text boxes' fonts, in fallback order: Figtree, then a subset of Noto Sans Math (OFL; Greek, operators, arrows,
+ * super/subscripts) for what Figtree lacks, so ∫ √ π αβγ draw instead of empty boxes. PageCanvas loads both.
+ */
+export const TEXT_FONTS = ['Figtree', 'NotoSansMath'];
+
 type TextLayout = Pick<TextItem, 'text' | 'w' | 'fontSize'> & { color?: string };
 
-/** The paragraph PageCanvas draws for a text box (Figtree, TEXT_LINE_HEIGHT), laid out at the box's width. */
+/** The paragraph PageCanvas draws for a text box (`TEXT_FONTS`, TEXT_LINE_HEIGHT), laid out at the box's width. */
 export function textParagraph(item: TextLayout, fonts: SkTypefaceFontProvider): SkParagraph {
   const p = Skia.ParagraphBuilder.Make({ textAlign: TextAlign.Left }, fonts)
-    .pushStyle({ color: Skia.Color(item.color ?? '#000000'), fontFamilies: ['Figtree'], fontSize: item.fontSize, heightMultiplier: TEXT_LINE_HEIGHT })
+    .pushStyle({ color: Skia.Color(item.color ?? '#000000'), fontFamilies: TEXT_FONTS, fontSize: item.fontSize, heightMultiplier: TEXT_LINE_HEIGHT })
     .addText(item.text || ' ')
     .pop()
     .build();
