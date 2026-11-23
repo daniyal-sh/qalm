@@ -135,17 +135,22 @@ class QalmInkModule : Module() {
       .setPreContext("")
       .setWritingArea(WritingArea(maxOf(1f, x1 - x0), maxOf(1f, y1 - y0)))
       .build()
-    val result = Tasks.await(recognizer.recognize(ink.build(), context))
+    // A line that fails is skipped (as on iOS), so one bad line doesn't lose the others.
+    val result = try {
+      Tasks.await(recognizer.recognize(ink.build(), context))
+    } catch (e: Exception) {
+      return null
+    }
     val best = result.candidates.firstOrNull() ?: return null
-    // ML Kit scores are "lower is better" and only some models provide one; map to 0..1 confidence.
-    val raw = best.score
-    val score = if (raw == null) 0.5 else 1.0 / (1.0 + maxOf(0f, raw))
-    return mapOf("key" to line.key, "text" to best.text, "score" to score)
+    // ML Kit's score is a cost (lower is better) and only some models provide one. Passed through as is (0 when
+    // absent), exactly like iOS InkRecognizer.swift.
+    return mapOf("key" to line.key, "text" to best.text, "score" to (best.score?.toDouble() ?: 0.0))
   }
 
   // ---- PDF (android.graphics.pdf.PdfRenderer → cached PNG in cacheDir) ----
 
   private fun renderPdfPage(fileUri: String, pageIndex: Int, widthPx: Int): String {
+    if (widthPx <= 0 || widthPx > 16384) throw CodedException("ERR_PDF_WIDTH", "Invalid width $widthPx", null) // as iOS
     val ctx = appContext.reactContext ?: throw CodedException("ERR_CONTEXT", "No React context", null)
     val uri = Uri.parse(fileUri)
     val stamp = if (uri.scheme == "file" || uri.scheme == null) File(uri.path ?: fileUri).lastModified() else 0L

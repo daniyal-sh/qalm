@@ -205,6 +205,9 @@ export function InkOverlay(props: InkOverlayProps) {
       return beside && dy > -margin;
     };
 
+    const palmSizeExceeded = (ev: PointerEvent) =>
+      Math.max(ev.width, ev.height) * MM_PER_PX > PALM_MAJOR_MM[propsRef.current.input.palm];
+
     const notePen = (ev: PointerEvent) => {
       s.lastPen = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp };
     };
@@ -303,17 +306,25 @@ export function InkOverlay(props: InkOverlayProps) {
         s.penPointers.add(ev.pointerId);
         notePen(ev);
         firePenButton(ev);
-        if (s.live && !s.live.isPen) retract(); // the palm got there first
+        if (s.live && !s.live.isPen) {
+          retract(); // the palm got there first
+          reject('pen-took-over');
+        }
         if (!s.live) start(ev, true);
         return;
       }
       if (ev.pointerType === 'touch') {
         if (P.input.drawWith === 'pen') return reject('pen-only'); // fingers scroll and zoom
-        if (Math.max(ev.width, ev.height) * MM_PER_PX > PALM_MAJOR_MM[P.input.palm]) return reject('contact-size');
-        if (s.live?.isPen) return reject('pen-active');
-        if (ev.timeStamp - s.lastPen.t < PEN_LOCKOUT_MS) return reject('pen-recent');
+        if (palmSizeExceeded(ev)) return reject('palm-size');
+        if (ev.timeStamp - s.lastPen.t < PEN_LOCKOUT_MS) return reject('pen-lockout');
         if (handSide(ev)) return reject('hand-side');
-        if (s.live) return; // one stroke at a time
+        if (s.live?.isPen) return reject('pen-active');
+        if (s.live) {
+          // A second finger: this is a scroll / zoom, not ink.
+          retract();
+          reject('multi-touch');
+          return;
+        }
         start(ev, false);
         return;
       }
@@ -327,6 +338,11 @@ export function InkOverlay(props: InkOverlayProps) {
       }
       const live = s.live;
       if (live && ev.pointerId === live.pointerId) {
+        if (ev.pointerType === 'touch' && palmSizeExceeded(ev)) {
+          retract(); // the contact grew into a palm
+          reject('palm-size');
+          return;
+        }
         const coalesced = ev.getCoalescedEvents?.() ?? [];
         for (const c of coalesced.length ? coalesced : [ev]) addPoint(live, c);
         live.predicted = live.kind === 'ink' ? (ev.getPredictedEvents?.() ?? []).map((p) => toPoint(p, live)) : [];
@@ -359,7 +375,7 @@ export function InkOverlay(props: InkOverlayProps) {
       s.penPointers.delete(ev.pointerId);
       if (s.live && ev.pointerId === s.live.pointerId) {
         retract();
-        reject('canceled');
+        reject('cancelled');
       }
     };
 

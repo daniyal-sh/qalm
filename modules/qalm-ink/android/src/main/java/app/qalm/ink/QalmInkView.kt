@@ -201,13 +201,13 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
         val l = live
         if (l != null && ev.getPointerId(idx) == l.pointerId) {
           // FLAG_CANCELED: the OS decided this pointer was accidental (palm). Retract instead of committing.
-          if ((ev.flags and FLAG_CANCELED) != 0) retract("canceled") else finish(ev, idx, l)
+          if ((ev.flags and FLAG_CANCELED) != 0) retract("cancelled") else finish(ev, idx, l)
         }
       }
-      MotionEvent.ACTION_CANCEL -> if (live != null) retract("canceled")
+      MotionEvent.ACTION_CANCEL -> if (live != null) retract("cancelled")
     }
-    // Keep receiving the gesture (a pen may land after a rejected palm). A parent ScrollView can still
-    // intercept finger drags, because we only disallow interception while a stroke is live.
+    // Keep receiving the gesture (a pen may land after a rejected palm). A parent ScrollView can still intercept
+    // finger drags until a stroke starts or a palm is rejected; ViewGroup clears that flag when the gesture ends.
     return true
   }
 
@@ -220,22 +220,37 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
         notePen(ev, idx)
         val button = penButtonPressed(ev, idx)
         firePenButton(button)
-        if (live?.isPen == false) retract(null) // the palm got there first
+        if (live?.isPen == false) retract("pen-took-over") // the palm got there first
         if (live == null) start(ev, idx, isPen = true, eraser = button)
       }
       toolType == MotionEvent.TOOL_TYPE_FINGER || toolType == MotionEvent.TOOL_TYPE_UNKNOWN -> {
         if (drawWith == "pen") return reject("pen-only") // fingers scroll and zoom
-        val majorMm = ev.getTouchMajor(idx) * mmPerPx
-        val limit = PALM_MAJOR_MM[palm] ?: 7.0
-        if (majorMm > limit) return reject("contact-size")
-        if (live?.isPen == true) return reject("pen-active")
-        if (ev.eventTime - lastPenTime < PEN_LOCKOUT_MS) return reject("pen-recent")
-        if (handSide(x, y, ev.eventTime)) return reject("hand-side")
-        if (live == null) start(ev, idx, isPen = false, eraser = false)
+        val palmReason = when {
+          palmSizeExceeded(ev, idx) -> "palm-size"
+          ev.eventTime - lastPenTime < PEN_LOCKOUT_MS -> "pen-lockout"
+          handSide(x, y, ev.eventTime) -> "hand-side"
+          else -> null
+        }
+        if (palmReason != null) {
+          parent?.requestDisallowInterceptTouchEvent(true) // swallow the palm so it doesn't scroll the page
+          return reject(palmReason)
+        }
+        val l = live
+        when {
+          l == null -> start(ev, idx, isPen = false, eraser = false)
+          l.isPen -> reject("pen-active")
+          else -> {
+            // A second finger: this is a scroll / zoom, not ink.
+            retract("multi-touch")
+            parent?.requestDisallowInterceptTouchEvent(false)
+          }
+        }
       }
       else -> if (live == null) start(ev, idx, isPen = false, eraser = false) // mouse
     }
   }
+
+  private fun palmSizeExceeded(ev: MotionEvent, idx: Int) = ev.getTouchMajor(idx) * mmPerPx > (PALM_MAJOR_MM[palm] ?: 7.0)
 
   private fun start(ev: MotionEvent, idx: Int, isPen: Boolean, eraser: Boolean) {
     val t = if (eraser) "eraser" else tool
@@ -273,6 +288,10 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     val l = live ?: return
     val idx = ev.findPointerIndex(l.pointerId)
     if (idx < 0) return
+    if (!l.isPen && ev.getToolType(idx) == MotionEvent.TOOL_TYPE_FINGER && palmSizeExceeded(ev, idx)) {
+      retract("palm-size") // the contact grew into a palm; keep swallowing it
+      return
+    }
     for (h in 0 until ev.historySize) addPoint(l, point(ev, idx, h, l))
     addPoint(l, point(ev, idx, -1, l))
     l.predicted = emptyList()
@@ -293,7 +312,6 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   private fun finish(ev: MotionEvent, idx: Int, l: Live) {
     addPoint(l, point(ev, idx, -1, l))
     live = null
-    parent?.requestDisallowInterceptTouchEvent(false)
     when (l.kind) {
       "erase" -> {
         emitErase(l, final = true)
@@ -328,11 +346,10 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
   }
 
-  private fun retract(reason: String?) {
+  private fun retract(reason: String) {
     live = null
-    parent?.requestDisallowInterceptTouchEvent(false)
     layer.drawFrame(null)
-    if (reason != null) reject(reason)
+    reject(reason)
   }
 
   private fun emitErase(l: Live, final: Boolean) {
