@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { emptyThreads, encodeQinkUpdate, labelList, renderLinesStripSvg, resolveThread } from '../src';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { emptyThreads, encodeQinkUpdate, labelList, renderLinesStripSvg, resolveThread, threadLabel } from '../src';
 import type { QinkLabels, TextItem } from '../src';
 import { newNotebook, newPage, stroke } from './helpers';
 
@@ -20,6 +20,8 @@ function setup() {
 }
 
 describe('Q-ink threads', () => {
+  afterEach(() => vi.useRealTimers());
+
   it('labels range lists', () => {
     expect(labelList(['L6', 'L4', 'L5', 'D1', 'L9'])).toBe('L4-6,L9,D1');
     expect(labelList(['L2'])).toBe('L2');
@@ -29,8 +31,14 @@ describe('Q-ink threads', () => {
     const { nb, pid, page, labels, threads, u0 } = setup();
     // The agent comments on L3 (C1); the student replies, and starts their own thread on L4.
     const agentC = page.addComment({ lineKey: 'k3', author: tutor, text: 'Check the sign' });
+    // The server labels an agent's thread as soon as it is created (AgentHub.applyOn). Without this, C1/C2 would
+    // depend on the random comment ids whenever both comments land in the same millisecond.
+    expect(threadLabel(threads, agentC, pid)).toBe('C1');
     const c1 = encodeQinkUpdate(nb, { [pid]: page }, labels, u0.snapshot, { session: 's', rev: 2, threads, seen: u0.seen });
     expect(c1.text).toBe('#q s=s r=2 p1 "y=2"');
+    // Entries are listed in thread order (createdAt, then id): keep the student's thread a millisecond later.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 1000);
     page.replyToComment(agentC, you, 'why?');
     const mine = page.addComment({ lineKey: 'k4', author: you, text: 'is this "right"?' });
     const u = encodeQinkUpdate(nb, { [pid]: page }, labels, c1.snapshot, { session: 's', rev: 3, threads, seen: c1.seen });
