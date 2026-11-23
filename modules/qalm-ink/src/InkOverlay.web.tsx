@@ -1,7 +1,8 @@
+import { inkPaint } from '@qalm/core';
 import * as React from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { HIGHLIGHTER_ALPHA, liveOutline } from './freehand';
+import { liveOutline } from './freehand';
 import {
   PALM_MAJOR_MM,
   PEN_LOCKOUT_MS,
@@ -152,8 +153,9 @@ export function InkOverlay(props: InkOverlayProps) {
 
       const live = s.live;
       if (live?.kind === 'ink') {
-        ctx.globalAlpha = live.tool === 'highlighter' ? HIGHLIGHTER_ALPHA : 1;
-        ctx.fillStyle = live.color;
+        const paint = inkPaint(live.tool, live.color);
+        ctx.globalAlpha = paint.alpha;
+        ctx.fillStyle = paint.rgb;
         ctx.fill(outlinePath(live, live.points.concat(live.predicted)));
         ctx.globalAlpha = 1;
       } else if (live?.kind === 'lasso' && live.points.length > 1) {
@@ -313,8 +315,8 @@ export function InkOverlay(props: InkOverlayProps) {
         const heldMs = Math.max(0, Math.round(Math.max(last.t, ev.timeStamp - live.t0) - live.holdT));
         s.finished.push({
           id,
-          color: live.color,
-          alpha: live.tool === 'highlighter' ? HIGHLIGHTER_ALPHA : 1,
+          color: inkPaint(live.tool, live.color).rgb,
+          alpha: inkPaint(live.tool, live.color).alpha,
           path: outlinePath(live, live.points), // exactly what PageCanvas will draw: no predicted points
         });
         setTimeout(() => {

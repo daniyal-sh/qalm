@@ -48,7 +48,14 @@ pg:{notebookId}:{pageId}   page doc
   comments: Y.Map<commentId, Y.Map>
 
 lib:{userId}               library doc: folders + notebook entries {id,title,cover,folderId,updatedAt,aiAccess,favorite,deletedAt}
+  swatches: Y.Map<'pen'|'highlighter', Y.Array<string>>   saved colours, in order; a missing key = the brand palette
 ```
+**Saved colours (swatches).** One list per tool; text and shapes use the pen list. Pen colours are `#rrggbb`. A highlighter
+colour is `#rrggbb` (drawn at the default 0.45 alpha, like every highlight made before custom colours) or `#rrggbbaa`,
+which carries its own opacity. Colours are normalised (lowercase, `#rgb` expanded, `ff` alpha dropped, alpha dropped on
+pens), deduplicated on read and capped at `MAX_SWATCHES` (24). An edit rewrites the tool's array; two devices editing at
+once leave both lists in it, and the read deduplicates. An emptied list stays empty (the key exists). Signed-out colours
+live in `lib:local` and move into the account with its notebooks (§5).
 
 ### Types (exported from `@qalm/core`)
 ```ts
@@ -99,7 +106,13 @@ class Page {                         // wraps one page doc
   observe(cb): () => void
 }
 createUndoManager(page: Page): Y.UndoManager   // tracks only local transactions (origin LOCAL_ORIGIN)
-class Library { constructor(doc: Y.Doc) /* folders and entries; CRUD */ }
+class Library { constructor(doc: Y.Doc) /* folders and entries; CRUD */
+  swatches(tool: SwatchTool): string[]; hasCustomSwatches(tool): boolean; setSwatches(tool, colors): void
+  addSwatch(tool, color): boolean /* false: not a colour, already saved, or full */; moveSwatch(tool, color, index): void
+  removeSwatch(tool, color): void; resetSwatches(tool): void; mergeSwatchesFrom(other: Library): void /* theirs after ours, capped */ }
+type SwatchTool = 'pen' | 'highlighter'; const DEFAULT_SWATCHES: Record<SwatchTool, readonly string[]>; const MAX_SWATCHES = 24
+normalizeColor(s): string | null; splitAlpha(color, fallback?): { rgb, alpha }; withAlpha(rgb, alpha): string
+inkPaint(tool, color): { rgb, alpha }   // how every renderer paints ink: highlighters use the colour's alpha, else 0.45
 const LOCAL_ORIGIN: unique symbol                // every app mutation uses doc.transact(fn, LOCAL_ORIGIN)
 ```
 **Undo and redo** apply per device: each page has a `createUndoManager`, and the app keeps a small cross-page stack of the page IDs
@@ -126,7 +139,7 @@ SMOOTHING  = [ { minStep: 0, passes: 0, streamline: 0.35 },   // 0: none (the or
 pen:         st = PEN_STYLES[style ?? 'fountain'], sm = SMOOTHING[smoothing ?? 0]
              input = pts.map(q => [q.x, q.y, st.curve === 1 ? tiltPressure(q) : tiltPressure(q) ** st.curve])
              getStroke(stabilize(input, sm.minStep, sm.passes), { size: width, thinning: st.thinning, smoothing: 0.5, streamline: sm.streamline, simulatePressure: false, last: true })
-highlighter: getStroke(pts.map(q => [q.x, q.y, 0.5]),             { size: width, thinning: 0,   smoothing: 0.5, streamline: 0.5,  simulatePressure: false, last: true })  // drawn at 0.45 alpha, multiply
+highlighter: getStroke(pts.map(q => [q.x, q.y, 0.5]),             { size: width, thinning: 0,   smoothing: 0.5, streamline: 0.5,  simulatePressure: false, last: true })  // drawn at inkPaint(...).alpha (0.45 unless #rrggbbaa), multiply
 ```
 `stabilize` (input stabilisation, before getStroke): keep the first point; keep each next point only if it is ≥ `minStep` (page units)
 from the last kept one; always keep the last point. Then `passes` rounds of `q[i] = (q[i-1] + 2 q[i] + q[i+1]) / 4` over x, y and
@@ -306,8 +319,19 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
   and meta. A backup never merges into the original, so it works under any account and can't resurrect or collide with the original's history.
 - **Accounts:** notebooks made while signed out live in `lib:local`. On every sign-in and app start while signed in they're moved into the
   account library and removed from `lib:local`. After a sign-in this device didn't ask for (a confirmed link), the user is asked first
-  ("Move N notebooks into this account?"). Signing in while signed in to another account always asks first. Token refresh re-reads the stored
+  ("Move N notebooks into this account?"). Saved colours in `lib:local` move too (`Library.mergeSwatchesFrom`: the account's list,
+  then the signed-out colours it lacks) and `lib:local` goes back to the brand palette. Signing in while signed in to another account always asks first. Token refresh re-reads the stored
   tokens first (another tab may have rotated them) and, on web, runs under `navigator.locks`. Sign-out calls `/auth/logout` (best effort).
+- **Colours:** the toolbar shows the active tool's saved colours from the library doc (pen list for pen, text and shapes;
+  highlighter list for the highlighter), then "+". The current colour has an ink ring and a check; a swatch that would vanish
+  against the toolbar (contrast < 1.6, e.g. graphite in dark mode) gets an outline. Labels are the brand name (`PEN_COLORS`,
+  `HIGHLIGHTER_COLORS`) or the hex (with the opacity for a highlighter, "#fde68a, 50%"). Tap uses a colour; hold 280 ms and drag
+  reorders (the toolbar stops scrolling while dragging); hold without moving, right-click, or the screen reader's long-press opens
+  Move left / Move right / Remove. "+" opens the picker: a hue slider over a 5×7 grid of solid tones for that hue (vivid to soft,
+  dark to light, plus greys; no gradients), a hex field, and for the highlighter an opacity slider (20–80 %). "Add colour" saves
+  and uses it, "Use once" only uses it. The picker is a popover under "+" (a bottom sheet below 520 px). The selection bar's
+  recolour shows the same pen strip and picker (highlighters and images keep their colour). The tool's current colour stays
+  per device (kv `tools`). On night paper the default graphite still draws as night ink (#e4e4e7); other colours draw as picked.
 - **Recognition:** debounced on-device recognition runs 1 s after a line changes, then calls `setLineText(key, …, 'device', score)`.
 
 ## 6. Desktop (`apps/desktop`, Electron)

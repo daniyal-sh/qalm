@@ -334,7 +334,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
         val last = l.points.last()
         val heldMs = max(0.0, max(last.t, (ev.eventTime - l.downTime).toDouble()) - l.holdT)
         val path = QalmFreehand.toPath(QalmFreehand.outline(l.tool, l.width, l.points, l.style, l.smoothing))
-        synchronized(pending) { pending.add(Pending(id, path, l.colorInt, alphaFor(l.tool))) }
+        synchronized(pending) { pending.add(Pending(id, path, l.colorInt, alphaFor(l))) }
         layer.commit()
         // Never committed (e.g. the app snapped it to a shape): drop it anyway, as iOS does.
         postDelayed({ dropPending(id) }, PENDING_FALLBACK_MS)
@@ -399,14 +399,19 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     val cursorColor: Int = 0,
   )
 
-  private fun alphaFor(tool: String) = if (tool == "highlighter") Math.round(HIGHLIGHTER_ALPHA * 255).toInt() else 255
+  /** Pens are opaque; a highlighter uses its colour's own alpha (#rrggbbaa) or HIGHLIGHTER_ALPHA (tech-spec §2). */
+  private fun alphaFor(l: Live): Int = when {
+    l.tool != "highlighter" -> 255
+    hasAlpha(l.color) -> Color.alpha(l.colorInt)
+    else -> Math.round(HIGHLIGHTER_ALPHA * 255).toInt()
+  }
 
   private fun render(l: Live) {
     val frame = when (l.kind) {
       "ink" -> Frame(
         fill = QalmFreehand.toPath(QalmFreehand.outline(l.tool, l.width, l.points + l.predicted, l.style, l.smoothing)),
         fillColor = l.colorInt,
-        fillAlpha = alphaFor(l.tool),
+        fillAlpha = alphaFor(l),
       )
       "lasso" -> Frame(
         lasso = Path().apply {
@@ -574,8 +579,15 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     val LASSO_COLOR = Color.parseColor("#4338ca")
     val ERASER_CURSOR = Color.parseColor("#8b8b95")
 
+    private fun hasAlpha(s: String) = s.trim().length == 9
+
+    /** `#rrggbb` or `#rrggbbaa` (CSS order; Android's own parser reads 8 digits as #aarrggbb). */
     fun parseColor(s: String): Int = try {
-      Color.parseColor(s)
+      val h = s.trim()
+      if (h.length == 9 && h.startsWith("#")) {
+        val v = h.substring(1).toLong(16)
+        Color.argb((v and 0xff).toInt(), ((v shr 24) and 0xff).toInt(), ((v shr 16) and 0xff).toInt(), ((v shr 8) and 0xff).toInt())
+      } else Color.parseColor(h)
     } catch (e: IllegalArgumentException) {
       Color.BLACK
     }

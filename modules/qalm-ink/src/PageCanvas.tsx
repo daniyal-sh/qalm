@@ -1,5 +1,5 @@
 import type { BBox, ImageItem, Item, PageInfo, ShapeItem, StrokeItem, TextItem } from '@qalm/core';
-import { itemBBox, paperPattern, shapePolylines, strokeOutline } from '@qalm/core';
+import { inkPaint, itemBBox, paperPattern, shapePolylines, strokeOutline } from '@qalm/core';
 import {
   Canvas,
   Circle,
@@ -20,7 +20,6 @@ import {
 import * as React from 'react';
 
 import figtree from '../assets/fonts/Figtree-Regular.ttf';
-import { HIGHLIGHTER_ALPHA } from './freehand';
 import { traceOutline } from './outlinePath';
 
 export interface CommentAnchor {
@@ -148,10 +147,11 @@ function DrawnProbe({ items, onDrawn }: { items: Item[]; onDrawn?: (ids: string[
 }
 
 function StrokeNode({ item, path }: { item: StrokeItem; path: SkPath }) {
+  const paint = inkPaint(item.tool, item.color);
   if (item.tool === 'highlighter') {
-    return <Path path={path} color={item.color} opacity={HIGHLIGHTER_ALPHA} blendMode="multiply" />;
+    return <Path path={path} color={paint.rgb} opacity={paint.alpha} blendMode="multiply" />;
   }
-  return <Path path={path} color={item.color} />;
+  return <Path path={path} color={paint.rgb} />;
 }
 
 function TextNode({ item, fonts }: { item: TextItem; fonts: SkTypefaceFontProvider }) {

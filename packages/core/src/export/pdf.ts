@@ -1,5 +1,6 @@
 import { BlendMode, LineCapStyle, PDFDocument, StandardFonts, degrees, rgb, type PDFEmbeddedPage, type PDFFont, type PDFImage, type RGB } from 'pdf-lib';
-import { strokeSvgPath, HIGHLIGHTER_ALPHA } from '../geometry/stroke';
+import { strokeSvgPath } from '../geometry/stroke';
+import { inkPaint } from '../geometry/color';
 import { paperPattern, DOT_RADIUS, RULE_WIDTH } from '../geometry/paper';
 import { TEXT_LINE_HEIGHT } from '../geometry/bbox';
 import { shapeSvgPath } from '../render/svg';
@@ -86,12 +87,13 @@ export async function exportPdf(
           const d = strokeSvgPath(item);
           if (!d) break;
           const hl = item.tool === 'highlighter';
+          const paint = inkPaint(item.tool, item.color);
           out.drawSvgPath(d, {
             x: 0,
             y: H,
-            color: parseColor(item.color),
+            color: parseColor(paint.rgb),
             borderWidth: 0,
-            ...(hl ? { opacity: HIGHLIGHTER_ALPHA, blendMode: BlendMode.Multiply } : {}),
+            ...(hl ? { opacity: paint.alpha, blendMode: BlendMode.Multiply } : {}),
           });
           break;
         }

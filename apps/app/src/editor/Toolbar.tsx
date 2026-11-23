@@ -4,10 +4,11 @@ import * as React from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useTheme } from '../theme/ThemeProvider';
-import { HIGHLIGHTER_COLORS, PEN_COLORS, radius, shadow2 } from '../theme/tokens';
+import { radius, shadow2 } from '../theme/tokens';
 import { IconButton } from '../ui/controls';
 import { Text } from '../ui/Text';
 import type { ToolState } from './context';
+import { SwatchStrip } from './Swatches';
 import type { ToolId } from './view';
 
 type MciName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -49,21 +50,6 @@ function ToolButton({ icon, label, selected, onPress }: { icon: MciName; label: 
 function Sep() {
   const { c } = useTheme();
   return <View style={{ width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginVertical: 8, backgroundColor: c.line }} />;
-}
-
-function Swatch({ hex, selected, label, onPress }: { hex: string; selected: boolean; label: string; onPress(): void }) {
-  const { c } = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityLabel={label}
-      accessibilityState={{ checked: selected }}
-      onPress={onPress}
-      style={[styles.swatchHit, { borderColor: selected ? c.accent : 'transparent' }]}
-    >
-      <View style={[styles.swatch, { backgroundColor: hex, borderColor: c.line }]} />
-    </Pressable>
-  );
 }
 
 function SizeDot({ size, selected, label, onPress }: { size: number; selected: boolean; label: string; onPress(): void }) {
@@ -110,9 +96,10 @@ export interface ToolbarProps {
 export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoomReset }: ToolbarProps) {
   const { c } = useTheme();
   const t = tools.tool;
+  const [dragging, setDragging] = React.useState(false);
   return (
     <View style={[styles.bar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+      <ScrollView horizontal scrollEnabled={!dragging} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
         {TOOLS.map((x) => (
           <ToolButton key={x.id} icon={x.icon} label={x.label} selected={t === x.id} onPress={() => onTool(x.id)} />
         ))}
@@ -120,9 +107,7 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
         <Sep />
         {t === 'pen' || t === 'text' ? (
           <>
-            {PEN_COLORS.map((p) => (
-              <Swatch key={p.hex} hex={p.hex} label={p.name} selected={tools.penColor === p.hex} onPress={() => onChange({ penColor: p.hex })} />
-            ))}
+            <SwatchStrip tool="pen" current={tools.penColor} onSelect={(c) => onChange({ penColor: c })} onDragging={setDragging} />
             {t === 'pen' ? (
               <>
                 <Sep />
@@ -141,9 +126,7 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
         ) : null}
         {t === 'highlighter' ? (
           <>
-            {HIGHLIGHTER_COLORS.map((p) => (
-              <Swatch key={p.hex} hex={p.hex} label={p.name} selected={tools.hlColor === p.hex} onPress={() => onChange({ hlColor: p.hex })} />
-            ))}
+            <SwatchStrip tool="highlighter" current={tools.hlColor} onSelect={(c) => onChange({ hlColor: c })} onDragging={setDragging} />
             <Sep />
             {[HIGHLIGHTER_WIDTH * 0.66, HIGHLIGHTER_WIDTH, HIGHLIGHTER_WIDTH * 1.6].map((w, i) => (
               <SizeDot key={w} size={6 + i * 4} label={['Thin', 'Medium', 'Wide'][i]!} selected={Math.abs(tools.hlWidth - w) < 0.01} onPress={() => onChange({ hlWidth: w })} />
@@ -183,8 +166,6 @@ const styles = StyleSheet.create({
   bar: { borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth, maxWidth: '100%', alignSelf: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 4 },
   tool: { width: 44, height: 44, borderRadius: radius.control, alignItems: 'center', justifyContent: 'center' },
-  swatchHit: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, borderWidth: 2 },
-  swatch: { width: 22, height: 22, borderRadius: 11, borderWidth: StyleSheet.hairlineWidth },
   sizeHit: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: radius.control, borderWidth: StyleSheet.hairlineWidth },
   zoomLabel: { minWidth: 52, height: 44, alignItems: 'center', justifyContent: 'center' },
 });

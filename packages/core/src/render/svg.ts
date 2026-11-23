@@ -1,4 +1,5 @@
-import { strokeSvgPath, HIGHLIGHTER_ALPHA } from '../geometry/stroke';
+import { strokeSvgPath } from '../geometry/stroke';
+import { inkPaint } from '../geometry/color';
 import { shapePolylines } from '../geometry/shape';
 import { paperPattern, DOT_RADIUS, RULE_WIDTH } from '../geometry/paper';
 import { TEXT_LINE_HEIGHT } from '../geometry/bbox';
@@ -26,10 +27,11 @@ export function itemSvg(item: Item, opts: { assetUrl?: (id: string) => string; i
       const d = strokeSvgPath(item);
       if (!d) return '';
       if (item.tool === 'highlighter') {
-        const fill = opts.ink ? '#c8c8c8' : item.color;
-        return `<path d="${d}" fill="${escapeXml(fill)}" fill-opacity="${HIGHLIGHTER_ALPHA}" style="mix-blend-mode:multiply"/>`;
+        const paint = inkPaint('highlighter', item.color);
+        const fill = opts.ink ? '#c8c8c8' : paint.rgb;
+        return `<path d="${d}" fill="${escapeXml(fill)}" fill-opacity="${n(paint.alpha)}" style="mix-blend-mode:multiply"/>`;
       }
-      return `<path d="${d}" fill="${escapeXml(opts.ink ?? item.color)}"/>`;
+      return `<path d="${d}" fill="${escapeXml(opts.ink ?? inkPaint('pen', item.color).rgb)}"/>`;
     }
     case 'shape':
       return `<path d="${shapeSvgPath(item)}" fill="none" stroke="${escapeXml(opts.ink ?? item.color)}" stroke-width="${n(item.width)}" stroke-linecap="round" stroke-linejoin="round"/>`;

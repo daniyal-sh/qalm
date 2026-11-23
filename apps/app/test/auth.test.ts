@@ -6,7 +6,7 @@ import { extractCode, isEmail, lookupMagicLink, startMagicLink, verifyCode, veri
 import { beginEmailSignIn, clearPending, pendingNonce, PENDING_TTL_MS, type PendingDeps, type PendingMap } from '../src/auth/pending';
 import { TokenManager, type RefreshLock, type Tokens } from '../src/auth/tokens';
 import { entryFor } from '../src/library/actions';
-import { localToMove, moveLocalLibrary } from '../src/state/localLibrary';
+import { hasLocalLibrary, localToMove, moveLocalLibrary } from '../src/state/localLibrary';
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const bodyOf = (init?: RequestInit) => JSON.parse(String(init!.body)) as Record<string, unknown>;
@@ -189,5 +189,18 @@ describe('moving signed-out notebooks into the account', () => {
     expect(localToMove(account, local)).toBe(0);
     expect(moveLocalLibrary(account, local)).toBe(0);
     expect(account.entries()).toHaveLength(2);
+  });
+
+  it('moves colours saved while signed out, even with no notebooks', () => {
+    const account = new Library(new Y.Doc());
+    const local = new Library(new Y.Doc());
+    expect(hasLocalLibrary(local)).toBe(false);
+    local.addSwatch('highlighter', '#ff880080');
+    expect(hasLocalLibrary(local)).toBe(true);
+    account.addSwatch('highlighter', '#00ff00');
+    expect(moveLocalLibrary(account, local)).toBe(0);
+    expect(account.swatches('highlighter').slice(-2)).toEqual(['#00ff00', '#ff880080']);
+    expect(account.hasCustomSwatches('pen')).toBe(false);
+    expect(hasLocalLibrary(local)).toBe(false);
   });
 });

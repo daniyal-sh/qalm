@@ -445,11 +445,14 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private func styleStrokeLayer(_ l: CAShapeLayer, tool: Tool, color: UIColor) {
     l.fillRule = .nonZero
     l.strokeColor = nil
-    l.fillColor = color.cgColor
     if tool == .highlighter {
-      l.opacity = FreehandSettings.highlighterAlpha
+      // A #rrggbbaa highlighter carries its own opacity; #rrggbb uses the default (tech-spec §2).
+      let alpha = color.cgColor.alpha
+      l.fillColor = color.withAlphaComponent(1).cgColor
+      l.opacity = alpha < 1 ? Float(alpha) : FreehandSettings.highlighterAlpha
       l.compositingFilter = QalmInkView.useMultiplyForHighlighter ? "multiplyBlendMode" : nil
     } else {
+      l.fillColor = color.cgColor
       l.opacity = 1
       l.compositingFilter = nil
     }
