@@ -27,4 +27,5 @@ Keep it simple. Anything not listed here is out of v1.
 - Updates go out on a pause (≥ 6 s) or when the student taps Ask, at most one every 20 s.
 - Every changed line is sent as an image plus the on-device guess. There's no server-side model.
 - The agent keeps its own chat history, and updates are self-contained.
-- Recognition on device is free: ML Kit on iPad and Android. Desktop has no recognizer in v1, so agents read the image.
+- No on-device recognition (ML Kit was removed). Handwriting is read by the agent's vision from the page image, the same on every
+  platform, and the app is about 20 MB lighter per language.

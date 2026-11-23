@@ -46,13 +46,13 @@ likes to work. Read it first, then `docs/decisions.md`, `docs/tech-spec.md`, `do
 | v1 tools | Pen, highlighter, eraser, lasso select and move, typed text boxes, shape snapping, PDF import and annotation, images |
 | Not in v1 | Handwriting search, sharing with other people, audio, stickers, templates, infinite canvas |
 | Export | PDF (ink flattened) and `.qalm` (full-fidelity backup) |
-| Recognition | English only. ML Kit Digital Ink on device (iPad and Android, free, ~20 MB per language). **None on desktop in v1**: agents read the image |
+| Recognition | **None on device** (ML Kit removed; the app is ~20 MB lighter per language). The agent reads handwriting from the image with its own vision |
 | Pen extras | Hover preview; pen button, squeeze or double-tap for the eraser; tilt shading |
 | Minimum OS | iPadOS 17, Android 10, Windows 10, macOS 13 |
 | Accounts | Apple, Google and email magic link. Cloud sync from day one. Free in beta with capped storage, no payments |
 | Backend | Cloudflare: Workers, Durable Objects, R2, D1. Encrypted at rest (Cloudflare default), no E2E |
 | AI | MCP only. Updates go out on a pen pause (≥ 6 s) or the **Ask** button, at most one per 20 s (Ask exempt). Every changed line is sent as an image strip plus the on-device guess. `transcribe` saves a reading. The agent keeps its own chat history; updates are self-contained |
-| Server AI | **None.** The image crop goes to the user's agent, together with the ML Kit guess |
+| Server AI | **None.** The image crop goes to the user's agent, which reads it |
 
 **Cost estimates** (GPT-6 Luna: $0.10/M in, $0.01/M cached, $0.50/M out), one hour of maths tutoring:
 
@@ -74,7 +74,8 @@ modules/qalm-ink   qalm-ink    Expo native module:
                                - InkOverlay: draws only the live stroke natively
                                  (iOS: coalesced and predicted UITouch; Android: front-buffered renderer and
                                  MotionEventPredictor; web: desynchronized canvas and getCoalescedEvents)
-                               - QalmInk.recognize/ensureModel (ML Kit) and renderPdfPage (PDFKit, PdfRenderer, pdf.js)
+                               - QalmInk.renderPdfPage (PDFKit, PdfRenderer, pdf.js). No recognition: ML Kit was removed
+                                 (recognize/ensureModel are deprecated JS no-ops until the app drops its callers)
 apps/app           @qalm/app   Expo SDK 58, expo-router, New Architecture, RN 0.88, React 19.3
 apps/desktop       @qalm/desktop  Electron shell loading the app's web export over a privileged app://qalm protocol
 apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Object (Yjs sync), R2 assets, D1, MCP + OAuth
@@ -195,7 +196,9 @@ D1 migrations: `0001_init`, `0002_user_assets`, `0003_notebook_deleted`, `0004_a
   `Freehand.swift` and the `strokeWidth` rename, needs a Mac build and an iPad test.
 - **No real stylus testing anywhere.** Pressure, tilt, hover, the pen button, `FLAG_CANCELED` and front-buffered latency
   are untested. The Android emulator only injects finger input.
-- **ML Kit** model download and recognition, and `renderPdfPage` on Android, haven't been run on a device.
+- `renderPdfPage` on Android hasn't been run on a device. (ML Kit is gone, so there's no model download to test.)
+- **Shim to delete:** `modules/qalm-ink/src/QalmInk.ts` keeps `QalmInk.recognize`/`ensureModel` as no-ops so `apps/app`
+  compiles; delete it (and the `RecognizeLine`/`RecognizeResult` exports) once the app no longer calls them.
 - **Sign-in:** Apple and Google are untested end to end, and they **don't work in the desktop app** (no redirect back
   into the app; this needs a web redirect page). Real Resend email delivery is untested.
 - **Agents:** no real MCP client has connected yet, and image-token costs per provider haven't been measured.
@@ -258,8 +261,8 @@ listed in `apps/server/.dev.vars.example`.
 
 ## 8. Suggested next steps
 
-1. **Mac:** build iOS (`expo run:ios`, the podspec pulls in `GoogleMLKit/DigitalInkRecognition`) and test on an iPad
-   with an Apple Pencil: latency, palm rejection, hover, squeeze and double-tap, recognition and PDF rendering. Build
+1. **Mac:** build iOS (`expo run:ios`; the podspec now depends only on `ExpoModulesCore`, no ML Kit pod) and test on an iPad
+   with an Apple Pencil: latency, palm rejection, hover, squeeze and double-tap, and PDF rendering. Build
    the macOS DMG too.
 2. **Android tablet with a stylus:** test the same list, plus whether the front-buffered renderer's latency feels right.
 3. **Deploy staging on Cloudflare**, once the owner agrees and with their accounts:

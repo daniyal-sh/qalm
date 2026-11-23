@@ -22,8 +22,6 @@ dependencies {
   implementation 'androidx.graphics:graphics-core:1.0.4'
   // Motion prediction (MotionEventPredictor)
   implementation 'androidx.input:input-motionprediction:1.0.1'
-  // On-device handwriting recognition, models downloaded on demand
-  implementation 'com.google.mlkit:digital-ink-recognition:19.0.0'
 
   // JVM tests (QalmFreehandTest compares the port against @qalm/core output)
   testImplementation 'junit:junit:4.13.2'

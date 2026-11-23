@@ -16,7 +16,6 @@ Pod::Spec.new do |s|
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
-  s.dependency 'GoogleMLKit/DigitalInkRecognition', '>= 7.0.0'   # pin to the version pod install resolves
   s.frameworks = 'UIKit', 'QuartzCore', 'PDFKit'
 
   s.pod_target_xcconfig = {

@@ -13,7 +13,7 @@ Handwritten notes, on pages, that feel like paper and that AI agents can read li
 
 ```
 packages/core      shared TypeScript: model, geometry, render, export, Q-ink
-modules/qalm-ink   native ink surface + on-device recognition (iOS, Android, web)
+modules/qalm-ink   native ink surface + PDF page rendering (iOS, Android, web)
 apps/app           Expo app (iPad, Android, web)
 apps/desktop       Electron (Windows, macOS)
 apps/server        Cloudflare Worker (auth, sync, assets, MCP)

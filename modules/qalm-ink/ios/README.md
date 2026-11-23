@@ -8,21 +8,19 @@ These files were written on Windows without Xcode and **have not been compiled y
 ## Files
 | File | What it does |
 |---|---|
-| `QalmInkModule.swift` | `Module` definition: `Name("QalmInk")`, the view's props and events, and `recognize`, `ensureModel` and `renderPdfPage` |
+| `QalmInkModule.swift` | `Module` definition: `Name("QalmInk")`, the view's props and events, and `renderPdfPage` |
 | `QalmInkView.swift` | `ExpoView` overlay with palm rejection, the live stroke, pending strokes until `committedIds`, eraser, lasso, hover preview and the Pencil double-tap and squeeze |
 | `InkGestureRecognizer.swift` | Touch pipe. It "claims" a touch sequence so ink never scrolls the page. Fingers in `drawWith: 'pen'` never reach it |
 | `Freehand.swift` | Port of perfect-freehand (MIT) `getStrokePoints` and `getStrokeOutlinePoints`, the spec §2 settings, and the outline-to-path step |
-| `InkRecognizer.swift` | ML Kit Digital Ink: on-demand model download and the best candidate per line key. If ML Kit isn't linked it compiles to a stub that resolves `[]` |
 | `PdfPageRenderer.swift` | PDFKit renders the page to PNG in `Caches/qalm-pdf/`, keyed by file (plus size and mtime), page and width |
 
 ## Podspec lines (`QalmInk.podspec`)
 ```ruby
 s.platforms        = { :ios => '17.0' }
 s.swift_version    = '5.9'
-s.static_framework = true                      # needed for ML Kit's static frameworks
+s.static_framework = true
 s.source_files     = "ios/**/*.{h,m,swift}"
 s.dependency 'ExpoModulesCore'
-s.dependency 'GoogleMLKit/DigitalInkRecognition', '>= 7.0.0'   # pin to the version pod install resolves
 s.frameworks       = 'UIKit', 'QuartzCore', 'PDFKit'
 ```
 If `s.platforms` stays below 16.1, the code still compiles because `zOffset` and the 17.5 Pencil APIs are behind `#available`.
@@ -60,16 +58,15 @@ If `s.platforms` stays below 16.1, the code still compiles because `zOffset` and
   pinch wins. Two-finger *scroll* only works if both fingers land within that 80 ms window.
 - **Pen button:** `UIPencilInteraction` sends `double-tap` (`pencilInteractionDidTap` before 17.5, `didReceiveTap` from 17.5 on) and `squeeze`
   (17.5+, on `.ended`). Every overlay on screen receives the interaction, so a shared 300 ms debounce makes it fire only once.
-- **`recognize`:** runs lines one at a time with the en-US model, downloading it first if needed. Stroke times are offset so they keep increasing across
-  strokes. `score` is ML Kit's candidate score, a cost where lower is better, or 0 when the model gives none. Lines with no candidate are left out.
+- **No recognition:** there is no on-device handwriting recognizer (ML Kit was removed); agents read handwriting from the page image.
 - **`renderPdfPage`:** the PNG is opaque, on white, exactly `widthPx` wide, uses the media box, applies page rotation (through `PDFPage.thumbnail`), and is returned
   as a `file://` URI. It renders on a background queue.
 
 ## Checklist on a Mac with an iPad and Apple Pencil
 **Build**
-- [ ] `pod install` resolves `GoogleMLKit/DigitalInkRecognition`. Pin its version in the podspec.
+- [ ] `pod install` succeeds (the only pod dependency is `ExpoModulesCore`).
 - [ ] The module compiles. The APIs I'm least sure about are listed under "Compile risks" below.
-- [ ] Simulator builds: ML Kit may need `EXCLUDED_ARCHS[sdk=iphonesimulator*] = arm64` on older ML Kit releases. Use a device for ink anyway.
+- [ ] Simulator builds. Use a device for ink anyway.
 
 **Ink**
 - [ ] Strokes appear under the Pencil with no visible lag. Fast scribbles show the predicted tail, with no leftover "ghost" tail after lifting.
@@ -100,18 +97,12 @@ If `s.platforms` stays below 16.1, the code still compiles because `zOffset` and
 - [ ] Holding the Pencil still for at least 350 ms at the end of a stroke reports `heldMs` ≥ 350, which triggers shape snapping.
 
 **Functions**
-- [ ] `ensureModel('en-US')` downloads once (watch for the network call), and later calls resolve at once.
-- [ ] `recognize` returns sensible text for handwritten lines, with one entry per key.
 - [ ] `renderPdfPage` returns a PNG that is exactly `widthPx` wide, for portrait, landscape and rotated pages. A second call hits the cache.
 
 ## Compile risks (check these first)
 - The `ExpoView` subclass has `required init(appContext:)` and no `init(coder:)`, as in Expo's own template.
-- Props typed `[String: Any]` (`pageSize`, `input`), and `[[String: Any]]` for the `recognize` argument.
+- Props typed `[String: Any]` (`pageSize`, `input`).
 - `promise.resolve()` with no argument, and `promise.reject(code, message)`.
-- ML Kit Swift names: `DigitalInkRecognitionModelIdentifier(forLanguageTag:)`, `ModelManager.modelManager()`,
-  `ModelDownloadConditions(allowsCellularAccess:allowsBackgroundDownloading:)`, `.mlkitModelDownloadDidSucceed/Fail`,
-  `ModelDownloadUserInfoKey`, `StrokePoint(x:y:t:)`, `candidate.score` as `NSNumber?`. Also whether the module is `MLKitDigitalInkRecognition` and `MLKitCommon`, or the
-  `MLKit` umbrella. If ML Kit can't be imported, the stub is compiled silently, so **check that `recognize` returns results**.
 - `UIPencilInteraction.Tap` / `.Squeeze` and `squeeze.phase == .ended` (iOS 17.5 SDK, Xcode 15.4+).
 - `CAShapeLayer.compositingFilter = "multiplyBlendMode"`.
 - `UIGestureRecognizer` subclass state changes (`import UIKit.UIGestureRecognizerSubclass`), and `touchesEstimatedPropertiesUpdated`.
