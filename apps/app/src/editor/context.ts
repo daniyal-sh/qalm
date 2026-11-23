@@ -23,6 +23,7 @@ export interface Selection {
 }
 
 export interface PageData {
+  page: Page;
   index: number;
   lines: Line[];
   comments: Comment[];

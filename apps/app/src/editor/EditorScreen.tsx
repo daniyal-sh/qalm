@@ -1,0 +1,644 @@
+import { LOCAL_ORIGIN, Notebook, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem, type Page } from '@qalm/core';
+import { router } from 'expo-router';
+import { QalmInk } from 'qalm-ink';
+import * as React from 'react';
+import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, useWindowDimensions, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { GestureDetector, usePinchGesture } from 'react-native-gesture-handler';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { exportNotebook, updateNotebookMeta } from '../library/ops';
+import { NameSheet } from '../library/components';
+import { newId } from '../lib/id';
+import { kvGet, kvSet } from '../lib/kv';
+import { pickFile } from '../lib/files';
+import { docIds } from '../sync/docs';
+import { useDoc, useLibraryData, useSession, useSyncStatus, useVersion } from '../state/session';
+import { useTheme } from '../theme/ThemeProvider';
+import { PEN_COLORS, HIGHLIGHTER_COLORS, radius, shadow2 } from '../theme/tokens';
+import { confirm } from '../ui/confirm';
+import { Button, IconButton, Pill, TextField, Toggle } from '../ui/controls';
+import { EmptyState, Menu, Row, Sheet, useToast, type MenuItem } from '../ui/layout';
+import { Text } from '../ui/Text';
+import { CommentsPanel } from './CommentsPanel';
+import { EditorContext, UndoRegistry, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
+import { cloneItems } from './items';
+import { PageView } from './PageView';
+import { Toolbar } from './Toolbar';
+import { CrossPageUndo } from './undoStack';
+import {
+  anchoredScroll,
+  baseWidth,
+  clampZoom,
+  contentHeight,
+  currentPageIndex,
+  layoutPages,
+  mountedRange,
+  penButtonTool,
+  stepZoom,
+  type ToolId,
+} from './view';
+
+const GAP = 44;
+const DEFAULT_TOOLS: ToolState = {
+  tool: 'pen',
+  penColor: PEN_COLORS[0].hex,
+  penWidth: PEN_WIDTHS[1],
+  hlColor: HIGHLIGHTER_COLORS[0].hex,
+  hlWidth: HIGHLIGHTER_WIDTH,
+  eraserRadius: 10,
+  snapShapes: true,
+};
+
+type MenuState = { items: MenuItem[]; anchor?: { x: number; y: number; align?: 'left' | 'right' } } | null;
+
+export function EditorScreen({ notebookId }: { notebookId: string }) {
+  const { c, input } = useTheme();
+  const s = useSession();
+  const { library } = useLibraryData();
+  const h = useDoc(docIds.notebook(notebookId), 2500);
+  const notebook = React.useMemo(() => (h ? new Notebook(h.doc) : null), [h]);
+  const sub = React.useMemo(() => (notebook ? (cb: () => void) => notebook.observe(cb) : null), [notebook]);
+  const ver = useVersion(sub);
+  const pages = React.useMemo(() => notebook?.pages() ?? [], [notebook, ver]);
+  const meta = React.useMemo(() => notebook?.meta() ?? null, [notebook, ver]);
+  const sync = useSyncStatus(h);
+  const win = useWindowDimensions();
+
+  // ---- tools ----
+  const [tools, setTools] = React.useState<ToolState>(DEFAULT_TOOLS);
+  const prevTool = React.useRef<ToolId>('pen');
+  React.useEffect(() => {
+    void kvGet<Partial<ToolState>>('tools').then((t) => t && setTools((x) => ({ ...x, ...t, tool: x.tool })));
+  }, []);
+  const changeTools = React.useCallback((p: Partial<ToolState>) => {
+    setTools((x) => {
+      const next = { ...x, ...p };
+      void kvSet('tools', next);
+      return next;
+    });
+  }, []);
+  const toolRef = React.useRef(tools.tool);
+  toolRef.current = tools.tool;
+  const setTool = React.useCallback(
+    (t: ToolId) => {
+      if (t !== toolRef.current) prevTool.current = toolRef.current;
+      changeTools({ tool: t });
+      if (t !== 'lasso') setSelection(null);
+    },
+    [changeTools],
+  );
+  const onPenButton = React.useCallback(() => setTool(penButtonTool(input.penGesture, toolRef.current, prevTool.current)), [input.penGesture, setTool]);
+
+  // ---- undo ----
+  const undo = React.useMemo(() => new CrossPageUndo(), []);
+  const registry = React.useMemo(() => new UndoRegistry(undo), [undo]);
+  const undoSub = React.useCallback((cb: () => void) => undo.onChange(cb), [undo]);
+  useVersion(undoSub);
+  React.useEffect(() => {
+    const off = s.dm.onEvict((docId) => {
+      const prefix = `pg:${notebookId}:`;
+      if (docId.startsWith(prefix)) registry.drop(docId.slice(prefix.length));
+    });
+    return () => {
+      off();
+      registry.clear();
+    };
+  }, [s.dm, registry, notebookId]);
+
+  // ---- selection, text, comments ----
+  const [selection, setSelection] = React.useState<Selection | null>(null);
+  const [editingText, setEditingText] = React.useState<{ pageId: string; itemId: string } | null>(null);
+  const [activeCommentId, setActiveComment] = React.useState<string | null>(null);
+  const [pageData, setPageData] = React.useState(() => new Map<string, PageData>());
+  const reportPage = React.useCallback((pageId: string, data: PageData | null) => {
+    setPageData((m) => {
+      const n = new Map(m);
+      if (data) n.set(pageId, data);
+      else n.delete(pageId);
+      return n;
+    });
+  }, []);
+  const lastPage = React.useRef<string | null>(null);
+  const touchTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchPage = React.useCallback(
+    (pageId: string) => {
+      lastPage.current = pageId;
+      // Keep the library's "last edited" fresh (at most every few seconds).
+      if (touchTimer.current) return;
+      touchTimer.current = setTimeout(() => {
+        touchTimer.current = null;
+        library?.updateEntry(notebookId, { updatedAt: Date.now() });
+      }, 3000);
+    },
+    [library, notebookId],
+  );
+  React.useEffect(() => () => {
+    if (touchTimer.current) clearTimeout(touchTimer.current);
+  }, []);
+
+  // Recognition model (ML Kit downloads it once; web is a no-op).
+  React.useEffect(() => {
+    QalmInk.ensureModel('en-US').catch(() => undefined);
+  }, []);
+
+  // Mirror title / cover / AI access into the library entry (they may change on another device).
+  React.useEffect(() => {
+    if (!meta || !library) return;
+    const e = library.entry(notebookId);
+    if (!e) library.putEntry({ id: notebookId, title: meta.title, cover: meta.cover, folderId: null, updatedAt: meta.updatedAt, aiAccess: meta.aiAccess, favorite: false, deletedAt: null });
+    else if (e.title !== meta.title || e.cover !== meta.cover || e.aiAccess !== meta.aiAccess) library.updateEntry(notebookId, { title: meta.title, cover: meta.cover, aiAccess: meta.aiAccess });
+  }, [meta, library, notebookId]);
+
+  // ---- layout, scroll and zoom ----
+  const [viewport, setViewport] = React.useState({ w: win.width, h: win.height });
+  const [zoom, setZoom] = React.useState(1);
+  const [liveScale, setLiveScale] = React.useState(1);
+  const [scrollY, setScrollY] = React.useState(0);
+  const vScroll = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const [commentsOpen, setCommentsOpen] = React.useState(win.width >= 1100);
+  const panelW = commentsOpen && viewport.w + (commentsOpen ? 340 : 0) >= 900 ? 340 : 0;
+  const base = baseWidth(viewport.w);
+  const slots = React.useMemo(() => layoutPages(pages, base, zoom, GAP, 96), [pages, base, zoom]);
+  const totalH = contentHeight(slots, GAP) + 80;
+  const contentW = Math.max(viewport.w, Math.max(0, ...slots.map((x) => x.width)) + 48);
+  const [first, last] = mountedRange(slots, scrollY, viewport.h, 2);
+  const current = currentPageIndex(slots, scrollY, viewport.h);
+  const currentPageId = pages[current]?.id ?? null;
+
+  const commitZoom = React.useCallback(
+    (next: number) => {
+      const z = clampZoom(next);
+      setLiveScale(1);
+      setZoom((prev) => {
+        if (Math.abs(z - prev) < 1e-3) return prev;
+        const y = anchoredScroll(scrollYRef.current, viewportRef.current.h, prev, z);
+        requestAnimationFrame(() => vScroll.current?.scrollTo({ y, animated: false }));
+        return z;
+      });
+    },
+    [],
+  );
+  const scrollYRef = React.useRef(0);
+  const viewportRef = React.useRef(viewport);
+  viewportRef.current = viewport;
+  const zoomRef = React.useRef(zoom);
+  zoomRef.current = zoom;
+
+  const pinchScale = React.useRef(1);
+  const pinch = usePinchGesture({
+    runOnJS: true,
+    disableReanimated: true,
+    onUpdate: (e) => {
+      pinchScale.current = e.scale;
+      setLiveScale(clampZoom(zoomRef.current * e.scale) / zoomRef.current);
+    },
+    onDeactivate: () => commitZoom(zoomRef.current * pinchScale.current),
+  });
+
+  // Web / Electron: trackpad pinch and ctrl+wheel zoom; keyboard shortcuts.
+  React.useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    let pending = 1;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onWheel = (ev: WheelEvent) => {
+      if (!ev.ctrlKey && !ev.metaKey) return;
+      ev.preventDefault();
+      pending = clampZoom(zoomRef.current * pending * Math.exp(-ev.deltaY * 0.01)) / zoomRef.current;
+      setLiveScale(pending);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        commitZoom(zoomRef.current * pending);
+        pending = 1;
+      }, 180);
+    };
+    window.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      window.removeEventListener('wheel', onWheel);
+      if (timer) clearTimeout(timer);
+    };
+  }, [commitZoom]);
+
+  const selectionPage = selection ? pageData.get(selection.pageId)?.page : undefined;
+  const deleteSelection = React.useCallback(() => {
+    if (!selection || !selectionPage) return;
+    selectionPage.removeItems(selection.ids);
+    setSelection(null);
+  }, [selection, selectionPage]);
+
+  React.useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const onKey = (ev: KeyboardEvent) => {
+      const target = ev.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      const mod = ev.ctrlKey || ev.metaKey;
+      const k = ev.key.toLowerCase();
+      if (mod && k === 'z') {
+        ev.preventDefault();
+        if (ev.shiftKey) undo.redo();
+        else undo.undo();
+      } else if (mod && k === 'y') {
+        ev.preventDefault();
+        undo.redo();
+      } else if ((k === 'delete' || k === 'backspace') && selection) {
+        ev.preventDefault();
+        deleteSelection();
+      } else if (k === 'escape') setSelection(null);
+      else if (!mod && k === 'p') setTool('pen');
+      else if (!mod && k === 'h') setTool('highlighter');
+      else if (!mod && k === 'e') setTool('eraser');
+      else if (!mod && k === 'l') setTool('lasso');
+      else if (!mod && k === 't') setTool('text');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, selection, deleteSelection, setTool]);
+
+  // ---- actions ----
+  const [menu, setMenu] = React.useState<MenuState>(null);
+  const [askOpen, setAskOpen] = React.useState(false);
+  const [askText, setAskText] = React.useState('');
+  const [renaming, setRenaming] = React.useState(false);
+  const [busy, setBusy] = React.useState<string | null>(null);
+  const [toast, showToast] = useToast();
+
+  const run = async (label: string, fn: () => Promise<unknown>) => {
+    setBusy(label);
+    try {
+      await fn();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const scrollToPage = (pageId: string) => {
+    const slot = slots.find((x) => x.id === pageId);
+    if (slot) vScroll.current?.scrollTo({ y: Math.max(0, slot.top - 80), animated: true });
+  };
+
+  const addPage = (afterIndex?: number) => {
+    if (!notebook) return;
+    const after = afterIndex !== undefined ? pages[afterIndex] : pages[pages.length - 1];
+    // A page after a PDF page gets the notebook's paper.
+    const id = notebook.addPage(after && after.background.kind === 'paper' ? { size: after.size, paper: after.paper, paperColor: after.paperColor } : {}, afterIndex !== undefined ? afterIndex + 1 : undefined);
+    requestAnimationFrame(() => scrollToPage(id));
+  };
+
+  const deletePage = (index: number) => {
+    if (!notebook || pages.length <= 1) return showToast('A notebook needs at least one page');
+    const p = pages[index];
+    if (!p) return;
+    confirm(`Delete page ${index + 1}?`, 'Its ink, text and comments go with it.', 'Delete', () => {
+      registry.drop(p.id);
+      notebook.removePage(p.id);
+    });
+  };
+
+  const pageMenu = (index: number, anchor: { x: number; y: number }) =>
+    setMenu({
+      anchor: { ...anchor, align: 'right' },
+      items: [
+        { label: 'Add page after', icon: 'plus', onPress: () => addPage(index) },
+        { label: 'Move up', icon: 'arrow-up', onPress: () => index > 0 && notebook?.movePage(pages[index]!.id, index - 1) },
+        { label: 'Move down', icon: 'arrow-down', onPress: () => index < pages.length - 1 && notebook?.movePage(pages[index]!.id, index + 1) },
+        { label: 'Delete page', icon: 'trash-2', tone: 'bad', onPress: () => deletePage(index) },
+      ],
+    });
+
+  const ctx = { dm: s.dm, assets: s.assets };
+  const moreMenu = (anchor: { x: number; y: number }) =>
+    setMenu({
+      anchor: { ...anchor, align: 'right' },
+      items: [
+        { label: 'Add page', icon: 'file-plus', onPress: () => addPage() },
+        { label: 'Rename', icon: 'edit-2', onPress: () => setRenaming(true) },
+        {
+          label: meta?.aiAccess ? 'Turn off AI access' : 'Turn on AI access',
+          icon: 'cpu',
+          tone: 'assistant',
+          description: meta?.aiAccess ? 'Connected agents can read and comment' : 'Agents can’t see this notebook',
+          onPress: () => notebook?.setMeta({ aiAccess: !meta?.aiAccess }),
+        },
+        { label: 'Export PDF', icon: 'file-text', onPress: () => void run('Exporting PDF…', () => exportNotebook(ctx, notebookId, 'pdf')) },
+        { label: 'Export .qalm backup', icon: 'archive', onPress: () => void run('Exporting…', () => exportNotebook(ctx, notebookId, 'qalm')) },
+        { label: 'Settings', icon: 'settings', onPress: () => router.push('/settings') },
+      ],
+    });
+
+  const insertImage = () =>
+    void run('Adding image…', async () => {
+      if (!notebook) return;
+      const pageId = lastPage.current && pages.some((p) => p.id === lastPage.current) ? lastPage.current : currentPageId;
+      const info = pages.find((p) => p.id === pageId);
+      const target = pageId ? pageData.get(pageId)?.page : undefined;
+      if (!info || !target) return;
+      const f = await pickFile(['image/*']);
+      if (!f) return;
+      if (!f.mime.startsWith('image/')) throw new Error('Pick an image');
+      const asset = await s.assets.put(f.bytes, f.mime, f.name);
+      notebook.addAsset(asset);
+      const uri = (await s.assets.uri(asset)) ?? f.uri;
+      const size = await new Promise<{ w: number; h: number }>((resolve) =>
+        Image.getSize(uri, (w, hh) => resolve({ w, h: hh }), () => resolve({ w: 4, h: 3 })),
+      );
+      const w = Math.min(info.size.w * 0.6, size.w);
+      const hh = (w * size.h) / size.w;
+      const item: ImageItem = { id: newId(), type: 'image', assetId: asset.id, x: (info.size.w - w) / 2, y: Math.max(24, (info.size.h - hh) / 3), w, h: hh };
+      target.addItem(item);
+      setTool('lasso');
+      setSelection({ pageId: info.id, ids: [item.id] });
+    });
+
+  const sendAsk = () => {
+    if (!notebook || !askText.trim()) return;
+    notebook.addAsk(lastPage.current ?? currentPageId ?? pages[0]!.id, askText.trim());
+    setAskText('');
+    setAskOpen(false);
+    showToast(meta?.aiAccess ? 'Sent to your connected agents' : 'Saved. Turn on AI access so agents can see it');
+  };
+
+  const commentCount = [...pageData.values()].reduce((n, d) => n + d.comments.filter((x) => !x.resolved).length, 0);
+
+  const edCtx = React.useMemo<EditorCtx | null>(
+    () =>
+      notebook
+        ? {
+            notebook,
+            notebookId,
+            tools,
+            setTool,
+            onPenButton,
+            input,
+            undo,
+            undoManagerFor: (pageId: string, page: Page) => registry.get(pageId, page),
+            selection,
+            setSelection,
+            editingText,
+            setEditingText,
+            activeCommentId,
+            setActiveComment: (id: string | null) => {
+              setActiveComment(id);
+              if (id) setCommentsOpen(true);
+            },
+            reportPage,
+            touchPage,
+          }
+        : null,
+    [notebook, notebookId, tools, setTool, onPenButton, input, undo, registry, selection, editingText, activeCommentId, reportPage, touchPage],
+  );
+
+  if (!h || !notebook || !meta || !edCtx) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.bg }}>
+        <ActivityIndicator color={c.accent} />
+      </View>
+    );
+  }
+  if (!meta.id) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
+        <EmptyState icon="alert-circle" title="Notebook not found" body="It may still be syncing, or it was deleted on another device." action={<Button label="Back to library" onPress={() => router.replace('/')} />} />
+      </SafeAreaView>
+    );
+  }
+
+  const syncPill =
+    sync === null ? null : sync === 'synced' ? <Pill label="Synced" tone="good" dot /> : sync === 'offline' ? <Pill label="Offline" tone="warn" dot /> : <Pill label="Syncing" tone="neutral" dot />;
+  const narrow = win.width < 640;
+
+  return (
+    <EditorContext.Provider value={edCtx}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top', 'left', 'right']}>
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.line }]}>
+          <IconButton icon="chevron-left" label="Back to library" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text variant="bodyStrong" numberOfLines={1} onPress={() => setRenaming(true)}>
+              {meta.title}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text variant="meta" tone="faint">
+                Page {current + 1} of {pages.length}
+              </Text>
+              {!narrow ? syncPill : null}
+              {!narrow && meta.aiAccess ? <Pill label="AI can read" tone="assistant" /> : null}
+            </View>
+          </View>
+          <IconButton icon="rotate-ccw" label="Undo" disabled={!undo.canUndo} onPress={() => undo.undo()} />
+          <IconButton icon="rotate-cw" label="Redo" disabled={!undo.canRedo} onPress={() => undo.redo()} />
+          <View>
+            <IconButton icon="message-square" label="Comments" selected={commentsOpen} onPress={() => setCommentsOpen((x) => !x)} />
+            {commentCount > 0 ? (
+              <View pointerEvents="none" style={[styles.badge, { backgroundColor: c.assistant }]}>
+                <Text variant="meta" tone="onAccent" style={{ fontSize: 10, lineHeight: 14 }}>
+                  {commentCount}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          {narrow ? (
+            <IconButton icon="help-circle" label="Ask" tone="assistant" onPress={() => setAskOpen(true)} />
+          ) : (
+            <Button label="Ask" icon="help-circle" variant="assistant" size="sm" onPress={() => setAskOpen(true)} />
+          )}
+          <IconButton icon="more-vertical" label="More" onPress={(e) => moreMenu({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY + 20 })} />
+        </View>
+
+        <View style={{ flex: 1, flexDirection: 'row' }}>
+          <View style={{ flex: 1 }} onLayout={(e) => setViewport({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+            <GestureDetector gesture={pinch}>
+              <ScrollView horizontal scrollEnabled={contentW > viewport.w + 1} contentContainerStyle={{ width: contentW }} showsHorizontalScrollIndicator={contentW > viewport.w + 1}>
+                <ScrollView
+                  ref={vScroll}
+                  style={{ width: contentW, height: viewport.h }}
+                  scrollEventThrottle={32}
+                  onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
+                    scrollYRef.current = e.nativeEvent.contentOffset.y;
+                    setScrollY(e.nativeEvent.contentOffset.y);
+                  }}
+                >
+                  <View style={{ width: contentW, height: totalH, transform: liveScale !== 1 ? [{ scale: liveScale }] : undefined, transformOrigin: 'top center' }}>
+                    {slots.map((slot, i) => {
+                      const info = pages[i]!;
+                      const left = (contentW - slot.width) / 2;
+                      return (
+                        <React.Fragment key={slot.id}>
+                          <View style={[styles.page, { left, top: slot.top, width: slot.width, height: slot.height, borderColor: c.line }]}>
+                            {i >= first && i <= last ? (
+                              <PageView info={info} index={i} width={slot.width} zoom={zoom} />
+                            ) : (
+                              <View style={{ flex: 1, backgroundColor: info.paperColor === 'night' ? '#1f1f23' : info.paperColor === 'cream' ? '#fbf7ee' : '#ffffff' }} />
+                            )}
+                          </View>
+                          <View style={[styles.pageFoot, { left, top: slot.top + slot.height + 4, width: slot.width }]}>
+                            <Text variant="meta" tone="faint">
+                              {i + 1}
+                              {info.background.kind === 'pdf' ? ' · PDF' : ''}
+                            </Text>
+                            <IconButton icon="more-horizontal" label={`Page ${i + 1} options`} size={32} onPress={(e) => pageMenu(i, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })} />
+                          </View>
+                        </React.Fragment>
+                      );
+                    })}
+                    {slots.length ? (
+                      <View style={{ position: 'absolute', top: contentHeight(slots, GAP), left: 0, right: 0, alignItems: 'center' }}>
+                        <Button label="Add page" icon="plus" size="sm" onPress={() => addPage()} />
+                      </View>
+                    ) : null}
+                  </View>
+                </ScrollView>
+              </ScrollView>
+            </GestureDetector>
+
+            {/* Floating toolbar */}
+            <View style={styles.toolbarWrap} pointerEvents="box-none">
+              <Toolbar
+                tools={tools}
+                onTool={setTool}
+                onChange={changeTools}
+                onImage={insertImage}
+                zoom={zoom * liveScale}
+                onZoom={(d) => commitZoom(stepZoom(zoom, d))}
+                onZoomReset={() => commitZoom(1)}
+              />
+            </View>
+
+            {selection && selectionPage ? (
+              <View style={styles.selWrap} pointerEvents="box-none">
+                <View style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
+                  <Text variant="label" style={{ paddingHorizontal: 8 }}>
+                    {selection.ids.length} selected
+                  </Text>
+                  {PEN_COLORS.map((p) => (
+                    <IconButton
+                      key={p.hex}
+                      icon="circle"
+                      label={`Recolour ${p.name}`}
+                      size={36}
+                      color={p.hex}
+                      onPress={() =>
+                        selectionPage.doc.transact(() => {
+                          for (const id of selection.ids) {
+                            const it = selectionPage.item(id);
+                            if (it && it.type !== 'image' && !(it.type === 'stroke' && it.tool === 'highlighter')) selectionPage.updateItem(id, { color: p.hex });
+                          }
+                        }, LOCAL_ORIGIN)
+                      }
+                    />
+                  ))}
+                  <IconButton
+                    icon="copy"
+                    label="Duplicate"
+                    size={36}
+                    onPress={() => {
+                      const items = selection.ids.map((id) => selectionPage.item(id)).filter((x) => !!x);
+                      const copies = cloneItems(items, 16, 16, newId);
+                      selectionPage.doc.transact(() => copies.forEach((it) => selectionPage.addItem(it)), LOCAL_ORIGIN);
+                      setSelection({ pageId: selection.pageId, ids: copies.map((x) => x.id) });
+                    }}
+                  />
+                  <IconButton icon="trash-2" label="Delete selection" tone="bad" size={36} onPress={deleteSelection} />
+                  <IconButton icon="x" label="Deselect" size={36} onPress={() => setSelection(null)} />
+                </View>
+              </View>
+            ) : null}
+          </View>
+
+          {commentsOpen ? (
+            <View style={panelW ? undefined : [StyleSheet.absoluteFill, { alignItems: 'flex-end' }]} pointerEvents="box-none">
+              <CommentsPanel
+                pages={pageData}
+                activeId={activeCommentId}
+                onSelect={setActiveComment}
+                onJump={scrollToPage}
+                onClose={() => {
+                  setCommentsOpen(false);
+                  setActiveComment(null);
+                }}
+              />
+            </View>
+          ) : null}
+        </View>
+
+        {busy ? (
+          <View style={[styles.busy, { backgroundColor: c.surface, borderColor: c.line }]} pointerEvents="none">
+            <ActivityIndicator color={c.accent} size="small" />
+            <Text variant="label">{busy}</Text>
+          </View>
+        ) : null}
+        {toast}
+
+        <Menu visible={!!menu} onClose={() => setMenu(null)} items={menu?.items ?? []} anchor={menu?.anchor} />
+
+        <Sheet
+          visible={askOpen}
+          onClose={() => setAskOpen(false)}
+          title="Ask your agent"
+          width={480}
+          footer={
+            <>
+              <Button label="Cancel" onPress={() => setAskOpen(false)} />
+              <Button label="Send" variant="assistant" icon="send" disabled={!askText.trim()} onPress={sendAsk} />
+            </>
+          }
+        >
+          <Text tone="muted">
+            Connected agents get your question right away, with what changed on page {current + 1}. Answers appear as comments next to your lines.
+          </Text>
+          <TextField value={askText} onChangeText={setAskText} placeholder="Is line 5 right?" multiline autoFocus accessibilityLabel="Question" style={{ minHeight: 72 }} />
+          <View style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: c.line, borderRadius: radius.control }}>
+            <Row title="AI access" description={meta.aiAccess ? 'Agents you approved can read and comment' : 'Off: agents can’t see this notebook'} last>
+              <Toggle label="AI access" value={meta.aiAccess} onChange={(v) => notebook.setMeta({ aiAccess: v })} />
+            </Row>
+          </View>
+        </Sheet>
+
+        <NameSheet
+          visible={renaming}
+          title="Rename notebook"
+          initial={meta.title}
+          placeholder="Title"
+          action="Rename"
+          onClose={() => setRenaming(false)}
+          onSubmit={(title) => {
+            setRenaming(false);
+            if (library) void updateNotebookMeta({ dm: s.dm, assets: s.assets, library }, notebookId, { title });
+            else notebook.setMeta({ title });
+          }}
+        />
+      </SafeAreaView>
+    </EditorContext.Provider>
+  );
+}
+
+const styles = StyleSheet.create({
+  header: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 6, minHeight: 60, borderBottomWidth: StyleSheet.hairlineWidth },
+  badge: { position: 'absolute', top: 4, right: 2, minWidth: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  page: {
+    position: 'absolute',
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  pageFoot: { position: 'absolute', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 32 },
+  toolbarWrap: { position: 'absolute', top: 12, left: 12, right: 12, alignItems: 'center' },
+  selWrap: { position: 'absolute', bottom: 20, left: 12, right: 12, alignItems: 'center' },
+  selBar: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 2, padding: 4, borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth },
+  busy: {
+    position: 'absolute',
+    top: 72,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+});

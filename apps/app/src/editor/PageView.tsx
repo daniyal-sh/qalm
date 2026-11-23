@@ -90,7 +90,7 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
   // Comments and lines for the comments panel.
   React.useEffect(() => {
     if (!page) return;
-    ed.reportPage(info.id, { index, lines, comments });
+    ed.reportPage(info.id, { page, index, lines, comments });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, lines, comments, index]);
   React.useEffect(() => () => ed.reportPage(info.id, null), [info.id]); // eslint-disable-line react-hooks/exhaustive-deps
