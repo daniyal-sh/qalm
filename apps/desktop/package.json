@@ -1,0 +1,28 @@
+{
+  "name": "@qalm/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Qalm by Apollo for Windows and macOS",
+  "author": "Apollo",
+  "homepage": "https://apollolearn.app",
+  "main": "dist/main.js",
+  "scripts": {
+    "compile": "tsc -p .",
+    "icons": "node scripts/icons.mjs",
+    "dev": "tsc -p . && node scripts/dev.mjs",
+    "dev:export": "tsc -p . && node scripts/dev.mjs --export",
+    "build": "pnpm --filter @qalm/app export:web && pnpm run icons && tsc -p . && electron-builder --dir",
+    "dist": "pnpm --filter @qalm/app export:web && pnpm run icons && tsc -p . && electron-builder",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "node --test test/unit.test.mjs",
+    "e2e": "node test/e2e.mjs"
+  },
+  "devDependencies": {
+    "@resvg/resvg-wasm": "2.6.2",
+    "@types/node": "^22.10.0",
+    "electron": "45.4.1",
+    "electron-builder": "26.18.0",
+    "playwright-core": "1.65.1",
+    "typescript": "~6.0.3"
+  }
+}

@@ -5,6 +5,8 @@ packages:
 
 # pnpm 10+ reads settings here, not from .npmrc. Expo needs a hoisted node_modules.
 allowBuilds:
+  electron: true
+  electron-winstaller: false
   esbuild: true
   workerd: true
 
