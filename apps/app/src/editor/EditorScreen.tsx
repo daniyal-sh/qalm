@@ -269,8 +269,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     if (!selection) return;
     const d = pageData.get(selection.pageId);
     if (!d) return;
-    const have = new Set(d.items.map((it) => it.id));
-    const ids = selection.ids.filter((id) => have.has(id));
+    // Ask the doc itself: `pageData` can lag a render behind a paste or duplicate.
+    const ids = selection.ids.filter((id) => !!d.page.item(id));
     if (ids.length !== selection.ids.length) setSelection(ids.length ? { pageId: selection.pageId, ids } : null);
   }, [pageData, selection]);
 

@@ -105,7 +105,7 @@ export function transformPatch(it: Item, f: Sim): Partial<Item> {
  */
 export function visualBBox(it: Item): BBox {
   if (it.type === 'stroke') {
-    const pad = it.width * 0.35 + 0.5;
+    const pad = it.width * 0.4 + 0.5; // brush ink reaches ~0.875 × width past its points; the bbox has 0.5
     return [it.bbox[0] - pad, it.bbox[1] - pad, it.bbox[2] + pad, it.bbox[3] + pad];
   }
   if (it.type === 'shape') {

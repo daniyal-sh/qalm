@@ -1,4 +1,4 @@
-import { boxSelect, hitTestErase, hitTestPoint, isIdentity, lassoSelect, LOCAL_ORIGIN, Page, snapShape, type Item, type PageInfo, type TextItem } from '@qalm/core';
+import { boxSelect, textHeight, hitTestErase, hitTestPoint, isIdentity, lassoSelect, LOCAL_ORIGIN, Page, snapShape, type Item, type PageInfo, type TextItem } from '@qalm/core';
 import { InkOverlay, PageCanvas, QalmInk, type InkOverlayProps } from 'qalm-ink';
 import * as React from 'react';
 import { PixelRatio, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -340,6 +340,8 @@ function TextEditor({ page, itemId, scale, onDone }: { page: Page; itemId: strin
           top: item.y * scale - 4,
           width: item.w * scale + 8,
           minHeight: item.fontSize * 1.3 * scale + 8,
+          // Grow with the text (a multiline input on web doesn't): the same wrapping estimate as the selection frame.
+          height: textHeight({ text: text || ' ', w: item.w, fontSize: item.fontSize }) * scale + 8 + item.fontSize * 0.3 * scale,
           fontSize: item.fontSize * scale,
           lineHeight: item.fontSize * 1.3 * scale,
           color: item.color,

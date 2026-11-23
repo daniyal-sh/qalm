@@ -307,6 +307,8 @@ export function InkOverlay(props: InkOverlayProps) {
         emitErase(live, true);
       } else if (live.kind === 'lasso') {
         if (live.points.length >= 1) P.onLasso({ nativeEvent: { polygon: live.points.map(({ x, y }) => ({ x, y })) } });
+        // A desynchronized canvas may not show a clear made in the pointerup task until it draws again.
+        requestAnimationFrame(() => s.draw());
       } else if (live.points.length > 0) {
         const id = uuid();
         const last = live.points[live.points.length - 1]!;
