@@ -68,9 +68,9 @@ describe('readings', () => {
 
   it('goes stale when ink is written on its row (like context: under 1½ units away), not on the row below', () => {
     const page = twoRows();
-    page.addItem(stroke('below', 50, 160, 60, 180)); // 40 below x^2 (unit 30): another row
+    page.addItem(stroke('below', 50, 160, 60, 180)); // 40 below x^2 (unit 48, so ½ unit is 24): another row
     expect(state(page)[0]).toEqual(['x^2', 'agent', false]);
-    page.addItem(stroke('more', 100, 100, 110, 120)); // 20 to the right of c: same row, 2/3 unit
+    page.addItem(stroke('more', 100, 100, 110, 120)); // 20 to the right of c: same row, under 1½ units
     expect(state(page)[0]).toEqual(['x^2', 'agent', true]);
   });
 

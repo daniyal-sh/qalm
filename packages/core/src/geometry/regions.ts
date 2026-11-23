@@ -29,8 +29,8 @@ export const DEFAULT_UNIT = 24;
 /** Ruled paper's line spacing and grid/dot spacing (paper.ts). */
 const RULED = 24;
 const GRID = 18;
-/** A stroke's height × this ≈ a line of handwriting (median letters are x-height or a bit more). */
-const HEIGHT_TO_UNIT = 1.5;
+/** A stroke's height × this ≈ a line of handwriting: the median stroke is about x-height, a ruled line ~2.5 of those. */
+const HEIGHT_TO_UNIT = 2.5;
 /** Strokes lower than this (dots, dashes) don't count towards the median height. */
 const MIN_HEIGHT = 3;
 
@@ -46,7 +46,7 @@ function median(xs: number[]): number {
 const clamp = (v: number) => Math.min(UNIT_MAX, Math.max(UNIT_MIN, v));
 
 /**
- * The page's unit: the ruling on ruled, Cornell, grid and dotted paper; otherwise 1.5 × the median stroke height
+ * The page's unit: the ruling on ruled, Cornell, grid and dotted paper; otherwise 2.5 × the median stroke height
  * (≈ one line of handwriting; tall strokes like ∫ and tiny dots don't move a median). Clamped to 12–48.
  */
 export function pageUnit(paper: Paper | undefined, boxes: readonly BBox[]): number {

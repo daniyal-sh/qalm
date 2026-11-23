@@ -67,7 +67,7 @@ landscape 1000×707. Boxes are rounded outwards, so a box always holds all of it
 ### Regions
 
 All lengths are in **units**: the typical height of handwriting on the page. On ruled and Cornell paper it is the rule
-spacing (24 pt); on grid and dotted paper the grid spacing (18 pt); otherwise 1.5 × the median stroke height (dots and
+spacing (24 pt); on grid and dotted paper the grid spacing (18 pt); otherwise 2.5 × the median stroke height (dots and
 tall strokes like ∫ don't move a median), clamped to 12–48 pt.
 
 1. **Changes.** The strokes added or moved since the agent's last update, and the ones erased, compared with what it was

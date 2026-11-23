@@ -27,13 +27,13 @@ import { OWNER, write } from './ink';
 const A4 = { w: 595, h: 842 };
 
 describe('units and coordinates', () => {
-  it('uses the ruling on ruled and grid paper, else 1.5 × the median stroke height, clamped', () => {
+  it('uses the ruling on ruled and grid paper, else 2.5 × the median stroke height, clamped', () => {
     expect(pageUnit('ruled', [])).toBe(24);
     expect(pageUnit('cornell', [])).toBe(24);
     expect(pageUnit('grid', [])).toBe(18);
     expect(pageUnit('blank', [])).toBe(24);
-    // Median of 10, 10, 12, 60 (the dot at 1 doesn't count; the tall ∫ barely moves it): 1.5 × 11.
-    expect(pageUnit('blank', [[0, 0, 5, 10], [0, 0, 5, 10], [0, 0, 5, 12], [0, 0, 5, 60], [0, 0, 1, 1]])).toBe(16.5);
+    // Median of 10, 10, 12, 60 (the dot at 1 doesn't count; the tall ∫ barely moves it): 2.5 × 11.
+    expect(pageUnit('blank', [[0, 0, 5, 10], [0, 0, 5, 10], [0, 0, 5, 12], [0, 0, 5, 60], [0, 0, 1, 1]])).toBe(27.5);
     expect(pageUnit('blank', [[0, 0, 5, 100]])).toBe(48);
     expect(pageUnit('blank', [[0, 0, 5, 4]])).toBe(12);
   });
