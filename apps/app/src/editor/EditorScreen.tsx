@@ -28,6 +28,7 @@ import { cloneItems, recolorPatch, selectionBBox } from './items';
 import { trackModifiers } from './modifiers';
 import { SelectionThumb } from './SelectionThumb';
 import { PageView } from './PageView';
+import { SwatchStrip } from './Swatches';
 import { Toolbar } from './Toolbar';
 import { CrossPageUndo } from './undoStack';
 import {
@@ -337,6 +338,13 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   selRef.current = sel;
   const [recoloring, setRecoloring] = React.useState(false);
   React.useEffect(() => setRecoloring(false), [selection?.pageId, selection?.ids.length]);
+  // The selection's colour when every recolourable item shares one (marked in the recolour swatches).
+  const selectionColor = React.useMemo(() => {
+    if (!recoloring) return null;
+    const cs = new Set(selectedItems().flatMap((it) => (recolorPatch(it, '#000000') && 'color' in it ? [it.color] : [])));
+    return cs.size === 1 ? [...cs][0]! : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recoloring, selection, pageData]);
 
   React.useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -712,9 +720,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                   {recoloring ? (
                     <>
                       <IconButton icon="chevron-left" label="Back" onPress={() => setRecoloring(false)} />
-                      {PEN_COLORS.map((p) => (
-                        <IconButton key={p.hex} icon="circle" label={`Recolour ${p.name}`} color={p.hex} onPress={() => sel.recolor(p.hex)} />
-                      ))}
+                      <SwatchStrip tool="pen" verb="Recolour" current={selectionColor ?? ''} onSelect={(hex) => sel.recolor(hex)} />
                     </>
                   ) : (
                     <>

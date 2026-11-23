@@ -14,7 +14,7 @@ import { DocManager, docIds, openLoaded, type DocHandle, type RemoteFactory } fr
 import { openPersistence } from '../sync/persistence';
 import { SyncProvider, type SyncStatus } from '../sync/provider';
 import { fetchTicket } from '../sync/ticket';
-import { localToMove, moveLocalLibrary } from './localLibrary';
+import { hasLocalLibrary, localToMove, moveLocalLibrary } from './localLibrary';
 
 export const LOCAL_LIBRARY = 'lib:local';
 
@@ -121,7 +121,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         const n = localToMove(lib, ll);
         if (n > 0 && (await kvGet<boolean>(unverifiedKey(user.id)))) {
           if (alive) setLocalOffer(n);
-        } else if (ll.entries().length) {
+        } else if (hasLocalLibrary(ll)) {
           moveLocalLibrary(lib, ll);
         }
         local.release();
