@@ -198,7 +198,8 @@ Ink is drawn from **recorded pictures**, one per chunk of up to 256 consecutive 
 so z-order is exact): a page with thousands of strokes is a handful of Skia nodes, zoom only changes the group's scale, and a new
 stroke re-records only the last chunk. Paths are cached per item and rebuilt only when its geometry changes; a page seen for the first
 time builds them in 8 ms slices in the background (newest chunk first). Replaced paths, pictures and images are freed (on web CanvasKit
-objects are never garbage-collected). Images decode off the main thread on web (`createImageBitmap`).
+objects are never garbage-collected). Images decode off the main thread on web (`createImageBitmap`). Items of a selection being
+dragged (`live`) leave their chunk and draw on their own inside the live transform, so a drag never re-records pictures per frame.
 
 **Only the stroke in progress is native:** `InkOverlay` (native view `QalmInkView`) is a transparent view stacked exactly over the
 `PageCanvas`. It takes all input and draws only the current stroke with minimum latency, using the same perfect-freehand port:
