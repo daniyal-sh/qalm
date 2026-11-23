@@ -16,6 +16,7 @@ const INSTRUCTIONS =
   'qalm notebooks in Q-ink Live format. Call wait() to list sessions, then wait(s) in a loop to follow live writing. ' +
   'Lines marked [n] are row n of the attached image; ~"…" is the device guess. Save your reading of a line with transcribe, ' +
   'pin feedback with comment. "note C5 …", "re C3 …" and "ask C6 …" are the student writing to you: answer with comment(thread). ' +
+  '"open C2 …" is a thread from before you joined, with its latest message; read("C2") shows all of it. ' +
   'You can never change ink.';
 
 const sArg = { type: 'string', description: 'Session (from wait with no arguments). Defaults to the last session you waited on.' };
@@ -28,7 +29,7 @@ const TOOLS = [
   },
   {
     name: 'read',
-    description: 'Reads on demand: "outline", a page "p3", lines "p3:L2-9", or the PDF behind a page "pdf:p2". Text plus an image strip where needed.',
+    description: 'Reads on demand: "outline", a page "p3", lines "p3:L2-9", the PDF behind a page "pdf:p2", or a whole comment thread "C5". Text plus an image strip where needed.',
     inputSchema: { type: 'object', properties: { ref: { type: 'string' }, s: sArg }, required: ['ref'], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },

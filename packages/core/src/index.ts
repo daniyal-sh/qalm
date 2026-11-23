@@ -54,6 +54,8 @@ export {
   assignLabels,
   encodeQinkUpdate,
   encodeQinkRead,
+  encodeQinkThread,
+  cleanAsk,
   resolveRef,
   resolveThread,
   threadLabel,
