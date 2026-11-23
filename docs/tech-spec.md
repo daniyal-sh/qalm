@@ -1,4 +1,4 @@
-# qalm v1 technical spec (rev 2)
+# qalm v1 technical spec (rev 3)
 
 Read with `decisions.md` (scope), `qink-live.md` (AI format) and **`brand.md` (qalm by Apollo: colours, type, mark)**.
 Layouts and flows come from `mockups/editor.html`, `mockups/screens-library.html` and `mockups/screens-ai.html`.
@@ -9,7 +9,7 @@ Changes in rev 2 (from review):
 - One Skia renderer for all finished content.
 - The native view only draws the stroke in progress.
 - One Yjs doc per page.
-- Line keys come from stroke IDs, and the server assigns the short labels.
+- (rev 3) Lines are gone: agents get regions of changed strokes, readings are of strokes, comments anchor to strokes (§2).
 - Added PDF rendering, zoom and undo.
 - Sync uses one-time tickets.
 - Palm thresholds are in millimetres.
@@ -19,7 +19,7 @@ Changes in rev 2 (from review):
 ```
 packages/core     @qalm/core     TypeScript, no platform deps. Model, geometry, SVG/PDF export, Q-ink
 modules/qalm-ink  qalm-ink       Expo module: PageCanvas (Skia, all platforms) + InkOverlay (native live stroke)
-                                 + PDF page rendering + on-device recognition. ios/ (Swift), android/ (Kotlin), src/ (TS + web)
+                                 + PDF page rendering. ios/ (Swift), android/ (Kotlin), src/ (TS + web)
 apps/app          @qalm/app      Expo app (iOS, Android, web). All UI screens
 apps/desktop      @qalm/desktop  Electron shell that loads the app's web build
 apps/server       @qalm/server   Cloudflare Worker: auth, sync, assets, MCP
@@ -45,7 +45,7 @@ nb:{notebookId}            index doc
 pg:{notebookId}:{pageId}   page doc
   items:    Y.Map<itemId, Y.Map>   item fields below; stroke points as Uint8Array
   order:    Y.Array<itemId>        z-order
-  lines:    Y.Map<lineKey, Y.Map>  Line fields
+  readings: Y.Map<readingId, Y.Map> Reading fields (someone's reading of some strokes)
   comments: Y.Map<commentId, Y.Map>
 
 lib:{userId}               library doc: folders + notebook entries {id,title,cover,folderId,updatedAt,aiAccess,favorite,deletedAt}
@@ -61,7 +61,7 @@ plus the library entry (`updateNotebookMeta`), like a rename. It isn't on the un
 
 **Thread index.** The comments panel, the unread badge, the "N open" count and "… commented" toasts cover the whole
 notebook, but only nearby page docs are loaded. So the index doc keeps a `ThreadSummary` per thread:
-`{id, pageId, lineKey, onSelection?, quote?, author, text, last: {author, text, at}, kinds, lastAgent?: {name, at}, resolved, ask?, createdAt, updatedAt}`
+`{id, pageId, onSelection?, quote?, author, text, last: {author, text, at}, kinds, lastAgent?: {name, at}, resolved, ask?, createdAt, updatedAt}`
 (texts cut to 280 characters; `kinds` has one letter per entry, `a` agent or `u` student, which is all unread counts need).
 The page doc stays the source of truth; the summary is a mirror, written with `Notebook.putThreads` (origin
 `THREADS_ORIGIN`, so never undone):
@@ -111,8 +111,9 @@ interface ShapeItem { id: string; type: 'shape'; kind: 'line'|'arrow'|'double-ar
 // shapes) or the 4 corners of its turned box. Moving or rotating a 2-point rect or ellipse stores 4 corners.
 type Item = StrokeItem | TextItem | ImageItem | ShapeItem;
 type BBox = [x0: number, y0: number, x1: number, y1: number];
-interface Line { key: string /* = id of the line's first item; globally unique */; kind: 'line' | 'drawing'; itemIds: string[]; bbox: BBox; text?: string; textSrc?: 'device'|'agent'|'user'; conf?: number; by?: string /* the agent that transcribed it */ }
-interface Comment { id: string; lineKey: string /* '' if a selection has no ink line */; author: { kind: 'agent'|'user'; name: string }; text: string; createdAt: number; resolved: boolean; replies: { author: {kind:'agent'|'user'; name:string}; text: string; at: number }[]; anchor?: BBox /* selection box */; anchorIds?: string[] /* the selected items: box and labels are derived from them live */; ask?: boolean /* started by an Ask */ }
+interface Reading { id: string; ids: string[] /* the strokes it reads */; text: string; src: 'agent'|'user'; by?: string /* the agent */; stale?: boolean; updatedAt: number }
+interface Comment { id: string; author: { kind: 'agent'|'user'; name: string }; text: string; createdAt: number; resolved: boolean; replies: { author: {kind:'agent'|'user'; name:string}; text: string; at: number }[]; anchor?: BBox /* fallback box */; anchorIds?: string[] /* the strokes it is about: its box is derived from them live */; ask?: boolean /* started by an Ask */ }
+// A thread with anchorIds sits on those strokes (follows them; "Ink removed" once they're all gone); with only anchor on a box; with neither on the page.
 interface Ask { id: string; pageId: string; text: string; at: number; sel?: { itemIds: string[]; bbox: BBox }; commentId?: string }
 ```
 Stroke points are stored as a Float32Array of 6-tuples `(x, y, p, tilt, az, t)`, exposed as a `Uint8Array`
@@ -135,9 +136,10 @@ class Page {                         // wraps one page doc
   items(): Item[]; addItem(item: Item): void; updateItem(id, patch): void; removeItems(ids: string[]): void
   addItems(items: Item[]): void; updateItems(patches: Iterable<[id, patch]>): void   // one transaction (one undo step) each; same result as one call per item
   reorder(ids: string[], to: 'front' | 'back'): void   // z-order; keeps their order among themselves
-  lines(): Line[]                    // maintained automatically on add/update/remove
-  setLineText(lineKey, text, src: 'device'|'agent'|'user', conf?, by?): void
-  clearLineText(lineKey): void   // back to automatic: no reading
+  readings(): Reading[]
+  setReading(ids, text, src: 'agent'|'user', by?): string | null   // null: no such strokes, or an agent over the student's reading
+  editReading(id, text): void       // the student's edit: becomes theirs and fresh; '' removes it
+  removeReading(id): void
   comments(): Comment[]; addComment(c: Omit<Comment,'id'|'createdAt'|'resolved'|'replies'>): string
   replyToComment(id, author, text): boolean   // a student's reply reopens a resolved thread; false if it's gone
   resolveComment(id): void
@@ -157,33 +159,26 @@ const LOCAL_ORIGIN: unique symbol                // every app mutation uses doc.
 **Undo and redo** apply per device: each page has a `createUndoManager`, and the app keeps a small cross-page stack of the page IDs
 it edited, so undo goes to the right page. Edits from other devices and agents are never undone.
 
-### Line assignment (keys are race-free)
-When a stroke is added, it joins an existing `line` if its vertical overlap with the line's bbox is ≥ 50% of the smaller
-height **and** the horizontal gap is ≤ 1.5 × the line's height. Otherwise it starts a new line whose **key is the stroke's ID**.
-Shape items, and strokes taller than 2.5 × the page's median line height, form `drawing`s with the same keying, merged with
-overlapping drawings (the earliest key wins). Lines with no items are deleted.
+### Readings, regions and migration (no lines)
+There is no line grouping in the model. Ink (strokes and shapes) is just items; what an agent is sent is computed when an update goes out
+(`qink.ts`, `geometry/regions.ts`; the rules and constants are in `qink-live.md` §2: unit, 2-unit clusters, ½-unit + row context).
 
-**A line's reading** (`text`, `textSrc`, `conf`: an agent's `transcribe`, the device's guess, the student's text) is of
-its items. It is cleared, unless `textSrc === 'user'`, when an edit changes **which items the line has**: an item joins
-(a stroke written onto it, one moved onto it) or leaves (erased, moved away, so a partly moved line loses it on both
-parts). An edit that leaves the line with the same items under the same key keeps it: moving, resizing or rotating a
-whole line (or a selection of whole lines), recolouring, reordering. "An edit" is one transaction (one undo step): the
-items are reassigned one by one, which splits and re-merges a moved line on the way, and the reading is settled against
-the line's items at the start of the transaction. Moving a line's items in separate transactions is a change per step.
-A reading saved during a transaction is of the items at that point.
-**Editing a reading** (app): select a handwritten line (or tap it with the lasso) → **Reading** on the selection bar.
-The sheet shows the saved text and its source (on-device guess, "Read by {agent}", or yours) with an edit field.
-Saving writes `textSrc: 'user'`, which device guesses and agents can't overwrite (the server refuses `transcribe`); an
-empty field or "Use automatic" calls `clearLineText`. Unchanged text stays automatic. Drawings, images and text boxes
-have no reading. One undo step per save. Two offline devices may create two separate lines that overlap. That's fine, because keys never collide.
-Short labels (`L7`, `D2`) exist **only in Q-ink**, and the server assigns them (§4).
+**Readings** (`readings` map) are someone's reading of some strokes: an agent's `transcribe` or the student's own text. An agent's reading
+is refused where the student's covers any of the strokes, and replaces agent readings of a subset of its strokes. A reading goes **stale**
+(kept, flagged) when one of its strokes is erased, or ink that isn't part of it comes within ½ unit of it (written, pasted or moved there;
+ink that was already next to it, e.g. moved along with it, doesn't count). Moving, resizing, rotating or recolouring the read ink keeps it
+fresh; a reading whose strokes are all erased is deleted. `Page` tracks this per transaction: a fresh reading's box and unit are taken once,
+updated as its strokes move, and each outermost `Page` call checks only the ink it touched against them (a bulk edit stays linear).
+Stale flags are written in the same transaction as the edit, so undo brings a reading back fresh. Readings are in the undo scope.
 
-Items are assigned one at a time, in the order they are added or changed, so a bulk edit (moving, duplicating or
-deleting a selection) gives the same lines and keys as editing its items one by one. To keep that fast, `Page` keeps
-the page's grouping in a per-doc **line index** that each step updates (no re-reading of the whole page per item), and
-writes items' `line` fields once when the outermost `Page` call returns. The index follows transactions made through
-`Page` and is rebuilt after anything else changes the doc (remote updates, undo, or raw writes, also between two `Page`
-calls in one transaction). Moving 3000 strokes takes ~45 ms instead of ~2.4 s.
+**Editing a reading** (app): select ink → **Reading** on the selection bar. The sheet lists the readings of the selection (the agent's text
+with its name, or "You"; a "stale" badge), each editable. Saving makes it the student's (`editReading`), which agents can't overwrite; with
+no reading yet, the student can write one for the selection (`setReading(ids, text, 'user')`). One undo step per save.
+
+**Migration** (`migratePage`, origin `MIGRATION_ORIGIN`, not undoable): pages from before regions are moved once on load (app) or when an
+agent edits them (server): a line comment (`lineKey`) gets the line's stroke ids as `anchorIds` (and its box as `anchor`), line text saved
+by the student or an agent becomes a reading `m:{lineKey}` of those strokes, device guesses are dropped, and the `lines` map and items'
+`line` fields are removed. Every write is deterministic, so two devices migrating at once converge; a migrated page has nothing left to move.
 
 ### Geometry, rendering and export
 Stroke outlines use **perfect-freehand** settings everywhere, so live and finished strokes are identical on every platform.
@@ -221,32 +216,33 @@ rotateSim(frame, start, pointer): Sim   // about the centre, snapping to 45° wi
 textWidthPatch(text, 'left'|'right', pointer): { x, y, w }   // a text box's edges change its width only (reflow)
 hitTestPoint(items, p, tol): string | null   // tap: nearest ink within tol, topmost on a tie; inside a box or closed shape counts
 boxSelect(items, a, b): string[]        // the lasso rule over a dragged rectangle
-threadBox(comment, items, lines): BBox | null   // where a thread sits, live; null once its line or anchored ink is gone
+threadBox(comment, items): BBox | null   // where a thread sits, live; null once its anchored ink is gone (or on the page)
 anchorInkRemoved(comment, items): boolean
 paperPattern(paper: Paper, color: PaperColor, size): { lines: [x0,y0,x1,y1][]; dots: [x,y][]; stroke: string; bg: string }  // shared by Skia and SVG
 renderPageSvg(info: PageInfo, page: Page, opts?: { paper?: boolean; assetUrl?: (id) => string }): string
-renderLinesStripSvg(page: Page, lineKeys: (string | BBox)[], labels: string[]): { svg: string; width: number; height: number }  // black on white, "[n]" rows; a BBox is a crop row
+renderRegionsSvg(pages: Record<pageId, Page>, rows: RegionRow[]): { svg: string; width: number; height: number }  // white, "[n]" rows: new ink black, context grey, erased red dashed; a clip row is a box crop
 exportPdf(nb: Notebook, loadPage: (pageId) => Promise<Page>, getAsset: (id) => Promise<Uint8Array>): Promise<Uint8Array>   // pdf-lib
 packQalm(...) / unpackQalm(bytes) -> { index: Y.Doc; pages: Map<pageId, Y.Doc>; assets: Map<id, Uint8Array> }              // zip (fflate)
 ```
 
 ### Q-ink (text format in `qink-live.md` §2)
 ```ts
-interface QinkLabels { [pageId: string]: { nextL: number; nextD: number; byKey: Record<string /*lineKey*/, string /*'L7'*/> } }
-interface QinkSnapshot { [pageId: string]: Record<string /*lineKey*/, string /*hash of itemIds + text*/> }
-assignLabels(labels: QinkLabels, pageId: string, lines: Line[]): void       // mutates; existing labels never change, new keys get the next number
+type InkSeen = Record<string /*stroke id*/, string /*simplified path, half-unit lattice, delta encoded*/>   // per agent and page, server-stored
+interface QinkRegions { next: number; byLabel: Record<string /*'R7'*/, { pageId; ids: string[]; box: BBox; client?: string; replaced?: boolean }> }   // notebook-wide, server-stored
 interface QinkThreads { next: number; byId: Record<string /*commentId*/, { label: string /*'C3'*/; pageId: string }> }   // notebook-wide, server-stored
 type QinkSeen = Record<string /*commentId*/, number /*entries seen: comment + replies*/>                               // per agent
-encodeQinkUpdate(nb: Notebook, pages: Record<string, Page> /*the pages to diff*/, labels: QinkLabels, prev: QinkSnapshot, opts: { session; rev; asks?; threads?; seen? })
-  : { text: string; image: { pageId: string; lineKeys: (string | BBox)[]; labels: string[] } | null; snapshot: QinkSnapshot; seen: QinkSeen }
-  // adds `note`/`re` for the student's new thread entries on the passed pages, and `ask C6 p3:L4-6 [n] "…"` for selection asks
-encodeQinkRead(nb: Notebook, pages: Record<string, Page>, labels: QinkLabels, ref: string /*'outline' | 'p3' | 'p3:L2-9' | 'pdf:p2'*/)
-  : { text: string; image: { pageId: string; lineKeys: string[]; labels: string[] } | null }
-resolveRef(labels, nb, ref: 'p3:L4'): { pageId: string; lineKey: string }   // for transcribe and comment
-threadLabel(threads, commentId, pageId): string; resolveThread(threads, 'C3'): { pageId; commentId }   // for comment(thread)
+encodeQinkUpdate(nb, pages: Record<string, Page> /*the pages to diff*/, regions: QinkRegions, prev: Record<pageId, InkSeen | undefined>,
+  opts: { session; rev; client?; asks?; threads?; seen? }): { text; image: { rows: RegionRow[] } | null; ink: Record<pageId, InkSeen>; seen: QinkSeen }
+  // a page without prev gets a first look; adds `note`/`re`/`open` for threads and `ask C6 R9 [n] …` for selection asks
+encodeQinkRead(nb, pages, regions, ref /*'outline' | 'p3' | 'R7' | 'p3@120,300,260,80' | 'pdf:p2'*/, client?): { text; image | null }
+encodeQinkThread(nb, pages, threads, 'C5'): string
+resolveTarget(nb, regions, 'R7' | 'p3@x,y,w,h' | 'p3'): { kind: 'region', label, pageId, pos, ids, box } | { kind: 'box', pageId, pos, box } | { kind: 'page', pageId, pos }
+registerRegion(regions, { pageId, ids, box }, client?): { label; was: string[] }   // same strokes keep their label; overlaps are replaced
+inkInBox(items, box): string[]                     // ink whose centre is inside (box refs)
+threadLabel(threads, commentId, pageId): string; resolveThread(threads, 'C3'): { pageId; commentId }
+pageUnit(paper, boxes); clusterBoxes(boxes, gap); contextFor(seeds, others, unit); toGrid/fromGrid(box, size); gridSize(size)
 ```
-Q-ink refers to pages by **1-based position** (`p3`). A line without text, or with `textSrc === 'device'`, goes into the image, with
-`~"guess"` added when device text exists. Lines with `textSrc` agent or user are sent as text only.
+Q-ink refers to pages by **1-based position** (`p3`) and to places by a 0–1000 grid across the page width.
 
 ## 3. Rendering and input (`qalm-ink`)
 
@@ -315,8 +311,7 @@ web CSS px = 0.2646 mm):
 Hover (where supported) shows a brush-size preview. The pen button, squeeze or double-tap fires `onPenButton`, and the app switches to the eraser.
 
 **No on-device recognition.** qalm-ink has no handwriting recognizer on any platform (ML Kit was removed): the user's agent reads handwriting
-from the page image. That keeps the app about 20 MB lighter per language and the same on every platform. (Until the app stops calling them,
-`QalmInk.recognize`/`ensureModel` remain as deprecated JS no-ops that resolve `[]` / nothing; they will be deleted.)
+from the region images with its own vision. That keeps the app about 20 MB lighter per language and the same on every platform.
 
 ## 4. Server (`apps/server`, Cloudflare Workers)
 
@@ -350,19 +345,21 @@ from the page image. That keeps the app about 20 MB lighter per language and the
     stay valid until they expire (1 h) after logout.
 - **MCP:** Streamable HTTP at `/mcp` with OAuth 2.1 and dynamic client registration (`@cloudflare/workers-oauth-provider`). The consent page is
   served by the worker (mockup screen 5). There are 4 tools: `wait`, `read`, `transcribe` and `comment`, as in `qink-live.md`. Images are returned as MCP image
-  content: a PNG made from `renderLinesStripSvg` with `@resvg/resvg-wasm`.
+  content: a PNG made from `renderRegionsSvg` with `@resvg/resvg-wasm`.
 - **What an agent sees:** a notebook is visible only if it is (a) a live library entry (not trashed, not deleted forever), (b) inside the grant
   (picked directly or in a granted folder), and (c) has AI access on. (c) is read live from the notebook's index doc in its `DocRoom` on every tool
   call and on every pass of the `wait` update stream, so switching it off takes effect at once (a pending `wait` ends with an error). A notebook
   whose meta is unknown counts as off. `notebooks.ai_access` in D1 is a mirror kept by the `DocRoom` on every client update of the index doc; the
   consent page uses it to mark notebooks with AI access off (they can be granted but stay hidden until it's turned on).
-- **Q-ink labels and snapshots** live in the notebook `DocRoom`'s storage (`QinkLabels`, plus a `QinkSnapshot` per agent session).
-  Only that object assigns labels, so they're stable and unique.
+- **Q-ink regions and ink seen** live in the notebook `DocRoom`'s storage: `regions` (`QinkRegions`, the notebook-wide `R#` registry)
+  and, per agent and page, `ink:{clientId}:{pageId}` (`InkSeen`: each stroke's simplified path as last sent). Only that object assigns
+  labels, so they're stable and unique. Pages loaded for an agent are migrated in memory (`migratePage`); an agent edit migrates the page
+  room's doc for good.
 - **Wake rules:** `wait(s)` resolves when (pen idle ≥ 6 s **and** changes since the last delivery **and** ≥ 20 s since the last wake) **or** a new `asks` entry arrives
   **or** the student added a comment or reply (a page room flags client transactions that touch its `comments` map and tells the notebook room,
   which keeps `lastCommentAt`). Only the changed pages are loaded.
 - **Threads:** the notebook room stores `QinkThreads` (labels `C1`, `C2`, …) and, in each agent's state, `QinkSeen`. `comment {ref}` creates the
-  comment in the page room and labels it; `comment {thread, resolve?}` replies there (author: the grant's client name). Agents still never touch ink.
+  comment in the page room (on the region's strokes still on the page, or the ink in a box, with the box as fallback) and labels it; `comment {thread, resolve?}` replies there (author: the grant's client name). Agents still never touch ink.
 - **Presence and pause:** every agent call records `presence` (client id → name, grant switches, last call) in the notebook room; pending waits
   are counted in memory. `meta.aiPaused` ("Pause sharing") is read live like `aiAccess`: while it's on, `wait` delivers nothing (times out as
   `#q s=… paused`) and the other tools fail; turning it off wakes pending waits.
@@ -393,7 +390,7 @@ from the page image. That keeps the app about 20 MB lighter per language and the
   time, newest first, and are skipped if the page scrolled away; on web the last 24 rendered pages are kept and older bitmaps revoked.
   Benchmark: `pnpm --filter @qalm/app bench:micro`, and `EXPO_PUBLIC_QALM_BENCH=1 pnpm --filter @qalm/app export:web` then
   `node apps/app/scripts/bench/run.mjs --label <name>` (headless Chrome: 300-page mixed notebook and a 300-page PDF).
-- **`.qalm` backups** restore as a **new** notebook (new notebook and page ids, title + " (restored)"), copying pages, items, lines, comments, assets
+- **`.qalm` backups** restore as a **new** notebook (new notebook and page ids, title + " (restored)"), copying pages, items, readings, comments, assets
   and meta. A backup never merges into the original, so it works under any account and can't resurrect or collide with the original's history.
 - **Accounts:** notebooks made while signed out live in `lib:local`. On every sign-in and app start while signed in they're moved into the
   account library and removed from `lib:local`. After a sign-in this device didn't ask for (a confirmed link), the user is asked first
@@ -410,7 +407,6 @@ from the page image. That keeps the app about 20 MB lighter per language and the
   and uses it, "Use once" only uses it. The picker is a popover under "+" (a bottom sheet below 520 px). The selection bar's
   recolour shows the same pen strip and picker (highlighters and images keep their colour). The tool's current colour stays
   per device (kv `tools`). On night paper the default graphite still draws as night ink (#e4e4e7); other colours draw as picked.
-- **Recognition:** debounced on-device recognition runs 1 s after a line changes, then calls `setLineText(key, …, 'device', score)`.
 
 ## 6. Desktop (`apps/desktop`, Electron)
 
@@ -427,10 +423,10 @@ scroll and zoom; with "pen and finger", a finger tap selects too. The selection 
 handles: drag inside to move, corners to resize uniformly, the round handle to rotate; a single text box has edge handles
 that change its width. A double-tap on a text box (or a tap with the text tool) edits it in place. While dragging,
 `PageCanvas` draws the selection with `live`; on release the edit is one `LOCAL_ORIGIN` transaction (one undo step), and
-`updateItem` re-runs line assignment for moved ink. The selection bar recolours, duplicates, copies, cuts, pastes (an
+readings of the moved ink stay fresh (ink moved next to another reading makes that one stale). The selection bar recolours, duplicates, copies, cuts, pastes (an
 in-app clipboard that works across pages and notebooks, copying image assets into the target notebook), brings to
 front / sends to back, comments, asks and deletes; Ctrl/Cmd + C / X / V / D / A and Delete work on desktop. A thread
-started from a selection stores its item ids (`anchorIds`), so its pin, margin card and Q-ink labels follow the ink; once
+started from a selection stores its item ids (`anchorIds`), so its pin, margin card and Q-ink box ref follow the ink; once
 that ink is all deleted, the thread shows only in the panel ("Ink removed").
 
 ### Shape snapping (`snapShape`)

@@ -7,7 +7,7 @@ Keep it simple. Anything not listed here is out of v1.
 - v1 tools: pen, highlighter, eraser, lasso select and move, typed text boxes, shape snapping, PDF import and annotation, images.
 - Not in v1: handwriting search, sharing with other people, audio, stickers, templates marketplace.
 - Export: PDF (ink flattened) and `.qalm` (full-fidelity backup).
-- Handwriting recognition: English only at launch.
+- Handwriting recognition: none in the app; the agent reads handwriting itself.
 
 ## Platforms
 - iPad, Android tablets, Windows and macOS, all at launch. Linux and stylus phones are not a priority.
@@ -23,9 +23,14 @@ Keep it simple. Anything not listed here is out of v1.
 
 ## AI (MCP only)
 - See `qink-live.md`.
-- Agents can read and comment, and can save a line's reading with `transcribe`. They can never edit ink.
+- Agents can read and comment, and can save their reading of some strokes with `transcribe`. They can never edit ink.
 - Updates go out on a pause (≥ 6 s) or when the student taps Ask, at most one every 20 s.
-- Every changed line is sent as an image plus the on-device guess. There's no server-side model.
+- No lines. Every change goes out as **regions**: crops of the strokes added or erased since the agent's last update
+  (new ink black, the ink around it grey for context, erased strokes faint red), with coordinates on a 0–1000 grid.
+  Line grouping split maths apart (superscripts, tall ∫, two expressions on one rule), so the agent "corrected"
+  correct work. There's no server-side model.
+- Readings are of strokes, and go stale (kept, flagged) when strokes are added to or erased from them. Comments attach
+  to strokes and follow the ink.
 - The agent keeps its own chat history, and updates are self-contained.
-- No on-device recognition (ML Kit was removed). Handwriting is read by the agent's vision from the page image, the same on every
+- Recognition = the agent's vision: no on-device recognition (ML Kit was removed). Handwriting is read by the agent from the region images, the same on every
   platform, and the app is about 20 MB lighter per language.
