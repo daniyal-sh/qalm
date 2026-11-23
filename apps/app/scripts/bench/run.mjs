@@ -3,7 +3,7 @@
  * Editor benchmark: serves a bench web export (EXPO_PUBLIC_QALM_BENCH=1) and drives headless Chrome over CDP.
  *
  *   EXPO_PUBLIC_QALM_BENCH=1 pnpm --filter @qalm/app export:web
- *   node apps/app/scripts/bench/run.mjs --label after [--runs 3] [--profile <dir>] [--chrome <exe>]
+ *   node apps/app/scripts/bench/run.mjs --label after [--runs 3] [--profile <dir>] [--dist <web export>] [--chrome <exe>]
  *
  * Seeds (once per profile) a 300-page mixed notebook (blank pages, 300-stroke pages and 3000/5000-stroke pages) and a
  * 300-page PDF import, then measures: open to first page drawn, scroll frame times and long tasks, memory after
@@ -18,10 +18,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const dist = path.resolve(here, '../../dist');
 const args = Object.fromEntries(
   process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]?.startsWith('--') || all[i + 1] === undefined ? '1' : all[i + 1]]] : acc), []),
 );
+const dist = path.resolve(args.dist ?? path.resolve(here, '../../dist'));
 const label = args.label ?? 'run';
 const runs = Number(args.runs ?? 3);
 const profile = path.resolve(args.profile ?? path.join(os.tmpdir(), 'qalm-bench-profile'));
@@ -181,9 +181,10 @@ async function openOnce(nbId, readyExpr) {
     const m = (n) => performance.getEntriesByName(n);
     const mount = m('qalm:editor-mount')[0]?.startTime ?? null;
     const drawn = m('qalm:page-drawn').find((e) => e.detail && e.detail.index === 0)?.startTime ?? null;
+    const partial = m('qalm:page-partial').find((e) => e.detail && e.detail.index === 0)?.startTime ?? null;
     const pdf = m('qalm:pdf-ready').find((e) => e.detail && e.detail.index === 0)?.startTime ?? null;
     const lt = window.__lt.filter(([s]) => s < (drawn ?? pdf ?? 1e9) + 1500);
-    return { ok: ${ok}, editorMount: mount, firstPageDrawn: drawn, firstPdfReady: pdf, mountToDrawn: drawn && mount ? drawn - mount : null,
+    return { ok: ${ok}, editorMount: mount, firstInk: partial ?? drawn, firstPageDrawn: drawn, firstPdfReady: pdf, mountToDrawn: drawn && mount ? drawn - mount : null,
       mountToPdf: pdf && mount ? pdf - mount : null, longestTask: Math.max(0, ...lt.map((x) => x[1])), longTaskMs: lt.reduce((a, x) => a + x[1], 0),
       pagesMounted: document.querySelectorAll('canvas').length, domNodes: document.getElementsByTagName('*').length };
   })()`);
@@ -194,7 +195,7 @@ for (const [key, nbId, ready] of [
 ]) {
   const all = [];
   for (let i = 0; i < runs; i++) all.push(await openOnce(nbId, ready));
-  results.open[key] = { runs: all, firstPageDrawn: stats(all.map((r) => r.firstPageDrawn ?? r.firstPdfReady ?? NaN)), mountToFirst: stats(all.map((r) => r.mountToDrawn ?? r.mountToPdf ?? NaN)), longestTask: stats(all.map((r) => r.longestTask)), domNodes: all[0].domNodes };
+  results.open[key] = { runs: all, firstPageDrawn: stats(all.map((r) => r.firstPageDrawn ?? r.firstPdfReady ?? NaN)), firstInk: stats(all.map((r) => r.firstInk ?? NaN)), mountToFirst: stats(all.map((r) => r.mountToDrawn ?? r.mountToPdf ?? NaN)), longestTask: stats(all.map((r) => r.longestTask)), domNodes: all[0].domNodes };
   console.log(key, 'open', JSON.stringify(round(results.open[key].firstPageDrawn)));
 }
 
@@ -243,8 +244,9 @@ async function scrollRun(key, nbId, ready) {
   await sleep(2500);
   const heapEnd = await heap();
   const docs = await evaluate('window.__qalmBench.stats()');
+  const wasmMb = await evaluate('(globalThis.CanvasKit?.HEAPU8?.byteLength ?? 0) / 1048576');
   const blobs = await evaluate('(() => { let n = 0, b = 0; for (const s of window.__blobs.values()) { n++; b += s; } return { n, mb: b / 1048576 }; })()');
-  results.memory[key] = { heapStartMb: heap0, heapAfterAllPagesMb: heapEnd, docs, blobsAlive: blobs.n, blobMb: blobs.mb, maxCanvases: through.maxCanvas, contentHeightPx: through.height };
+  results.memory[key] = { heapStartMb: heap0, heapAfterAllPagesMb: heapEnd, docs, blobsAlive: blobs.n, blobMb: blobs.mb, skiaWasmMb: wasmMb, maxCanvases: through.maxCanvas, contentHeightPx: through.height };
   console.log(key, 'memory', JSON.stringify(round(results.memory[key])));
 }
 await scrollRun('mixed', ids.mixed, `performance.getEntriesByName('qalm:page-drawn').some((e) => e.detail && e.detail.index === 0)`);

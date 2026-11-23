@@ -164,6 +164,7 @@ export class Page {
     this.tx(() => {
       const move = new Set(ids.filter((id) => this.itemMap.has(id)));
       if (!move.size) return;
+      this.dirty();
       const moved = this.orderedIds().filter((id) => move.has(id));
       const arr = this.order.toArray();
       for (let i = arr.length - 1; i >= 0; i--) if (move.has(arr[i]!)) this.order.delete(i, 1);

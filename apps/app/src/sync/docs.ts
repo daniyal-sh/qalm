@@ -43,6 +43,7 @@ export class DocManager {
   private evictListeners = new Set<(docId: string) => void>();
   private remoteListeners = new Set<() => void>();
   private clock = 0;
+  private retain: (docId: string) => boolean = () => false;
 
   constructor(private deps: DocManagerDeps) {}
 
@@ -55,6 +56,14 @@ export class DocManager {
     return () => {
       this.evictListeners.delete(cb);
     };
+  }
+
+  /**
+   * Idle docs for which `fn` is true are evicted last (the editor keeps pages with undo history in memory, so undo
+   * still reaches them after scrolling away). The cache stays bounded: they are evicted too once it overflows.
+   */
+  setRetain(fn: ((docId: string) => boolean) | null): void {
+    this.retain = fn ?? (() => false);
   }
 
   /** Called after setRemote (providers were replaced). */
@@ -120,7 +129,8 @@ export class DocManager {
 
   private trim(): void {
     const max = this.deps.cacheSize ?? 24;
-    const idle = [...this.entries.values()].filter((e) => e.refs === 0).sort((a, b) => a.lastUsed - b.lastUsed);
+    const keep = (e: Entry) => (this.retain(e.docId) ? 1 : 0);
+    const idle = [...this.entries.values()].filter((e) => e.refs === 0).sort((a, b) => keep(a) - keep(b) || a.lastUsed - b.lastUsed);
     while (idle.length > max) this.evict(idle.shift()!);
   }
 

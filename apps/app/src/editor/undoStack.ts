@@ -47,6 +47,11 @@ export class CrossPageUndo {
     return this.redoStack.some((e) => this.managers.has(e.pageId));
   }
 
+  /** Does undo or redo history point at this page? */
+  hasHistory(pageId: string): boolean {
+    return this.undoStack.some((e) => e.pageId === pageId) || this.redoStack.some((e) => e.pageId === pageId);
+  }
+
   /** Starts tracking a page's UndoManager. Re-attaching the same page replaces the old manager. */
   attach(pageId: string, um: Y.UndoManager): () => void {
     this.detach(pageId);

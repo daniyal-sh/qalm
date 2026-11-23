@@ -7,7 +7,19 @@ type PdfDoc = Awaited<ReturnType<PdfJs['getDocument']>['promise']>;
 
 let pdfjsPromise: Promise<PdfJs> | null = null;
 const docs = new Map<string, Promise<PdfDoc>>();
+/** Rendered pages (object URLs), least recently used first. Older ones are revoked: each is a full-page PNG. */
 const pages = new Map<string, Promise<string>>();
+const MAX_PAGES = 24;
+
+function remember(key: string, png: Promise<string>): void {
+  pages.delete(key);
+  pages.set(key, png);
+  while (pages.size > MAX_PAGES) {
+    const [oldest, url] = pages.entries().next().value as [string, Promise<string>];
+    pages.delete(oldest);
+    url.then((u) => URL.revokeObjectURL(u)).catch(() => undefined);
+  }
+}
 
 /**
  * pdf.js needs its worker as a separate file. The app must serve
@@ -70,8 +82,8 @@ class QalmInkWebModule extends NativeModule implements QalmInkModuleType {
     if (!png) {
       png = render(fileUri, pageIndex, Math.round(widthPx));
       png.catch(() => pages.delete(key));
-      pages.set(key, png);
     }
+    remember(key, png);
     return png;
   }
 }

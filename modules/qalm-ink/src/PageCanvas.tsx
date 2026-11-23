@@ -1,26 +1,36 @@
-import type { BBox, ImageItem, Item, PageInfo, ShapeItem, StrokeItem, TextItem } from '@qalm/core';
+import type { BBox, ImageItem, Item, PageInfo, ShapeItem, TextItem } from '@qalm/core';
 import { inkPaint, itemBBox, paperPattern, shapePolylines, strokeOutline } from '@qalm/core';
 import {
+  BlendMode,
   Canvas,
   Circle,
   DashPathEffect,
   Group,
   Image,
+  PaintStyle,
   Paragraph,
   Path,
+  Picture,
   Rect,
   RoundedRect,
   Skia,
+  StrokeCap,
+  StrokeJoin,
   TextAlign,
   useFonts,
-  useImage,
+  type SkPaint,
   type SkPath,
+  type SkPicture,
+  type SkRect,
   type SkTypefaceFontProvider,
 } from '@shopify/react-native-skia';
 import * as React from 'react';
 
 import figtree from '../assets/fonts/Figtree-Regular.ttf';
+import { disposeLater } from './dispose';
+import { INK_CHUNK, inkGeometryKey, inkRuns, sameItems, type InkItem, type Run } from './inkRuns';
 import { traceOutline } from './outlinePath';
+import { usePageImage } from './usePageImage';
 
 export interface CommentAnchor {
   lineKey: string;
@@ -41,9 +51,10 @@ export interface PageCanvasProps {
   assetUri?: (assetId: string) => string | undefined;
   /**
    * Called with the item ids in z-order once Skia has committed them, i.e. its new picture has been handed to the
-   * view. Feed the newest ones to InkOverlay's `committedIds` so the live stroke stays until Skia shows it.
+   * view. Feed the newest ones to InkOverlay's `committedIds` so the live stroke stays until Skia shows it. `complete` is
+   * false while a page's ink is still being built over a few frames (only ids already drawn are listed).
    */
-  onDrawn?: (ids: string[]) => void;
+  onDrawn?: (ids: string[], complete: boolean) => void;
   /**
    * Draws these items moved / scaled / turned while a selection is being dragged, without rebuilding their paths:
    * p' = o + s·R(r)·(p − o) + d (the same as core's `Sim`).
@@ -114,43 +125,203 @@ function liveTransform(f: LiveTransform) {
   ];
 }
 
-/** Caches stroke paths across renders; a stroke is rebuilt only when its geometry changes. */
-function useStrokePaths(items: Item[]): Map<string, SkPath> {
-  const cache = React.useRef(new Map<string, { key: string; path: SkPath }>());
-  return React.useMemo(() => {
-    const next = new Map<string, { key: string; path: SkPath }>();
-    const out = new Map<string, SkPath>();
-    for (const it of items) {
-      if (it.type !== 'stroke') continue;
-      const key = `${it.tool}|${it.width}|${it.style}|${it.smoothing}|${it.points.length}|${it.bbox.join(',')}`;
-      const hit = cache.current.get(it.id);
-      const entry = hit && hit.key === key ? hit : { key, path: outlineToPath(strokeOutline(it)) };
-      next.set(it.id, entry);
-      out.set(it.id, entry.path);
+/** The Skia paint for an ink item: colour and alpha from core's `inkPaint` (a `#rrggbbaa` highlighter carries its own alpha). */
+function skiaInkPaint(it: InkItem): SkPaint {
+  const p = Skia.Paint();
+  p.setAntiAlias(true);
+  const c = inkPaint(it.type === 'stroke' ? it.tool : 'pen', it.color);
+  p.setColor(Skia.Color(c.rgb));
+  if (it.type === 'stroke') {
+    if (it.tool === 'highlighter') {
+      p.setAlphaf(c.alpha);
+      p.setBlendMode(BlendMode.Multiply);
     }
+  } else {
+    p.setStyle(PaintStyle.Stroke);
+    p.setStrokeWidth(it.width);
+    p.setStrokeCap(StrokeCap.Round);
+    p.setStrokeJoin(StrokeJoin.Round);
+  }
+  return p;
+}
+
+const paintKey = (it: InkItem) => (it.type === 'stroke' ? `s|${it.tool}|${it.color}` : `h|${it.color}|${it.width}`);
+
+interface InkCache {
+  paths: Map<string, { key: string; path: SkPath }>;
+  pictures: Map<string, { items: InkItem[]; picture: SkPicture }>;
+}
+
+/**
+ * Ink (strokes and shapes) is drawn from recorded pictures, one per chunk of up to 256 consecutive ink items, so a page
+ * with thousands of strokes is a handful of Skia nodes instead of one React element per stroke. Zooming only changes
+ * the group's scale; adding a stroke re-records only the last chunk; a path is rebuilt only when its item's geometry
+ * changes. Replaced paths and pictures are freed (CanvasKit objects are never garbage-collected on web).
+ *
+ * Building paths for a page seen for the first time is spread over 8 ms slices in the background (newest chunk
+ * first), so mounting a page with thousands of strokes while scrolling never blocks the main thread for long.
+ */
+const FRAME_BUDGET_MS = 8;
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+interface Ink {
+  runs: Run[];
+  pictures: Map<string, SkPicture>;
+  /** Ids of items drawn as they are now (all non-ink items, and ink in up-to-date chunks). */
+  drawnIds: string[];
+  complete: boolean;
+  /** Ink items still without a path (newest first), built in the background. */
+  pending: InkItem[];
+  /** Paths of ink drawn on its own (a selection being dragged). */
+  alonePaths: Map<string, SkPath>;
+}
+
+/** `alone`: ids drawn individually instead of in a picture (a live selection edit moves them with a transform). */
+function useInk(items: Item[], bounds: SkRect, alone: ReadonlySet<string> | null): Ink {
+  const cache = React.useRef<InkCache>({ paths: new Map(), pictures: new Map() });
+  const [pass, setPass] = React.useState(0);
+  const result = React.useMemo((): Ink => {
+    const t0 = now();
+    const prev = cache.current;
+    const next: InkCache = { paths: new Map(), pictures: new Map() };
+    const runs = inkRuns(items, INK_CHUNK, alone);
+    const pathOf = (it: InkItem): SkPath => {
+      const key = inkGeometryKey(it);
+      const hit = next.paths.get(it.id) ?? prev.paths.get(it.id);
+      const entry = hit && hit.key === key ? hit : { key, path: it.type === 'stroke' ? outlineToPath(strokeOutline(it)) : shapePath(it) };
+      next.paths.set(it.id, entry);
+      return entry.path;
+    };
+    const current = new Set<string>();
+    let complete = true;
+    const pending: InkItem[] = [];
+    let built = 0;
+    const alonePaths = new Map<string, SkPath>();
+    // Newest chunks first: the stroke just written is in the last one.
+    for (let r = runs.length - 1; r >= 0; r--) {
+      const run = runs[r]!;
+      if (run.kind !== 'ink') {
+        const it = run.item;
+        if (it.type === 'stroke' || it.type === 'shape') alonePaths.set(it.id, pathOf(it));
+        continue;
+      }
+      const old = prev.pictures.get(run.key);
+      if (old && sameItems(old.items, run.items)) {
+        for (const it of run.items) if (prev.paths.has(it.id)) next.paths.set(it.id, prev.paths.get(it.id)!);
+        next.pictures.set(run.key, old);
+        current.add(run.key);
+        continue;
+      }
+      // Build the chunk's missing paths within the time slice; record it once they are all there.
+      let ready = true;
+      for (const it of run.items) {
+        const hit = next.paths.get(it.id) ?? prev.paths.get(it.id);
+        if (hit && hit.key === inkGeometryKey(it)) {
+          next.paths.set(it.id, hit);
+          continue;
+        }
+        if (!ready || (built > 0 && now() - t0 > FRAME_BUDGET_MS)) {
+          ready = false;
+          if (hit) next.paths.set(it.id, hit);
+          pending.push(it);
+          continue;
+        }
+        pathOf(it);
+        built++;
+      }
+      if (!ready) {
+        // Out of time: keep showing the chunk's previous picture (if any); the rest is built in the background.
+        complete = false;
+        if (old) next.pictures.set(run.key, old);
+        continue;
+      }
+      const rec = Skia.PictureRecorder();
+      const canvas = rec.beginRecording(bounds);
+      const paints = new Map<string, SkPaint>();
+      for (const it of run.items) {
+        const k = paintKey(it);
+        let paint = paints.get(k);
+        if (!paint) paints.set(k, (paint = skiaInkPaint(it)));
+        canvas.drawPath(pathOf(it), paint);
+      }
+      next.pictures.set(run.key, { items: run.items, picture: rec.finishRecordingAsPicture() });
+      current.add(run.key);
+      disposeLater(...paints.values(), rec);
+    }
+    for (const [id, e] of prev.paths) if (next.paths.get(id) !== e) disposeLater(e.path);
+    for (const [key, e] of prev.pictures) if (next.pictures.get(key) !== e) disposeLater(e.picture);
     cache.current = next;
-    return out;
-  }, [items]);
+    const drawnIds: string[] = [];
+    for (const run of runs) {
+      if (run.kind === 'item') drawnIds.push(run.item.id);
+      else if (current.has(run.key)) for (const it of run.items) drawnIds.push(it.id);
+    }
+    return { runs, pictures: new Map([...next.pictures].map(([k, v]) => [k, v.picture])), drawnIds, complete, pending, alonePaths };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, pass, alone]);
+  React.useEffect(() => {
+    if (result.complete) return;
+    // Build the remaining paths in 8 ms slices without re-rendering (each Skia redraw of a heavy page is costly), and
+    // show progress about every 120 ms.
+    let i = 0;
+    let shown = now();
+    let timer: ReturnType<typeof setTimeout>;
+    const step = () => {
+      const t0 = now();
+      const paths = cache.current.paths;
+      while (i < result.pending.length && now() - t0 < FRAME_BUDGET_MS) {
+        const it = result.pending[i++]!;
+        const key = inkGeometryKey(it);
+        const hit = paths.get(it.id);
+        if (hit && hit.key === key) continue;
+        if (hit) disposeLater(hit.path);
+        paths.set(it.id, { key, path: it.type === 'stroke' ? outlineToPath(strokeOutline(it)) : shapePath(it) });
+      }
+      if (i >= result.pending.length || now() - shown > 120) {
+        shown = now();
+        setPass((p) => p + 1);
+        if (i >= result.pending.length) return;
+      }
+      timer = setTimeout(step, 0);
+    };
+    timer = setTimeout(step, 0);
+    return () => clearTimeout(timer);
+  }, [result]);
+  // Free everything once the page unmounts (not on StrictMode's immediate re-mount).
+  const mounted = React.useRef(true);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      setTimeout(() => {
+        if (mounted.current) return;
+        const c = cache.current;
+        disposeLater(...[...c.paths.values()].map((e) => e.path), ...[...c.pictures.values()].map((e) => e.picture));
+        cache.current = { paths: new Map(), pictures: new Map() };
+      }, 0);
+    };
+  }, []);
+  return result;
 }
 
 /**
  * Rendered inside <Canvas>, so its effect runs when Skia's own reconciler commits (after the new recording has been
  * dispatched to the view), not when React commits PageCanvas: on web that is often several frames later.
  */
-function DrawnProbe({ items, onDrawn }: { items: Item[]; onDrawn?: (ids: string[]) => void }) {
+function DrawnProbe({ ink, onDrawn }: { ink: Ink; onDrawn?: (ids: string[], complete: boolean) => void }) {
   const cb = React.useRef(onDrawn);
   cb.current = onDrawn;
   React.useEffect(() => {
-    cb.current?.(items.map((it) => it.id));
-  }, [items]);
+    cb.current?.(ink.drawnIds, ink.complete);
+  }, [ink]);
   return null;
 }
 
-function StrokeNode({ item, path }: { item: StrokeItem; path: SkPath }) {
+/** One stroke or shape drawn on its own (while a selection edit moves it). */
+function InkNode({ item, path }: { item: InkItem; path: SkPath }) {
+  if (item.type === 'shape') return <Path path={path} color={inkPaint('pen', item.color).rgb} style="stroke" strokeWidth={item.width} strokeCap="round" strokeJoin="round" />;
   const paint = inkPaint(item.tool, item.color);
-  if (item.tool === 'highlighter') {
-    return <Path path={path} color={paint.rgb} opacity={paint.alpha} blendMode="multiply" />;
-  }
+  if (item.tool === 'highlighter') return <Path path={path} color={paint.rgb} opacity={paint.alpha} blendMode="multiply" />;
   return <Path path={path} color={paint.rgb} />;
 }
 
@@ -170,7 +341,7 @@ function TextNode({ item, fonts }: { item: TextItem; fonts: SkTypefaceFontProvid
 }
 
 function ImageNode({ item, uri }: { item: ImageItem; uri: string }) {
-  const image = useImage(uri);
+  const image = usePageImage(uri);
   if (!image) return null;
   const node = <Image image={image} x={item.x} y={item.y} width={item.w} height={item.h} fit="fill" />;
   const t = turned(item.x, item.y, item.rot);
@@ -181,13 +352,16 @@ function ImageNode({ item, uri }: { item: ImageItem; uri: string }) {
  * The one renderer for finished page content (tech-spec §3): paper, PDF background, items in z-order,
  * selection outline and comment anchors. Runs on iOS/Android (Skia) and web/Electron (CanvasKit).
  */
-export function PageCanvas({ info, items, selection, anchors, pdfImage, width, assetUri, onDrawn, live }: PageCanvasProps) {
+export const PageCanvas = React.memo(function PageCanvas({ info, items, selection, anchors, pdfImage, width, assetUri, onDrawn, live }: PageCanvasProps) {
   const { w: pageW, h: pageH } = info.size;
   const scale = width / pageW;
   const height = Math.round(pageH * scale);
   const fonts = useFonts({ Figtree: [figtree] });
-  const pdf = useImage(pdfImage);
-  const strokePaths = useStrokePaths(items);
+  const pdf = usePageImage(pdfImage);
+  const bounds = React.useMemo(() => Skia.XYWHRect(-pageW, -pageH, pageW * 3, pageH * 3), [pageW, pageH]);
+  const liveIds = React.useMemo(() => (live?.ids.length ? new Set(live.ids) : null), [live?.ids]);
+  const liveMatrix = live ? liveTransform(live.transform) : undefined;
+  const ink = useInk(items, bounds, liveIds);
 
   const paper = React.useMemo(() => {
     const pattern = paperPattern(info.paper, info.paperColor, info.size);
@@ -200,25 +374,6 @@ export function PageCanvas({ info, items, selection, anchors, pdfImage, width, a
 
   const anchorColors = info.paperColor === 'night' ? ANCHOR.night : ANCHOR.light;
   const hairline = 1 / scale; // 1 px in page units
-
-  const liveIds = React.useMemo(() => (live?.ids.length ? new Set(live.ids) : null), [live?.ids]);
-  const liveMatrix = live ? liveTransform(live.transform) : undefined;
-  const itemNode = (it: Item): React.ReactElement | null => {
-    switch (it.type) {
-      case 'stroke': {
-        const path = strokePaths.get(it.id);
-        return path ? <StrokeNode key={it.id} item={it} path={path} /> : null;
-      }
-      case 'shape':
-        return <Path key={it.id} path={shapePath(it)} color={it.color} style="stroke" strokeWidth={it.width} strokeCap="round" strokeJoin="round" />;
-      case 'text':
-        return fonts ? <TextNode key={it.id} item={it} fonts={fonts} /> : null;
-      case 'image': {
-        const uri = assetUri?.(it.assetId);
-        return uri ? <ImageNode key={it.id} item={it} uri={uri} /> : null;
-      }
-    }
-  };
 
   const selectionBox = React.useMemo(() => {
     if (!selection?.length) return null;
@@ -250,8 +405,21 @@ export function PageCanvas({ info, items, selection, anchors, pdfImage, width, a
           );
         })}
 
-        {items.map((it) => {
-          const node = itemNode(it);
+        {ink.runs.map((run) => {
+          if (run.kind === 'ink') {
+            const picture = ink.pictures.get(run.key);
+            return picture ? <Picture key={run.key} picture={picture} /> : null;
+          }
+          const it = run.item;
+          let node: React.ReactElement | null = null;
+          if (it.type === 'stroke' || it.type === 'shape') {
+            const path = ink.alonePaths.get(it.id);
+            node = path ? <InkNode key={it.id} item={it} path={path} /> : null;
+          } else if (it.type === 'text') node = fonts ? <TextNode key={it.id} item={it} fonts={fonts} /> : null;
+          else {
+            const uri = assetUri?.(it.assetId);
+            node = uri ? <ImageNode key={it.id} item={it} uri={uri} /> : null;
+          }
           return node && liveIds?.has(it.id) ? (
             <Group key={it.id} transform={liveMatrix}>
               {node}
@@ -282,7 +450,7 @@ export function PageCanvas({ info, items, selection, anchors, pdfImage, width, a
           </Group>
         ))}
       </Group>
-      <DrawnProbe items={items} onDrawn={onDrawn} />
+      <DrawnProbe ink={ink} onDrawn={onDrawn} />
     </Canvas>
   );
-}
+});

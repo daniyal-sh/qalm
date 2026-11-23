@@ -289,3 +289,17 @@ describe('item read cache', () => {
     expect(back.type === 'stroke' && back.color).toBe('#0f766e');
   });
 });
+
+describe('item read cache and z-order', () => {
+  it('sees a reorder made earlier in the same transaction', () => {
+    const page = newPage();
+    page.addItem(stroke('a', 50, 100, 60, 120));
+    page.addItem(stroke('b', 70, 100, 80, 120));
+    expect(page.items().map((i) => i.id)).toEqual(['a', 'b']);
+    page.doc.transact(() => {
+      page.reorder(['a'], 'front');
+      expect(page.items().map((i) => i.id)).toEqual(['b', 'a']);
+    }, LOCAL_ORIGIN);
+    expect(page.items().map((i) => i.id)).toEqual(['b', 'a']);
+  });
+});
