@@ -251,6 +251,15 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   viewportRef.current = viewport;
   const zoomRef = React.useRef(zoom);
   zoomRef.current = zoom;
+  // When the page width changes (the page sidebar opens or closes, the window resizes), keep the same place in view.
+  const prevBase = React.useRef(base);
+  React.useEffect(() => {
+    const prev = prevBase.current;
+    prevBase.current = base;
+    if (prev === base) return;
+    const y = anchoredScroll(scrollYRef.current, viewportRef.current.h, prev, base);
+    requestAnimationFrame(() => vScroll.current?.scrollTo({ y, animated: false }));
+  }, [base]);
 
   const pinchScale = React.useRef(1);
   const pinch = usePinchGesture({

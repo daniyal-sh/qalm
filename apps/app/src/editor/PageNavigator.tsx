@@ -151,6 +151,8 @@ export function PageNavigator(props: PageNavigatorProps) {
   const list = React.useRef<FlatList<NavEntry[]>>(null);
   const scrollY = React.useRef(0);
   const viewH = React.useRef(0);
+  // The list's height once measured: the first scroll to the current page waits for it.
+  const [measuredH, setMeasuredH] = React.useState(0);
   const touchedAt = React.useRef(0);
   const currentRow = React.useMemo(() => {
     const i = entries.findIndex((e) => e.index === current);
@@ -160,8 +162,10 @@ export function PageNavigator(props: PageNavigatorProps) {
     if (currentRow < 0 || !viewH.current || Date.now() - touchedAt.current < 2000) return;
     const top = NAV_PAD + currentRow * layout.rowH;
     if (top >= scrollY.current && top + layout.rowH <= scrollY.current + viewH.current) return;
-    list.current?.scrollToOffset({ offset: Math.max(0, top - viewH.current / 3), animated: true });
-  }, [currentRow, layout.rowH]);
+    // Jump on opening; follow smoothly afterwards.
+    const first = scrollY.current === 0 && top > viewH.current;
+    list.current?.scrollToOffset({ offset: Math.max(0, top - viewH.current / 3), animated: !first });
+  }, [currentRow, layout.rowH, measuredH]);
 
   // ---- drag to reorder (All only) ----
   const [drag, setDrag] = React.useState<{ from: number; gap: number } | null>(null);
@@ -254,6 +258,7 @@ export function PageNavigator(props: PageNavigatorProps) {
         style={{ flex: 1 }}
         onLayout={(e) => {
           viewH.current = e.nativeEvent.layout.height;
+          setMeasuredH(e.nativeEvent.layout.height);
           measure();
         }}
         {...pan.panHandlers}
@@ -265,7 +270,6 @@ export function PageNavigator(props: PageNavigatorProps) {
             key={layout.columns}
             keyExtractor={(row) => row[0]!.info.id}
             getItemLayout={(_d, i) => ({ length: layout.rowH, offset: NAV_PAD + layout.rowH * i, index: i })}
-            initialScrollIndex={currentRow > 0 ? Math.max(0, currentRow - 1) : undefined}
             initialNumToRender={Math.max(4, Math.ceil(900 / layout.rowH)) * 1}
             windowSize={5}
             maxToRenderPerBatch={4}
