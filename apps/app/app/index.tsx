@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensio
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { folderCounts, visibleEntries, type LibraryFilter } from '../src/library/actions';
-import { DEFAULT_FORM, FolderTile, MoveSheet, NameSheet, NewNotebookSheet, NotebookCard } from '../src/library/components';
+import { CoverSheet, DEFAULT_FORM, FolderTile, MoveSheet, NameSheet, NewNotebookSheet, NotebookCard } from '../src/library/components';
 import { createNotebook, deleteForever, exportNotebook, importPdf, importQalm, updateNotebookMeta, type Ctx } from '../src/library/ops';
 import { pickFile } from '../src/lib/files';
 import { isPdf, isQalm } from '../src/lib/mime';
@@ -71,6 +71,7 @@ export default function LibraryScreen() {
   const [menu, setMenu] = React.useState<MenuState>(null);
   const [newOpen, setNewOpen] = React.useState(false);
   const [rename, setRename] = React.useState<LibraryEntry | null>(null);
+  const [coverFor, setCoverFor] = React.useState<LibraryEntry | null>(null);
   const [renameFolder, setRenameFolder] = React.useState<Folder | null>(null);
   const [newFolder, setNewFolder] = React.useState(false);
   const [move, setMove] = React.useState<LibraryEntry | null>(null);
@@ -141,6 +142,7 @@ export default function LibraryScreen() {
       : [
           { label: 'Open', icon: 'book-open', onPress: () => open(e.id) },
           { label: 'Rename', icon: 'edit-2', onPress: () => setRename(e) },
+          { label: 'Cover…', icon: 'book', onPress: () => setCoverFor(e) },
           { label: e.favorite ? 'Remove from favorites' : 'Add to favorites', icon: 'star', onPress: () => ctx.library.updateEntry(e.id, { favorite: !e.favorite }) },
           { label: 'Move to folder', icon: 'folder', onPress: () => setMove(e) },
           {
@@ -345,6 +347,16 @@ export default function LibraryScreen() {
           const id = await createNotebook(ctx, f, folderId);
           setNewOpen(false);
           open(id);
+        }}
+      />
+      <CoverSheet
+        visible={!!coverFor}
+        initial={{ title: coverFor?.title ?? '', cover: coverFor?.cover ?? '' }}
+        onClose={() => setCoverFor(null)}
+        onSave={(v) => {
+          const e = coverFor;
+          setCoverFor(null);
+          if (e && ctx) void run('Saving…', () => updateNotebookMeta(ctx, e.id, v));
         }}
       />
       <NameSheet

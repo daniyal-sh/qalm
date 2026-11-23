@@ -1,5 +1,5 @@
 import type { BBox, ImageItem, Item, PageInfo, ShapeItem, TextItem } from '@qalm/core';
-import { inkPaint, itemBBox, paperPattern, shapePolylines, strokeOutline } from '@qalm/core';
+import { inkPaint, itemBBox, itemsOnPaper, paperPattern, shapePolylines, strokeOutline } from '@qalm/core';
 import {
   BlendMode,
   Canvas,
@@ -330,8 +330,10 @@ function ImageNode({ item, uri }: { item: ImageItem; uri: string }) {
  * The one renderer for finished page content (tech-spec §3): paper, PDF background, items in z-order,
  * selection outline and comment anchors. Runs on iOS/Android (Skia) and web/Electron (CanvasKit).
  */
-export const PageCanvas = React.memo(function PageCanvas({ info, items, selection, anchors, pdfImage, width, assetUri, onDrawn, live }: PageCanvasProps) {
+export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, selection, anchors, pdfImage, width, assetUri, onDrawn, live }: PageCanvasProps) {
   const { w: pageW, h: pageH } = info.size;
+  // The default ink follows the paper colour (a page's paper can change after it was written on).
+  const items = React.useMemo(() => itemsOnPaper(stored, info.paperColor), [stored, info.paperColor]);
   const scale = width / pageW;
   const height = Math.round(pageH * scale);
   // Figtree, falling back to Noto Sans Math (maths symbols and Greek): see `TEXT_FONTS`.

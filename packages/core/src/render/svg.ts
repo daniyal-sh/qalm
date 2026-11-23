@@ -1,7 +1,7 @@
 import { strokeSvgPath } from '../geometry/stroke';
 import { inkPaint } from '../geometry/color';
 import { shapePolylines } from '../geometry/shape';
-import { paperPattern, DOT_RADIUS, RULE_WIDTH } from '../geometry/paper';
+import { itemsOnPaper, paperPattern, DOT_RADIUS, RULE_WIDTH } from '../geometry/paper';
 import { TEXT_LINE_HEIGHT } from '../geometry/bbox';
 import { escapeXml, wrapText } from './text';
 import type { Page } from '../model/page';
@@ -70,6 +70,6 @@ export function renderPageSvg(info: PageInfo, page: Page, opts: { paper?: boolea
       }
     }
   }
-  for (const item of page.items()) parts.push(itemSvg(item, { assetUrl: opts.assetUrl }));
+  for (const item of itemsOnPaper(page.items(), info.paperColor)) parts.push(itemSvg(item, { assetUrl: opts.assetUrl }));
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n(w)} ${n(h)}" width="${n(w)}" height="${n(h)}">${parts.join('')}</svg>`;
 }

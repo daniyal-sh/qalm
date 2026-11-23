@@ -1,4 +1,4 @@
-import type { Paper, PaperColor, Size } from '../types';
+import type { Item, Paper, PaperColor, Size } from '../types';
 
 export interface PaperPattern { lines: [number, number, number, number][]; dots: [number, number][]; stroke: string; bg: string }
 
@@ -14,9 +14,34 @@ export function inkOnPaper(color: string, paper: PaperColor | undefined): string
   return paper === 'night' && color.toLowerCase() === DEFAULT_INK ? NIGHT_INK : color;
 }
 
-/** The swatch a stored ink colour came from (the inverse of `inkOnPaper`), for ticking the current colour. */
-export function swatchOfInk(color: string, paper: PaperColor | undefined): string {
-  return paper === 'night' && color.toLowerCase() === NIGHT_INK ? DEFAULT_INK : color;
+/**
+ * The swatch a stored ink colour came from (the inverse of `inkOnPaper`), for ticking the current colour. Night ink is
+ * graphite on any paper: a page's paper colour can change after it was written on (see `itemsOnPaper`).
+ */
+export function swatchOfInk(color: string, _paper?: PaperColor): string {
+  return color.toLowerCase() === NIGHT_INK ? DEFAULT_INK : color;
+}
+
+const onNight = new WeakMap<Item, Item>();
+const onLight = new WeakMap<Item, Item>();
+
+/**
+ * Items as drawn on `paper`. The default ink follows the paper: graphite written on light paper is drawn as night ink on
+ * night paper and back, so changing a page's paper colour keeps its ink readable without rewriting it. Other colours
+ * are kept. A mapped item is the same object every time (per item and paper), so renderers' caches keep working.
+ */
+export function itemsOnPaper(items: Item[], paper: PaperColor | undefined): Item[] {
+  const night = paper === 'night';
+  const [from, to, cache] = night ? [DEFAULT_INK, NIGHT_INK, onNight] : [NIGHT_INK, DEFAULT_INK, onLight];
+  let changed = false;
+  const out = items.map((it) => {
+    if (it.type === 'image' || it.color.toLowerCase() !== from) return it;
+    changed = true;
+    let m = cache.get(it);
+    if (!m) cache.set(it, (m = { ...it, color: to }));
+    return m;
+  });
+  return changed ? out : items;
 }
 /** Rule line width and dot radius, in page units. */
 export const RULE_WIDTH = 0.5;

@@ -1,4 +1,4 @@
-import { inkPaint, paperPattern, shapePolylines, type Item, type PageInfo } from '@qalm/core';
+import { inkPaint, itemsOnPaper, paperPattern, shapePolylines, type Item, type PageInfo } from '@qalm/core';
 import { BlendMode, ImageFormat, PaintStyle, Skia, StrokeCap, StrokeJoin, type SkImage, type SkPaint } from '@shopify/react-native-skia';
 
 
@@ -63,7 +63,7 @@ export async function renderThumbnail({ info, items, background, width }: Thumbn
     }
   };
   const strokePaints = new Map<string, SkPaint>();
-  for (const it of items) {
+  for (const it of itemsOnPaper(items, info.paperColor)) {
     if (it.type === 'stroke' || it.type === 'shape') {
       const key = `${it.type}|${it.type === 'stroke' ? it.tool : ''}|${it.color}|${it.width}`;
       let p = strokePaints.get(key);

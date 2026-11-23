@@ -37,6 +37,8 @@ export interface PageNavigatorProps {
   onDuplicate(index: number): void;
   onDelete(index: number): void;
   onBookmark(index: number): void;
+  /** Change a page's paper (not offered for PDF pages). */
+  onPaper?(index: number): void;
 }
 
 /** The thumbnail for a page: requested only while its cell is mounted (on screen), re-rendered a moment after it changes. */
@@ -133,7 +135,7 @@ const Cell = React.memo(function Cell({ entry, layout, current, priority, thumbs
  * The list is virtualised and thumbnails render lazily, so it stays cheap with hundreds of pages.
  */
 export function PageNavigator(props: PageNavigatorProps) {
-  const { mode, width, pages, current, thumbs, onJump, onClose, onGoTo, onMove, onDuplicate, onDelete, onBookmark } = props;
+  const { mode, width, pages, current, thumbs, onJump, onClose, onGoTo, onMove, onDuplicate, onDelete, onBookmark, onPaper } = props;
   const { c } = useTheme();
   const [filter, setFilter] = React.useState<NavFilter>('all');
   const [menu, setMenu] = React.useState<{ items: MenuItem[]; anchor: { x: number; y: number } } | null>(null);
@@ -211,6 +213,7 @@ export function PageNavigator(props: PageNavigatorProps) {
       items: [
         { label: p.bookmarked ? 'Remove bookmark' : 'Bookmark', icon: 'bookmark', onPress: () => onBookmark(index) },
         { label: 'Duplicate', icon: 'copy', onPress: () => onDuplicate(index) },
+        ...(onPaper && p.background.kind === 'paper' ? [{ label: 'Paper…', icon: 'file' as const, onPress: () => onPaper(index) }] : []),
         ...(index > 0 ? [{ label: 'Move up', icon: 'arrow-up' as const, onPress: () => onMove(index, index - 1) }] : []),
         ...(index < pages.length - 1 ? [{ label: 'Move down', icon: 'arrow-down' as const, onPress: () => onMove(index, index + 1) }] : []),
         { label: 'Delete page', icon: 'trash-2', tone: 'bad', onPress: () => onDelete(index) },
