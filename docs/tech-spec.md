@@ -37,7 +37,7 @@ on screen (plus or minus 2) are loaded on the device. Durable Objects hold one d
 ```
 nb:{notebookId}            index doc
   meta:   Y.Map  { id, title, cover, paper, paperColor, size:{w,h}, orientation, aiAccess, aiPaused?, createdAt, updatedAt }
-  pages:  Y.Array<Y.Map>   { id, size:{w,h}, paper, paperColor, background: {kind:'paper'} | {kind:'pdf', assetId, pageIndex} }
+  pages:  Y.Array<Y.Map>   { id, size:{w,h}, paper, paperColor, background: {kind:'paper'} | {kind:'pdf', assetId, pageIndex}, bookmarked? }
   assets: Y.Map<assetId, {id, sha256, mime, name, bytes, pageCount?}>
   asks:   Y.Array<{id, pageId, text, at, sel?: {itemIds, bbox}, commentId?}>   sel: an Ask about a selection; commentId: its thread
 
@@ -90,6 +90,7 @@ class Notebook {                     // wraps the index doc
   constructor(doc: Y.Doc); readonly doc: Y.Doc
   meta(): NotebookMeta; setMeta(patch): void
   pages(): PageInfo[]; addPage(opts?: Partial<PageInfo>, index?: number): string; removePage(id): void; movePage(id, index): void
+  setBookmark(id, on): void; duplicatePage(id, newPageId?): string | null   // the copy's content: Page.copyFrom
   assets(): Asset[]; addAsset(a: Asset): void
   addAsk(pageId, text, extra?: { sel?, commentId? }): string; asks(): Ask[]
   observe(cb): () => void
@@ -106,6 +107,7 @@ class Page {                         // wraps one page doc
   observe(cb): () => void
 }
 createUndoManager(page: Page): Y.UndoManager   // tracks only local transactions (origin LOCAL_ORIGIN)
+createNotebookUndoManager(nb: Notebook): Y.UndoManager   // the page list: add, delete, move, duplicate, bookmark (one step each)
 class Library { constructor(doc: Y.Doc) /* folders and entries; CRUD */
   swatches(tool: SwatchTool): string[]; hasCustomSwatches(tool): boolean; setSwatches(tool, colors): void
   addSwatch(tool, color): boolean /* false: not a colour, already saved, or full */; moveSwatch(tool, color, index): void
@@ -317,6 +319,10 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
     Live agent: a presence pill ("Claude is following along", "… is thinking…" after an Ask until an agent entry arrives or 90 s;
     tap for what it can do, Pause sharing, Stop), open threads as cards in the margin beside the page when the gutter is ≥ 200 px
     (pins on the page otherwise, plus a toast when an agent writes), and an unread badge on Comments (per device, `seen:{notebookId}` in kv)
+  - Page navigator (top-bar "Pages"): thumbnails of every page, as a sidebar on windows ≥ 900 px wide and a full-screen grid below
+    that. Tap to jump, long-press and drag to reorder, bookmark (with a Bookmarks filter), duplicate and delete; the current page is
+    highlighted. Thumbnails render lazily (only cells on screen, one at a time, into an offscreen CPU surface as small JPEGs) and are
+    cached until the page changes. Desktop keys: PgUp / PgDn, Home / End, Ctrl+G (go to page; the "Page n of m" label opens it too).
   - Settings: Account, Pen and palm rejection, and AI access (connected agents, pending requests, activity log)
   - Sign-in
 - **Sync:** the client uses the `y-websocket` provider (with tickets) for each loaded doc, with IndexedDB persistence on web and file persistence on native.

@@ -1,6 +1,6 @@
-import { LOCAL_ORIGIN, Notebook, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem, type Page } from '@qalm/core';
+import { createNotebookUndoManager, LOCAL_ORIGIN, Notebook, Page, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem } from '@qalm/core';
 import { router } from 'expo-router';
-import { QalmInk } from 'qalm-ink';
+import { QalmInk, renderThumbnail } from 'qalm-ink';
 import * as React from 'react';
 import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, useWindowDimensions, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { GestureDetector, usePinchGesture } from 'react-native-gesture-handler';
@@ -12,7 +12,7 @@ import { NameSheet } from '../library/components';
 import { newId } from '../lib/id';
 import { kvGet, kvSet } from '../lib/kv';
 import { pickFile } from '../lib/files';
-import { docIds } from '../sync/docs';
+import { docIds, openLoaded } from '../sync/docs';
 import { useDoc, useLibraryData, useSession, useSyncStatus, useVersion } from '../state/session';
 import { useTheme } from '../theme/ThemeProvider';
 import { PEN_COLORS, HIGHLIGHTER_COLORS, radius, shadow2 } from '../theme/tokens';
@@ -31,6 +31,9 @@ import { SelectionThumb } from './SelectionThumb';
 import { PageView } from './PageView';
 import { SwatchStrip } from './Swatches';
 import { Toolbar } from './Toolbar';
+import { keyTarget, NAV_SIDEBAR_MIN, NAV_SIDEBAR_W, parseGoTo } from './navigator.logic';
+import { PageNavigator } from './PageNavigator';
+import { Thumbnails } from './thumbnails';
 import { CrossPageUndo } from './undoStack';
 import {
   anchoredScroll,
@@ -48,6 +51,8 @@ import {
 } from './view';
 
 const GAP = 44;
+/** The cross-page undo stack's id for the notebook's page list. */
+const PAGES_UNDO = '__pages';
 const DEFAULT_TOOLS: ToolState = {
   tool: 'pen',
   penColor: PEN_COLORS[0].hex,
@@ -119,6 +124,17 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       registry.clear();
     };
   }, [s.dm, registry, notebookId, undo]);
+  // Page-list changes (add, delete, move, duplicate, bookmark) are undo steps too, on the notebook's index doc.
+  React.useEffect(() => {
+    if (!notebook) return;
+    const um = createNotebookUndoManager(notebook);
+    const off = undo.attach(PAGES_UNDO, um);
+    return () => {
+      off();
+      undo.detach(PAGES_UNDO);
+      um.destroy();
+    };
+  }, [notebook, undo]);
 
   // ---- selection, text, comments ----
   const [selection, setSelection] = React.useState<Selection | null>(null);
@@ -235,6 +251,15 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   viewportRef.current = viewport;
   const zoomRef = React.useRef(zoom);
   zoomRef.current = zoom;
+  // When the page width changes (the page sidebar opens or closes, the window resizes), keep the same place in view.
+  const prevBase = React.useRef(base);
+  React.useEffect(() => {
+    const prev = prevBase.current;
+    prevBase.current = base;
+    if (prev === base) return;
+    const y = anchoredScroll(scrollYRef.current, viewportRef.current.h, prev, base);
+    requestAnimationFrame(() => vScroll.current?.scrollTo({ y, animated: false }));
+  }, [base]);
 
   const pinchScale = React.useRef(1);
   const pinch = usePinchGesture({
@@ -394,12 +419,21 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         ev.preventDefault();
         deleteSelection();
       } else if (k === 'escape') setSelection(null);
-      else if (mod) return;
+      else if (mod && k === 'g') {
+        ev.preventDefault();
+        openGoTo();
+      } else if (mod) return;
       else if (k === 'p') setTool('pen');
       else if (k === 'h') setTool('highlighter');
       else if (k === 'e') setTool('eraser');
       else if (k === 'l') setTool('lasso');
       else if (k === 't') setTool('text');
+      else if (!ev.altKey) {
+        const to = keyTarget(ev.key, currentRef.current, pagesRef.current.length);
+        if (to === null) return;
+        ev.preventDefault();
+        jumpToRef.current(to);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -432,8 +466,67 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   };
 
   const scrollToPage = (pageId: string) => {
-    const slot = slots.find((x) => x.id === pageId);
-    if (slot) vScroll.current?.scrollTo({ y: Math.max(0, slot.top - 80), animated: true });
+    const i = slots.findIndex((x) => x.id === pageId);
+    const slot = slots[i];
+    // Nearby pages scroll smoothly; far ones jump (an animated scroll past hundreds of pages would load them all).
+    if (slot) vScroll.current?.scrollTo({ y: Math.max(0, slot.top - 80), animated: Math.abs(i - current) <= 3 });
+  };
+  const jumpTo = (index: number) => {
+    const p = pages[index];
+    if (p) scrollToPage(p.id);
+  };
+  const jumpToRef = React.useRef(jumpTo);
+  jumpToRef.current = jumpTo;
+  const currentRef = React.useRef(current);
+  currentRef.current = current;
+  const pagesRef = React.useRef(pages);
+  pagesRef.current = pages;
+
+  // ---- page navigator ----
+  const navWide = win.width >= NAV_SIDEBAR_MIN;
+  const [navOpen, setNavOpen] = React.useState(false);
+  const [goTo, setGoTo] = React.useState<string | null>(null);
+  const openGoTo = () => setGoTo(String(currentRef.current + 1));
+  const thumbs = React.useMemo(
+    () =>
+      notebook
+        ? new Thumbnails({
+            dm: s.dm,
+            notebookId,
+            pdfUri: async (assetId) => {
+              const a = notebook.asset(assetId);
+              return a ? s.assets.uri(a) : null;
+            },
+            renderPdf: (uri, pageIndex, w) => QalmInk.renderPdfPage(uri, pageIndex, w),
+            draw: renderThumbnail,
+          })
+        : null,
+    [notebook, notebookId, s.dm, s.assets],
+  );
+  React.useEffect(() => () => thumbs?.dispose(), [thumbs]);
+  const duplicatePage = (index: number) =>
+    void run('Duplicating page…', async () => {
+      const src = pages[index];
+      if (!notebook || !src) return;
+      const id = newId();
+      // Content first (its own doc), then the page entry: one undo step that removes the copy.
+      const [a, b] = await Promise.all([openLoaded(s.dm, docIds.page(notebookId, src.id)), openLoaded(s.dm, docIds.page(notebookId, id))]);
+      try {
+        new Page(b.doc).copyFrom(new Page(a.doc), newId);
+      } finally {
+        a.release();
+        b.release();
+      }
+      notebook.duplicatePage(src.id, id);
+      showToast(`Page ${index + 1} duplicated`);
+    });
+  const toggleBookmark = (index: number) => {
+    const p = pages[index];
+    if (notebook && p) notebook.setBookmark(p.id, !p.bookmarked);
+  };
+  const movePage = (from: number, to: number) => {
+    const p = pages[from];
+    if (notebook && p && from !== to) notebook.movePage(p.id, to);
   };
 
   const addPage = (afterIndex?: number) => {
@@ -459,6 +552,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       anchor: { ...anchor, align: 'right' },
       items: [
         { label: 'Add page after', icon: 'plus', onPress: () => addPage(index) },
+        { label: 'Duplicate page', icon: 'copy', onPress: () => duplicatePage(index) },
+        { label: pages[index]?.bookmarked ? 'Remove bookmark' : 'Bookmark page', icon: 'bookmark', onPress: () => toggleBookmark(index) },
         { label: 'Move up', icon: 'arrow-up', onPress: () => index > 0 && notebook?.movePage(pages[index]!.id, index - 1) },
         { label: 'Move down', icon: 'arrow-down', onPress: () => index < pages.length - 1 && notebook?.movePage(pages[index]!.id, index + 1) },
         { label: 'Delete page', icon: 'trash-2', tone: 'bad', onPress: () => deletePage(index) },
@@ -614,12 +709,13 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         {/* Header */}
         <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.line }]}>
           <IconButton icon="chevron-left" label="Back to library" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+          <IconButton icon={navWide ? 'sidebar' : 'grid'} label="Pages" selected={navOpen} onPress={() => setNavOpen((x) => !x)} />
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text variant="bodyStrong" numberOfLines={1} onPress={() => setRenaming(true)}>
               {meta.title}
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text variant="meta" tone="faint">
+              <Text variant="meta" tone="faint" onPress={openGoTo} accessibilityRole="button" accessibilityHint="Go to a page">
                 Page {current + 1} of {pages.length}
               </Text>
               {!narrow ? syncPill : null}
@@ -655,6 +751,22 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         </View>
 
         <View style={{ flex: 1, flexDirection: 'row' }}>
+          {navOpen && navWide && thumbs ? (
+            <PageNavigator
+              mode="sidebar"
+              width={NAV_SIDEBAR_W}
+              pages={pages}
+              current={current}
+              thumbs={thumbs}
+              onJump={jumpTo}
+              onClose={() => setNavOpen(false)}
+              onGoTo={openGoTo}
+              onMove={movePage}
+              onDuplicate={duplicatePage}
+              onDelete={deletePage}
+              onBookmark={toggleBookmark}
+            />
+          ) : null}
           <View style={{ flex: 1 }} onLayout={(e) => setViewport({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
             <GestureDetector gesture={pinch}>
               <ScrollView horizontal scrollEnabled={contentW > viewport.w + 1} contentContainerStyle={{ width: contentW }} showsHorizontalScrollIndicator={contentW > viewport.w + 1}>
@@ -786,6 +898,27 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               </View>
             </View>
           ) : null}
+          {navOpen && !navWide && thumbs ? (
+            <View style={StyleSheet.absoluteFill}>
+              <PageNavigator
+                mode="grid"
+                width={win.width}
+                pages={pages}
+                current={current}
+                thumbs={thumbs}
+                onJump={(i) => {
+                  setNavOpen(false);
+                  jumpTo(i);
+                }}
+                onClose={() => setNavOpen(false)}
+                onGoTo={openGoTo}
+                onMove={movePage}
+                onDuplicate={duplicatePage}
+                onDelete={deletePage}
+                onBookmark={toggleBookmark}
+              />
+            </View>
+          ) : null}
         </View>
 
         {busy ? (
@@ -840,6 +973,49 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               <Toggle label="AI access" value={meta.aiAccess} onChange={(v) => notebook.setMeta({ aiAccess: v })} />
             </Row>
           </View>
+        </Sheet>
+
+        <Sheet
+          visible={goTo !== null}
+          onClose={() => setGoTo(null)}
+          title="Go to page"
+          width={360}
+          footer={
+            <>
+              <Button label="Cancel" onPress={() => setGoTo(null)} />
+              <Button
+                label="Go"
+                variant="primary"
+                disabled={parseGoTo(goTo ?? '', pages.length) === null}
+                onPress={() => {
+                  const i = parseGoTo(goTo ?? '', pages.length);
+                  setGoTo(null);
+                  if (i !== null) {
+                    setNavOpen((x) => x && navWide);
+                    jumpTo(i);
+                  }
+                }}
+              />
+            </>
+          }
+        >
+          <TextField
+            value={goTo ?? ''}
+            onChangeText={(v) => setGoTo(v.replace(/[^0-9]/g, ''))}
+            keyboardType="number-pad"
+            autoFocus
+            selectTextOnFocus
+            accessibilityLabel={`Page number, 1 to ${pages.length}`}
+            placeholder={`1–${pages.length}`}
+            onSubmitEditing={() => {
+              const i = parseGoTo(goTo ?? '', pages.length);
+              setGoTo(null);
+              if (i !== null) {
+                setNavOpen((x) => x && navWide);
+                jumpTo(i);
+              }
+            }}
+          />
         </Sheet>
 
         <NameSheet

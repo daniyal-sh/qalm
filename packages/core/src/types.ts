@@ -106,7 +106,11 @@ export interface NotebookMeta {
   updatedAt: number;
 }
 
-export interface PageInfo { id: string; size: Size; paper: Paper; paperColor: PaperColor; background: PageBackground }
+export interface PageInfo {
+  id: string; size: Size; paper: Paper; paperColor: PaperColor; background: PageBackground;
+  /** Bookmarked in the page navigator (missing = not bookmarked). */
+  bookmarked?: boolean;
+}
 export interface Asset { id: string; sha256: string; mime: string; name: string; bytes: number; pageCount?: number }
 /** What a selection Ask is about: the selected item ids and their page-space box. */
 export interface AskSelection { itemIds: string[]; bbox: BBox }

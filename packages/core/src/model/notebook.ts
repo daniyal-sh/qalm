@@ -7,18 +7,20 @@ export interface NotebookInit { id: string; title: string; cover: string; paper:
 
 function pageMap(p: PageInfo): Y.Map<unknown> {
   const m = new Y.Map<unknown>();
-  for (const [k, v] of Object.entries(p)) m.set(k, v);
+  for (const [k, v] of Object.entries(p)) if (v !== undefined) m.set(k, v);
   return m;
 }
 
 function readPage(m: Y.Map<unknown>): PageInfo {
-  return {
+  const p: PageInfo = {
     id: m.get('id') as string,
     size: m.get('size') as Size,
     paper: m.get('paper') as Paper,
     paperColor: m.get('paperColor') as PaperColor,
     background: (m.get('background') as PageInfo['background']) ?? { kind: 'paper' },
   };
+  if (m.get('bookmarked') === true) p.bookmarked = true;
+  return p;
 }
 
 /** Creates an index doc with one first page. */
@@ -110,6 +112,29 @@ export class Notebook {
     this.tx(() => {
       for (let i = this.pageArr.length - 1; i >= 0; i--) if (this.pageArr.get(i).get('id') === id) this.pageArr.delete(i, 1);
     });
+  }
+
+  /** Bookmarks (or un-bookmarks) a page. */
+  setBookmark(id: string, on: boolean): void {
+    this.tx(() => {
+      for (const m of this.pageArr.toArray()) {
+        if (m.get('id') !== id) continue;
+        if (on) m.set('bookmarked', true);
+        else m.delete('bookmarked');
+      }
+    });
+  }
+
+  /**
+   * Adds a copy of page `id`'s settings (size, paper, background) right after it, with a new id (not bookmarked).
+   * The page's content lives in its own doc: copy it with `Page.copyFrom`. Returns the new id, or null.
+   */
+  duplicatePage(id: string, newPageId: string = newId()): string | null {
+    const i = this.indexOf(id);
+    if (i < 0) return null;
+    const { bookmarked: _b, ...p } = readPage(this.pageArr.get(i));
+    this.tx(() => this.pageArr.insert(i + 1, [pageMap({ ...p, id: newPageId })]));
+    return newPageId;
   }
 
   /** Moves a page so it ends up at `index`. */

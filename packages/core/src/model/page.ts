@@ -289,6 +289,38 @@ export class Page {
     this.tx(() => this.commentMap.get(id)?.set('resolved', true));
   }
 
+  /**
+   * Copies another page's items (with new ids, same z-order, same line grouping and line text) into this one, in one
+   * transaction. Comments are not copied (they are threads about the original). Linear in the number of items.
+   */
+  copyFrom(src: Page, makeId: () => string = newId): void {
+    const ids = new Map<string, string>();
+    for (const id of src.orderedIds()) ids.set(id, makeId());
+    this.tx(() => {
+      this.dirty();
+      const order: string[] = [];
+      for (const [oldId, id] of ids) {
+        const from = src.itemMap.get(oldId)!;
+        const m = new Y.Map<unknown>();
+        this.itemMap.set(id, m);
+        from.forEach((v, k) => {
+          if (k === 'id') m.set('id', id);
+          else if (k === 'line') m.set('line', ids.get(v as string) ?? id);
+          else m.set(k, v instanceof Uint8Array ? v.slice() : Array.isArray(v) ? JSON.parse(JSON.stringify(v)) : v);
+        });
+        order.push(id);
+      }
+      this.order.push(order);
+      src.lineMap.forEach((e, key) => {
+        const k = ids.get(key);
+        if (!k) return;
+        const m = new Y.Map<unknown>();
+        this.lineMap.set(k, m);
+        e.forEach((v, f) => m.set(f, v));
+      });
+    });
+  }
+
   /** Called after every transaction that changed the page (local or remote). */
   observe(cb: (tx: Y.Transaction) => void): () => void {
     const h = (tx: Y.Transaction) => {

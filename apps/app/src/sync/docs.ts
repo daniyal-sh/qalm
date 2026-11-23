@@ -42,6 +42,7 @@ export class DocManager {
   private entries = new Map<string, Entry>();
   private evictListeners = new Set<(docId: string) => void>();
   private remoteListeners = new Set<() => void>();
+  private updateListeners = new Set<(docId: string) => void>();
   private clock = 0;
   private retain: (docId: string) => boolean = () => false;
 
@@ -66,6 +67,14 @@ export class DocManager {
     this.retain = fn ?? (() => false);
   }
 
+  /** Called when an open or cached doc changes after its local state loaded (local edits, sync, undo). */
+  onUpdate(cb: (docId: string) => void): () => void {
+    this.updateListeners.add(cb);
+    return () => {
+      this.updateListeners.delete(cb);
+    };
+  }
+
   /** Called after setRemote (providers were replaced). */
   onRemoteChange(cb: () => void): () => void {
     this.remoteListeners.add(cb);
@@ -80,6 +89,13 @@ export class DocManager {
       const doc = new Y.Doc({ guid: docId });
       e = { docId, doc, persistence: this.deps.persist(docId, doc), provider: null, refs: 0, lastUsed: 0 };
       this.entries.set(docId, e);
+      let loaded = false;
+      void e.persistence.whenSynced.then(() => {
+        loaded = true;
+      });
+      doc.on('update', () => {
+        if (loaded) for (const l of [...this.updateListeners]) l(docId);
+      });
     }
     const entry = e;
     entry.refs++;
