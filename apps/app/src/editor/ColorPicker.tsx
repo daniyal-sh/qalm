@@ -71,7 +71,9 @@ export interface ColorPickerProps {
  * The colour picker popover: a hue slider over a grid of solid tones for that hue, a hex field and, for the
  * highlighter, an opacity slider. "Add" saves the colour as a swatch and uses it; picking a saved colour just uses it.
  */
-export function ColorPicker({ visible, tool, initial, saved, anchor, onClose, onPick }: ColorPickerProps) {
+export function ColorPicker({ visible, tool, initial: given, saved, anchor, onClose, onPick }: ColorPickerProps) {
+  // The recolour bar passes '' when the selection has mixed colours.
+  const initial = normalizeColor(given) ?? '#27272a';
   const { c } = useTheme();
   const win = useWindowDimensions();
   const hl = tool === 'highlighter';
