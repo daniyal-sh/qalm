@@ -11,6 +11,10 @@ if (!config.resolver.sourceExts.includes('mjs')) config.resolver.sourceExts.push
 // Resolve tslib to its plain CommonJS build instead.
 const upstream = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  // lib0 (yjs) imports this on native; it isn't installed. See webcrypto-shim.js.
+  if (moduleName === 'isomorphic-webcrypto/src/react-native') {
+    return { type: 'sourceFile', filePath: path.join(__dirname, 'webcrypto-shim.js') };
+  }
   if (moduleName === 'tslib') {
     // Node's resolution picks the "require" condition: tslib.js.
     return { type: 'sourceFile', filePath: require.resolve('tslib', { paths: [path.dirname(context.originModulePath)] }) };
