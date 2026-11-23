@@ -3,9 +3,10 @@ import { InkOverlay, PageCanvas, QalmInk, type InkOverlayProps } from 'qalm-ink'
 import * as React from 'react';
 import { PixelRatio, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
+import { mark } from '../bench/hook';
 import { newId } from '../lib/id';
-import { docIds } from '../sync/docs';
-import { useDoc, useSession, useVersion } from '../state/session';
+import { docIds, openLoaded, type DocHandle } from '../sync/docs';
+import { useSession, useVersion } from '../state/session';
 import { smoothingLevel } from '../theme/ThemeProvider';
 import { font } from '../theme/tokens';
 import { useEditor } from './context';
@@ -13,7 +14,8 @@ import { DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, hitText, makeStroke, pointsBBox,
 import { isAdditive } from './modifiers';
 import { SelectionFrame, type LiveEdit } from './SelectionFrame';
 import { RecognitionScheduler } from './recognition';
-import { commentAnchors, pdfBucketWidth } from './view';
+import { pageDocQueue, pdfQueue } from './renderQueue';
+import { commentAnchors, pdfRenderWidth } from './view';
 
 const ACCENT = '#4338ca';
 /** A lasso that moved less than this (px) is a tap. */
@@ -46,24 +48,93 @@ function useAssetUris(ids: string[]): Map<string, string> {
   return map;
 }
 
-function usePdfBackground(info: PageInfo, width: number, zoom: number): string | undefined {
+function usePdfBackground(info: PageInfo, width: number, zoom: number, visible: boolean): string | undefined {
   const bg = info.background;
   const assetId = bg.kind === 'pdf' ? bg.assetId : null;
   const uris = useAssetUris(assetId ? [assetId] : []);
   const fileUri = assetId ? uris.get(assetId) : undefined;
-  const target = pdfBucketWidth(width, width / zoom, PixelRatio.get());
+  // A page scrolling out of view keeps the bitmap it has (no re-render at 1×); one mounted off screen starts at 1×.
+  const full = pdfRenderWidth(width, zoom, PixelRatio.get(), true);
+  const last = React.useRef<number | null>(null);
+  const target = visible ? full : last.current !== null && last.current <= full ? last.current : pdfRenderWidth(width, zoom, PixelRatio.get(), false);
+  last.current = target;
   const [png, setPng] = React.useState<string | undefined>();
   React.useEffect(() => {
     if (!fileUri || bg.kind !== 'pdf') return;
     let alive = true;
-    QalmInk.renderPdfPage(fileUri, bg.pageIndex, target)
-      .then((u) => alive && setPng(u))
-      .catch(() => undefined);
+    // Queued (2 at a time, newest first) and dropped if the page scrolls away before its turn.
+    const job = pdfQueue.request(() => QalmInk.renderPdfPage(fileUri, bg.pageIndex, target));
+    job.promise.then((u) => alive && setPng(u)).catch(() => undefined);
     return () => {
       alive = false;
+      job.cancel();
     };
   }, [fileUri, bg.kind === 'pdf' ? bg.pageIndex : -1, target]);
   return png;
+}
+
+/** Off-screen (overscan) pages open their doc a moment later, so the pages in view load and draw first. */
+function useDeferred(ready: boolean, delayMs = 200): boolean {
+  const [armed, setArmed] = React.useState(ready);
+  if (ready && !armed) setArmed(true);
+  React.useEffect(() => {
+    if (armed) return;
+    const t = setTimeout(() => setArmed(true), delayMs);
+    return () => clearTimeout(t);
+  }, [armed, delayMs]);
+  return armed;
+}
+
+/**
+ * Holds a page doc open while mounted, opened through `pageDocQueue` (nearest the current page first). The queue moves
+ * on once this page has drawn (`drawn()`) or 400 ms after its doc loaded. A doc still in memory opens right away.
+ */
+function usePageDoc(docId: string | null, priority: number): { h: DocHandle | null; drawn(): void } {
+  const { dm } = useSession();
+  const [h, setH] = React.useState<DocHandle | null>(null);
+  const done = React.useRef<() => void>(() => undefined);
+  const prio = React.useRef(priority);
+  prio.current = priority;
+  React.useEffect(() => {
+    if (!docId) return;
+    let alive = true;
+    let handle: DocHandle | null = null;
+    const open = (finish: () => void) =>
+      openLoaded(dm, docId).then(
+        (x) => {
+          if (!alive) {
+            x.release();
+            return finish();
+          }
+          handle = x;
+          setH(x);
+          setTimeout(finish, 400);
+        },
+        () => finish(),
+      );
+    let cancel = () => undefined as void;
+    if (dm.has(docId)) void open(() => undefined);
+    else {
+      const job = pageDocQueue.request(
+        () =>
+          new Promise<void>((resolve) => {
+            done.current = resolve;
+            void open(resolve);
+          }),
+        prio.current,
+      );
+      cancel = job.cancel;
+    }
+    return () => {
+      alive = false;
+      cancel();
+      done.current();
+      done.current = () => undefined;
+      setH(null);
+      handle?.release();
+    };
+  }, [dm, docId]);
+  return React.useMemo(() => ({ h, drawn: () => done.current() }), [h]);
 }
 
 /**
@@ -101,11 +172,17 @@ export interface PageViewProps {
   /** px */
   width: number;
   zoom: number;
+  /** In the viewport (not just mounted ahead of the scroll). */
+  visible?: boolean;
+  /** Load order: 0 for the current page, then by distance from it. */
+  priority?: number;
 }
 
-export function PageView({ info, index, width, zoom }: PageViewProps) {
+/** Memoised: scrolling and live zoom re-render the editor, not the pages (they change only with their props). */
+export const PageView = React.memo(function PageView({ info, index, width, zoom, visible = true, priority = 0 }: PageViewProps) {
   const ed = useEditor();
-  const h = useDoc(docIds.page(ed.notebookId, info.id));
+  const armed = useDeferred(visible);
+  const { h, drawn: pageDrawn } = usePageDoc(armed ? docIds.page(ed.notebookId, info.id) : null, priority);
   const page = React.useMemo(() => (h ? new Page(h.doc) : null), [h]);
   const sub = React.useMemo(() => (page ? (cb: () => void) => page.observe(cb) : null), [page]);
   const v = useVersion(sub);
@@ -132,7 +209,13 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
   }, [page, lines, comments, items, index]);
   React.useEffect(() => () => ed.reportPage(info.id, null), [info.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const pdf = usePdfBackground(info, width, zoom);
+  React.useEffect(() => {
+    if (page) mark('qalm:doc-loaded', { index });
+  }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pdf = usePdfBackground(info, width, zoom, visible);
+  React.useEffect(() => {
+    if (pdf) mark('qalm:pdf-ready', { index });
+  }, [pdf]); // eslint-disable-line react-hooks/exhaustive-deps
   const imageIds = React.useMemo(() => items.filter((i) => i.type === 'image').map((i) => (i as { assetId: string }).assetId), [items]);
   const imageUris = useAssetUris(imageIds);
 
@@ -199,12 +282,24 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
   const toPage = (wx: number, wy: number, fn: (x: number, y: number) => void) =>
     rootRef.current?.measureInWindow((x, y) => fn((wx - x) / scale, (wy - y) / scale));
 
-  if (!page) return <View style={{ width, height, backgroundColor: '#ffffff' }} />;
+  const anchors = React.useMemo(() => commentAnchors(lines, comments, ed.activeCommentId, items), [lines, comments, ed.activeCommentId, items]);
+  const assetUri = React.useCallback((id: string) => imageUris.get(id), [imageUris]);
+  const onDrawn = React.useCallback(
+    (ids: string[], complete: boolean) => {
+      drawn.set(ids);
+      if (complete) {
+        mark('qalm:page-drawn', { index, items: ids.length });
+        pageDrawn();
+      } else if (ids.length) mark('qalm:page-partial', { index, items: ids.length });
+    },
+    [drawn, index, pageDrawn],
+  );
+
+  if (!page) return <View style={{ width, height, backgroundColor: info.paperColor === 'night' ? '#1f1f23' : info.paperColor === 'cream' ? '#fbf7ee' : '#ffffff' }} />;
 
   const t = ed.tools;
   const inkTool = t.tool === 'text' ? 'none' : t.tool;
   const nightInk = info.paperColor === 'night' && t.penColor === '#27272a' ? '#e4e4e7' : t.penColor;
-  const anchors = commentAnchors(lines, comments, ed.activeCommentId, items);
 
   const tapText = (x: number, y: number) => {
     const hit = hitText(items, x, y);
@@ -237,8 +332,8 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
         live={liveCanvas}
         anchors={anchors}
         pdfImage={pdf}
-        assetUri={(id) => imageUris.get(id)}
-        onDrawn={drawn.set}
+        assetUri={assetUri}
+        onDrawn={onDrawn}
       />
       <HandoffInkOverlay
         drawn={drawn}
@@ -310,7 +405,8 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
       {editing ? <TextEditor page={page} itemId={editing} scale={scale} onDone={() => ed.setEditingText(null)} /> : null}
     </View>
   );
-}
+});
+
 
 function TextEditor({ page, itemId, scale, onDone }: { page: Page; itemId: string; scale: number; onDone(): void }) {
   const ed = useEditor();

@@ -6,6 +6,7 @@ import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, useWindowDi
 import { GestureDetector, usePinchGesture } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { mark } from '../bench/hook';
 import { exportNotebook, updateNotebookMeta } from '../library/ops';
 import { NameSheet } from '../library/components';
 import { newId } from '../lib/id';
@@ -41,6 +42,8 @@ import {
   mountedRange,
   penButtonTool,
   stepZoom,
+  viewKey,
+  windowRange,
   type ToolId,
 } from './view';
 
@@ -71,6 +74,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const meta = React.useMemo(() => notebook?.meta() ?? null, [notebook, ver]);
   const sync = useSyncStatus(h);
   const win = useWindowDimensions();
+  React.useEffect(() => mark('qalm:editor-mount'), []);
 
   // ---- tools ----
   const [tools, setTools] = React.useState<ToolState>(DEFAULT_TOOLS);
@@ -103,15 +107,18 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const undoSub = React.useCallback((cb: () => void) => undo.onChange(cb), [undo]);
   useVersion(undoSub);
   React.useEffect(() => {
+    const prefix = `pg:${notebookId}:`;
     const off = s.dm.onEvict((docId) => {
-      const prefix = `pg:${notebookId}:`;
       if (docId.startsWith(prefix)) registry.drop(docId.slice(prefix.length));
     });
+    // Pages with undo history stay in memory longest, so undo still reaches them after scrolling far away.
+    s.dm.setRetain((docId) => docId.startsWith(prefix) && undo.hasHistory(docId.slice(prefix.length)));
     return () => {
       off();
+      s.dm.setRetain(null);
       registry.clear();
     };
-  }, [s.dm, registry, notebookId]);
+  }, [s.dm, registry, notebookId, undo]);
 
   // ---- selection, text, comments ----
   const [selection, setSelection] = React.useState<Selection | null>(null);
@@ -191,10 +198,19 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const base = baseWidth(viewport.w);
   const slots = React.useMemo(() => layoutPages(pages, base, zoom, GAP, 96), [pages, base, zoom]);
   const totalH = contentHeight(slots, GAP) + 80;
-  const contentW = Math.max(viewport.w, Math.max(0, ...slots.map((x) => x.width)) + 48);
+  const widestPx = React.useMemo(() => slots.reduce((m, x) => Math.max(m, x.width), 0), [slots]);
+  const contentW = Math.max(viewport.w, widestPx + 48);
   const [first, last] = mountedRange(slots, scrollY, viewport.h, 2);
+  const [visFirst, visLast] = mountedRange(slots, scrollY, viewport.h, 0);
+  // Only pages near the viewport are rendered at all (placeholders beyond the mounted ones), not one view per page.
+  const [winFirst, winLast] = windowRange([first, last], slots.length);
+  // Scroll events re-render the editor only when what it shows changes (mounted / visible / current page).
+  const slotsRef = React.useRef(slots);
+  slotsRef.current = slots;
+  const shownKey = React.useRef('');
+  shownKey.current = viewKey(slots, scrollY, viewport.h);
   // Comment cards sit in the margin beside the page when there's room; otherwise pins on the page and the panel.
-  const gutter = (contentW - Math.max(0, ...slots.map((x) => x.width))) / 2;
+  const gutter = (contentW - widestPx) / 2;
   const wideMargin = gutter >= 200;
   const marginW = Math.min(240, gutter - 40);
   const current = currentPageIndex(slots, scrollY, viewport.h);
@@ -203,6 +219,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const commitZoom = React.useCallback(
     (next: number) => {
       const z = clampZoom(next);
+      mark('qalm:zoom-commit', z);
       setLiveScale(1);
       setZoom((prev) => {
         if (Math.abs(z - prev) < 1e-3) return prev;
@@ -646,12 +663,14 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                   style={{ width: contentW, height: viewport.h }}
                   scrollEventThrottle={32}
                   onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
-                    scrollYRef.current = e.nativeEvent.contentOffset.y;
-                    setScrollY(e.nativeEvent.contentOffset.y);
+                    const y = e.nativeEvent.contentOffset.y;
+                    scrollYRef.current = y;
+                    if (viewKey(slotsRef.current, y, viewportRef.current.h) !== shownKey.current) setScrollY(y);
                   }}
                 >
                   <View style={{ width: contentW, height: totalH, transform: liveScale !== 1 ? [{ scale: liveScale }] : undefined, transformOrigin: 'top center' }}>
-                    {slots.map((slot, i) => {
+                    {slots.slice(winFirst, winLast + 1).map((slot, k) => {
+                      const i = winFirst + k;
                       const info = pages[i]!;
                       const left = (contentW - slot.width) / 2;
                       const data = i >= first && i <= last ? pageData.get(info.id) : undefined;
@@ -660,7 +679,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                         <React.Fragment key={slot.id}>
                           <View style={[styles.page, { left, top: slot.top, width: slot.width, height: slot.height, borderColor: c.line }]}>
                             {i >= first && i <= last ? (
-                              <PageView info={info} index={i} width={slot.width} zoom={zoom} />
+                              <PageView info={info} index={i} width={slot.width} zoom={zoom} visible={i >= visFirst && i <= visLast} priority={Math.abs(i - current)} />
                             ) : (
                               <View style={{ flex: 1, backgroundColor: info.paperColor === 'night' ? '#1f1f23' : info.paperColor === 'cream' ? '#fbf7ee' : '#ffffff' }} />
                             )}

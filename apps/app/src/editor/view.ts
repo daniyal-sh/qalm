@@ -31,10 +31,41 @@ export function pageWidthPx(page: Pick<PageInfo, 'size'>, widestPageW: number, b
  * The PDF background render width: the nearest bucket (1×, 2× or 4× the zoom-1 width) at or above
  * the displayed width, times the device pixel ratio, so zooming doesn't re-render on every step.
  */
-export function pdfBucketWidth(displayW: number, zoom1W: number, pixelRatio = 1): number {
+export function pdfBucketWidth(displayW: number, zoom1W: number, pixelRatio = 1, maxPx = PDF_MAX_PX): number {
   const ratio = displayW / zoom1W;
   const bucket = ratio <= 1.001 ? 1 : ratio <= 2.001 ? 2 : 4;
-  return Math.round(zoom1W * bucket * Math.max(1, Math.min(pixelRatio, 3)));
+  return Math.min(maxPx, Math.round(zoom1W * bucket * Math.max(1, Math.min(pixelRatio, 3))));
+}
+
+/** Widest PDF background bitmap (px): an A4 page at 4096 px is 4096×5797, ~95 MB of RGBA, so never wider. */
+export const PDF_MAX_PX = 4096;
+
+/**
+ * The PDF background width for a page: pages in view get their zoom bucket; pages only mounted ahead of the scroll
+ * (overscan) get the 1× bucket, so zooming in never keeps several huge bitmaps alive off screen.
+ */
+export function pdfRenderWidth(displayW: number, zoom: number, pixelRatio: number, visible: boolean): number {
+  const zoom1W = displayW / zoom;
+  return pdfBucketWidth(visible ? displayW : Math.min(displayW, zoom1W), zoom1W, pixelRatio);
+}
+
+/**
+ * Pages to render at all (placeholders included): the mounted range plus `extra` pages of plain page outlines on
+ * each side, so a fast fling shows page shapes without rendering hundreds of views.
+ */
+export function windowRange([first, last]: [number, number], count: number, extra = 6): [number, number] {
+  if (count === 0 || last < first) return [0, -1];
+  return [Math.max(0, first - extra), Math.min(count - 1, last + extra)];
+}
+
+/**
+ * A key for what the editor shows at scroll offset `y`: it re-renders only when this changes, not on every
+ * scroll event.
+ */
+export function viewKey(slots: PageSlot[], y: number, viewportH: number, overscan = 2): string {
+  const [f, l] = mountedRange(slots, y, viewportH, overscan);
+  const [vf, vl] = mountedRange(slots, y, viewportH, 0);
+  return `${f}:${l}:${vf}:${vl}:${currentPageIndex(slots, y, viewportH)}`;
 }
 
 export interface PageSlot {
