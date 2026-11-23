@@ -131,7 +131,7 @@ export function PresencePill({
         ]}
       >
         <Dot color={fg} on={thinking && !paused} />
-        <Text variant="meta" numberOfLines={1} style={{ color: fg, fontWeight: '600', maxWidth: compact ? 120 : 260 }}>
+        <Text variant="meta" numberOfLines={1} style={{ color: fg, fontWeight: '600', maxWidth: compact ? 120 : 260, flexShrink: 1 }}>
           {label}
         </Text>
       </Pressable>
@@ -254,7 +254,8 @@ export function MarginCard({
 }
 
 const styles = StyleSheet.create({
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 26, paddingHorizontal: 10, borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth },
+  // Shrinks (its label ellipsizes) instead of pushing past the title column onto Undo / Redo on a phone.
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 26, paddingHorizontal: 10, borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth, flexShrink: 1, minWidth: 0 },
   dot: { width: 7, height: 7, borderRadius: 4 },
   pop: { position: 'absolute', width: 320, maxWidth: '96%', padding: 14, gap: 10, borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth },
   card: { borderRadius: radius.control, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7, gap: 2, overflow: 'hidden' },

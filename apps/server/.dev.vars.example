@@ -1,6 +1,9 @@
 # Copy to .dev.vars (gitignored) for `wrangler dev`. In production set these with `wrangler secret put`.
 JWT_SECRET=dev-only-change-me-at-least-32-characters-long
 # PUBLIC_URL=https://api.qalm.app
+# Testing on an Android emulator (http://10.0.2.2:8787) or a device on your LAN: set PUBLIC_URL to the loopback
+# origin, e.g. http://127.0.0.1:8787. Otherwise the OAuth provider rejects the plain-http, non-loopback origin taken
+# from the request and every request fails with a 500.
 # Where app sign-in links point: the web app's /auth/email/verify route (it POSTs the token; GET never uses a link up).
 # wrangler.jsonc sets the production value; for local dev point it at the Expo web server:
 MAGIC_LINK_URL=http://localhost:8081/auth/email/verify

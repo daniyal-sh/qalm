@@ -1,6 +1,7 @@
 import { frameCorners, moveBy, resizeSim, rotateSim, selectionFrame, textWidthPatch, type Frame, type Item, type TextItem } from '@qalm/core';
 import * as React from 'react';
-import { PanResponder, Platform, StyleSheet, View, type GestureResponderEvent, type PanResponderGestureState } from 'react-native';
+import { PanResponder, Platform, StyleSheet, View } from 'react-native';
+import { GestureDetector, usePanGesture, type PanGesture } from 'react-native-gesture-handler';
 
 import { Icon } from '../ui/Icon';
 import { liveFrame, type LiveEdit } from './selection.logic';
@@ -37,29 +38,67 @@ export interface SelectionFrameProps {
 const cursor = (c: string) => (Platform.OS === 'web' ? ({ cursor: c } as object) : null);
 
 interface DragHandlers {
-  start?(g: PanResponderGestureState, e: GestureResponderEvent): void;
+  /** Where the press started, in window coordinates. */
+  start?(x0: number, y0: number): void;
   move(dx: number, dy: number): void;
-  end(dx: number, dy: number, g: PanResponderGestureState): void;
+  end(dx: number, dy: number): void;
 }
 
-/** A PanResponder that owns the gesture until it ends (the page must not scroll or draw meanwhile). */
-function useDrag(h: DragHandlers, onCancel: () => void) {
-  const ref = React.useRef({ h, onCancel });
-  ref.current = { h, onCancel };
-  return React.useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: (e, g) => ref.current.h.start?.(g, e),
-        onPanResponderMove: (_e, g) => ref.current.h.move(g.dx, g.dy),
-        onPanResponderRelease: (_e, g) => ref.current.h.end(g.dx, g.dy, g),
-        onPanResponderTerminate: () => ref.current.onCancel(),
-      }).panHandlers,
-    [],
-  );
-}
+/** A drag that owns the gesture until it ends (the page must not scroll or draw meanwhile). */
+type Drag = { panHandlers: object } | { gesture: PanGesture };
+
+/**
+ * Web: a PanResponder. iOS / Android: a gesture-handler pan. A PanResponder is granted asynchronously there, so a
+ * native ScrollView takes a quick drag (past its touch slop) first and the page scrolls instead of the selection
+ * moving; a gesture-handler pan is recognised natively, before the ScrollView, and then cancels it.
+ */
+const useDrag: (h: DragHandlers, onCancel: () => void) => Drag =
+  Platform.OS === 'web'
+    ? function useResponderDrag(h, onCancel) {
+        const ref = React.useRef({ h, onCancel });
+        ref.current = { h, onCancel };
+        return React.useMemo(
+          () => ({
+            panHandlers: PanResponder.create({
+              onStartShouldSetPanResponder: () => true,
+              onMoveShouldSetPanResponder: () => true,
+              onPanResponderTerminationRequest: () => false,
+              onPanResponderGrant: (_e, g) => ref.current.h.start?.(g.x0, g.y0),
+              onPanResponderMove: (_e, g) => ref.current.h.move(g.dx, g.dy),
+              onPanResponderRelease: (_e, g) => ref.current.h.end(g.dx, g.dy),
+              onPanResponderTerminate: () => ref.current.onCancel(),
+            }).panHandlers,
+          }),
+          [],
+        );
+      }
+    : function useNativeDrag(h, onCancel) {
+        const ref = React.useRef({ h, onCancel });
+        ref.current = { h, onCancel };
+        const moved = React.useRef<[number, number]>([0, 0]);
+        const active = React.useRef(false);
+        const gesture = usePanGesture({
+          runOnJS: true,
+          disableReanimated: true,
+          minDistance: 0,
+          maxPointers: 1,
+          onBegin: (e) => {
+            moved.current = [0, 0];
+            active.current = false;
+            ref.current.h.start?.(e.absoluteX, e.absoluteY);
+          },
+          onActivate: () => {
+            active.current = true;
+          },
+          onUpdate: (e) => {
+            moved.current = [e.translationX, e.translationY];
+            ref.current.h.move(e.translationX, e.translationY);
+          },
+          // A press that never moved "fails" (canceled): that is a tap, which end() turns into onTap.
+          onFinalize: (e) => (e.canceled && active.current ? ref.current.onCancel() : ref.current.h.end(...moved.current)),
+        });
+        return { gesture };
+      };
 
 /**
  * The selection's frame on the page: drag inside to move, corner handles to resize (uniform, so images keep their
@@ -93,7 +132,7 @@ export function SelectionFrame({ items, scale, live, onLive, onCommit, onTap, ni
 
   const body = useDrag(
     {
-      start: (g) => base && (g0.current = { frame: base, at: [g.x0, g.y0] }),
+      start: (x0, y0) => base && (g0.current = { frame: base, at: [x0, y0] }),
       move: (dx, dy) => g0.current && (Math.abs(dx) > TAP_SLOP || Math.abs(dy) > TAP_SLOP || liveRef.current) && onLive({ kind: 'sim', sim: moveBy(dx * k, dy * k) }),
       end: (dx, dy) => {
         const at = g0.current?.at;
@@ -167,21 +206,22 @@ export function SelectionFrame({ items, scale, live, onLive, onCommit, onTap, ni
   const W = bw + m * 2;
   const H = bh + m + top;
 
-  const handle = (key: string, x: number, y: number, pan: object, label: string, cur: string, shape: 'square' | 'bar' | 'round') => (
-    <View
+  const handle = (key: string, x: number, y: number, pan: Drag, label: string, cur: string, shape: 'square' | 'bar' | 'round') => (
+    <Draggable
       key={key}
-      {...pan}
+      drag={pan}
       accessibilityLabel={label}
       style={[styles.hit, { left: x - HIT / 2, top: y - HIT / 2 }, cursor(cur)]}
     >
       {shape === 'round' ? (
-        <View style={[styles.knob, knob, styles.round]}>
+        // The icon (a Text) must not take the touch from the handle (gesture-handler on Android).
+        <View pointerEvents="none" style={[styles.knob, knob, styles.round]}>
           <Icon name="rotate-cw" size={11} color={accent.line} />
         </View>
       ) : (
-        <View style={[styles.knob, knob, shape === 'bar' ? styles.bar : styles.square]} />
+        <View pointerEvents="none" style={[styles.knob, knob, shape === 'bar' ? styles.bar : styles.square]} />
       )}
-    </View>
+    </Draggable>
   );
 
   const deg = (frame.rot * 180) / Math.PI;
@@ -194,6 +234,9 @@ export function SelectionFrame({ items, scale, live, onLive, onCommit, onTap, ni
   return (
     <View
       pointerEvents="box-none"
+      // Always a real native view: a layout-only view is flattened away until a live rotation gives it a transform,
+      // and re-parenting the handles then cancels the rotate drag (gesture-handler, Android).
+      collapsable={false}
       style={{
         position: 'absolute',
         left: frame.cx * scale - bw / 2 - m,
@@ -207,7 +250,7 @@ export function SelectionFrame({ items, scale, live, onLive, onCommit, onTap, ni
     >
       {/* the rotate handle's stem */}
       <View pointerEvents="none" style={[styles.stem, { backgroundColor: accent.line, left: m + bw / 2 - 0.5, top: top - ROT_OFF + 8, height: ROT_OFF - 8 }]} />
-      <View {...body} accessibilityLabel="Move selection" style={[styles.box, line, { left: m, top, width: bw, height: bh }, cursor('move')]} />
+      <Draggable drag={body} accessibilityLabel="Move selection" style={[styles.box, line, { left: m, top, width: bw, height: bh }, cursor('move')]} />
       {textOnly ? (
         <>
           {handle('l', m, top + bh / 2, left, 'Text box width', resizeCursor(1), 'bar')}
@@ -223,6 +266,22 @@ export function SelectionFrame({ items, scale, live, onLive, onCommit, onTap, ni
       )}
       {handle('rot', m + bw / 2, top - ROT_OFF, rotate, 'Rotate selection', 'grab', 'round')}
     </View>
+  );
+}
+
+/** A view that a {@link Drag} moves: the responder's handlers on web, wrapped in a GestureDetector on native. */
+function Draggable({ drag, children, ...props }: React.ComponentProps<typeof View> & { drag: Drag }) {
+  if ('panHandlers' in drag) {
+    return (
+      <View {...props} {...drag.panHandlers}>
+        {children}
+      </View>
+    );
+  }
+  return (
+    <GestureDetector gesture={drag.gesture}>
+      <View {...props}>{children}</View>
+    </GestureDetector>
   );
 }
 

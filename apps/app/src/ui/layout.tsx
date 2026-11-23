@@ -12,6 +12,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { useTheme } from '../theme/ThemeProvider';
 import { radius, shadow1, shadow2 } from '../theme/tokens';
 import { IconButton } from './controls';
@@ -147,6 +149,7 @@ export function Sheet({
 }) {
   const { c } = useTheme();
   const win = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const narrow = win.width < 640;
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} supportedOrientations={['portrait', 'landscape']}>
@@ -158,7 +161,8 @@ export function Sheet({
               styles.sheet,
               shadow2,
               { backgroundColor: c.surface, borderColor: c.line, maxHeight: win.height * (narrow ? 0.92 : 0.88) },
-              narrow ? { width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 } : { width: Math.min(width, win.width - 48) },
+              // Docked: clear the Android gesture / nav bar (the modal is drawn edge to edge).
+              narrow ? { width: '100%', borderBottomLeftRadius: 0, borderBottomRightRadius: 0, paddingBottom: insets.bottom } : { width: Math.min(width, win.width - 48) },
             ]}
           >
             {title ? (
@@ -247,6 +251,7 @@ export function Menu({
 /** Small transient message at the bottom (solid surface). */
 export function useToast(): [React.ReactNode, (msg: string) => void] {
   const { c } = useTheme();
+  const insets = useSafeAreaInsets();
   const [msg, setMsg] = React.useState<string | null>(null);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const show = React.useCallback((m: string) => {
@@ -258,7 +263,7 @@ export function useToast(): [React.ReactNode, (msg: string) => void] {
     if (timer.current) clearTimeout(timer.current);
   }, []);
   const node = msg ? (
-    <View pointerEvents="none" style={styles.toastWrap}>
+    <View pointerEvents="none" style={[styles.toastWrap, { bottom: 28 + insets.bottom }]}>
       <View style={[styles.toast, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
         <Text variant="label">{msg}</Text>
       </View>
