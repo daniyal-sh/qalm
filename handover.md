@@ -97,7 +97,8 @@ apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Objec
   - **Retractions:** an OS cancel retracts the stroke, as does a second finger or a contact that grows into a palm.
   - **Fingers:** with "pen only" they scroll; a rejected palm never scrolls.
   - **Parity:** the same rules apply on iOS, Android and web.
-- **Hand-off:** the overlay keeps a finished stroke on screen until its id shows up in `committedIds`, with a 4 s fallback.
+- **Hand-off:** the overlay keeps a finished stroke on screen until its id shows up in `committedIds` (reported by
+  `PageCanvas`'s `onDrawn` once Skia has it) plus 2 frames (web) or 50 ms (native), with a 4 s fallback.
   On native, the brush-width prop is `strokeWidth`. The name `width` collided with Fabric's layout width.
 - **Server (§4):**
   - **Sync:** one-time 30 s sync tickets (`POST /sync/ticket`, then `/sync/{docId}?ticket=`). DocRoom uses

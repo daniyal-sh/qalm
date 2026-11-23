@@ -54,7 +54,10 @@ export interface InkOverlayProps {
   /** page units */
   width: number;
   input: InkInputSettings;
-  /** stroke ids already drawn by PageCanvas */
+  /**
+   * Stroke ids already drawn by PageCanvas: pass the newest ids from PageCanvas's `onDrawn`, not the page's items (Skia
+   * shows new items a few frames after React commits them). A finished stroke stays a short hand-off after its id arrives.
+   */
   committedIds: string[];
   onStrokeEnd(e: { nativeEvent: StrokeEndEvent }): void;
   /** Emitted while erasing: each event carries the path segment since the previous event (page units). */

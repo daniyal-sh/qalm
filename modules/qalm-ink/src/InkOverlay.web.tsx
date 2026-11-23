@@ -21,6 +21,12 @@ const HOLD_MOVE_MM = 1;
 const LASSO_COLOR = '#4338ca'; // brand accent
 /** A finished stroke whose id never reaches committedIds (e.g. snapped to a shape) is dropped after this. */
 const PENDING_FALLBACK_MS = 4000;
+/**
+ * Animation frames a finished stroke stays on the overlay after its id reaches `committedIds` (PageCanvas's onDrawn):
+ * the WebGL canvas shows its new picture up to a couple of frames after Skia has it. 1 frame still left blank frames
+ * in headless Chrome now and then; 2 never did (tech-spec §3).
+ */
+const HANDOFF_FRAMES = 2;
 
 type Kind = 'ink' | 'erase' | 'lasso';
 
@@ -43,6 +49,8 @@ interface Live {
 
 interface Finished {
   id: string;
+  /** Set once the id is in committedIds and the drop is scheduled. */
+  dropping?: boolean;
   color: string;
   alpha: number;
   path: Path2D;
@@ -55,6 +63,11 @@ function uuid(): string {
   b[8] = (b[8]! & 0x3f) | 0x80;
   const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+function afterFrames(n: number, fn: () => void) {
+  if (n <= 0) fn();
+  else requestAnimationFrame(() => afterFrames(n - 1, fn));
 }
 
 function outlinePath(tool: 'pen' | 'highlighter', width: number, pts: InkPoint[]): Path2D {
@@ -87,13 +100,19 @@ export function InkOverlay(props: InkOverlayProps) {
     draw: () => {},
   });
 
-  // Drop finished strokes once PageCanvas has drawn them.
+  // Drop finished strokes once PageCanvas has drawn them: a few frames after their id shows up in committedIds.
   React.useEffect(() => {
     const s = state.current;
     const committed = new Set(props.committedIds);
-    const before = s.finished.length;
-    s.finished = s.finished.filter((f) => !committed.has(f.id));
-    if (s.finished.length !== before) s.draw();
+    for (const f of s.finished) {
+      if (f.dropping || !committed.has(f.id)) continue;
+      f.dropping = true;
+      afterFrames(HANDOFF_FRAMES, () => {
+        const before = s.finished.length;
+        s.finished = s.finished.filter((x) => x !== f);
+        if (s.finished.length !== before) s.draw();
+      });
+    }
   }, [props.committedIds]);
 
   React.useEffect(() => {

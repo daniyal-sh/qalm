@@ -1,5 +1,5 @@
 import { hitTestErase, lassoSelect, LOCAL_ORIGIN, Page, snapShape, type Item, type PageInfo, type TextItem } from '@qalm/core';
-import { InkOverlay, PageCanvas, QalmInk } from 'qalm-ink';
+import { InkOverlay, PageCanvas, QalmInk, type InkOverlayProps } from 'qalm-ink';
 import * as React from 'react';
 import { PanResponder, PixelRatio, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
@@ -58,6 +58,35 @@ function usePdfBackground(info: PageInfo, width: number, zoom: number): string |
   return png;
 }
 
+/**
+ * The ids PageCanvas has actually drawn (its `onDrawn`), newest 64. Kept outside PageView's state so a report only
+ * re-renders the overlay, not the whole page.
+ */
+function createDrawnIds() {
+  let ids: string[] = [];
+  const subs = new Set<() => void>();
+  return {
+    get: () => ids,
+    set: (all: string[]) => {
+      const next = all.slice(-64);
+      if (next.length === ids.length && next.every((id, i) => id === ids[i])) return; // e.g. a selection drag
+      ids = next;
+      subs.forEach((f) => f());
+    },
+    subscribe: (f: () => void) => {
+      subs.add(f);
+      return () => void subs.delete(f);
+    },
+  };
+}
+type DrawnIds = ReturnType<typeof createDrawnIds>;
+
+/** The overlay keeps drawing a finished stroke until PageCanvas reports it drawn (tech-spec §3, hand-off). */
+function HandoffInkOverlay({ drawn, ...props }: Omit<InkOverlayProps, 'committedIds'> & { drawn: DrawnIds }) {
+  const committedIds = React.useSyncExternalStore(drawn.subscribe, drawn.get);
+  return <InkOverlay {...props} committedIds={committedIds} />;
+}
+
 export interface PageViewProps {
   info: PageInfo;
   index: number;
@@ -112,6 +141,7 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
   }, [items, drag, sel, selSet, editing]);
   const selBox = React.useMemo(() => (sel ? unionBBox(shown.filter((i) => selSet.has(i.id)).map(itemBBox)) : null), [shown, sel, selSet]);
 
+  const drawn = React.useMemo(createDrawnIds, []);
   const rootRef = React.useRef<React.ComponentRef<typeof View>>(null);
   const pageRef = React.useRef(page);
   pageRef.current = page;
@@ -151,8 +181,6 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
   const inkTool = t.tool === 'text' ? 'none' : t.tool;
   const nightInk = info.paperColor === 'night' && t.penColor === '#27272a' ? '#e4e4e7' : t.penColor;
   const anchors = commentAnchors(lines, comments, ed.activeCommentId);
-  // The newest items: the overlay keeps drawing a finished stroke until its id shows up here.
-  const committedIds = items.slice(-64).map((i) => i.id);
 
   const tapText = (x: number, y: number) => {
     const hit = hitText(items, x, y);
@@ -186,14 +214,15 @@ export function PageView({ info, index, width, zoom }: PageViewProps) {
         anchors={anchors}
         pdfImage={pdf}
         assetUri={(id) => imageUris.get(id)}
+        onDrawn={drawn.set}
       />
-      <InkOverlay
+      <HandoffInkOverlay
+        drawn={drawn}
         pageSize={info.size}
         tool={inkTool}
         color={t.tool === 'highlighter' ? t.hlColor : nightInk}
         width={t.tool === 'highlighter' ? t.hlWidth : t.tool === 'eraser' ? t.eraserRadius * 2 : t.penWidth}
         input={ed.input}
-        committedIds={committedIds}
         onStrokeEnd={({ nativeEvent: e }) => {
           ed.touchPage(info.id);
           const shape = t.snapShapes && e.tool === 'pen' ? snapShape(e.points, e.heldMs) : null;

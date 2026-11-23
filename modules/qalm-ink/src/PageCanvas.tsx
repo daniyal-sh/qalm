@@ -40,6 +40,11 @@ export interface PageCanvasProps {
   width: number;
   /** Resolves an ImageItem's assetId to a loadable uri. Images without one are skipped. */
   assetUri?: (assetId: string) => string | undefined;
+  /**
+   * Called with the item ids in z-order once Skia has committed them, i.e. its new picture has been handed to the
+   * view. Feed the newest ones to InkOverlay's `committedIds` so the live stroke stays until Skia shows it.
+   */
+  onDrawn?: (ids: string[]) => void;
 }
 
 // Brand tokens (docs/brand.md). Paper stays light, so the light tokens apply except on night paper.
@@ -130,6 +135,19 @@ function useStrokePaths(items: Item[]): Map<string, SkPath> {
   }, [items]);
 }
 
+/**
+ * Rendered inside <Canvas>, so its effect runs when Skia's own reconciler commits (after the new recording has been
+ * dispatched to the view), not when React commits PageCanvas: on web that is often several frames later.
+ */
+function DrawnProbe({ items, onDrawn }: { items: Item[]; onDrawn?: (ids: string[]) => void }) {
+  const cb = React.useRef(onDrawn);
+  cb.current = onDrawn;
+  React.useEffect(() => {
+    cb.current?.(items.map((it) => it.id));
+  }, [items]);
+  return null;
+}
+
 function StrokeNode({ item, path }: { item: StrokeItem; path: SkPath }) {
   if (item.tool === 'highlighter') {
     return <Path path={path} color={item.color} opacity={HIGHLIGHTER_ALPHA} blendMode="multiply" />;
@@ -160,7 +178,7 @@ function ImageNode({ item, uri }: { item: ImageItem; uri: string }) {
  * The one renderer for finished page content (tech-spec §3): paper, PDF background, items in z-order,
  * selection outline and comment anchors. Runs on iOS/Android (Skia) and web/Electron (CanvasKit).
  */
-export function PageCanvas({ info, items, selection, anchors, pdfImage, width, assetUri }: PageCanvasProps) {
+export function PageCanvas({ info, items, selection, anchors, pdfImage, width, assetUri, onDrawn }: PageCanvasProps) {
   const { w: pageW, h: pageH } = info.size;
   const scale = width / pageW;
   const height = Math.round(pageH * scale);
@@ -258,6 +276,7 @@ export function PageCanvas({ info, items, selection, anchors, pdfImage, width, a
           </Group>
         ))}
       </Group>
+      <DrawnProbe items={items} onDrawn={onDrawn} />
     </Canvas>
   );
 }

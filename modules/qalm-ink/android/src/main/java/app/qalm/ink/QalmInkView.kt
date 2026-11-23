@@ -44,8 +44,9 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   fun setCommittedIds(ids: List<String>) {
     val committed = ids.toHashSet()
-    val changed = synchronized(pending) { pending.removeAll { it.id in committed } }
-    if (changed) layer.redrawPending()
+    val done = synchronized(pending) { pending.filter { it.id in committed }.map { it.id } }
+    // committedIds arrive once Skia has its new picture; it shows it a frame or two later, so keep ours until then.
+    for (id in done) postDelayed({ dropPending(id) }, HANDOFF_MS)
   }
 
   private fun dropPending(id: String) {
@@ -548,6 +549,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     const val HOLD_MOVE_MM = 1.0
     /** A finished stroke whose id never reaches committedIds is dropped after this (same as iOS). */
     const val PENDING_FALLBACK_MS = 4000L
+    /** How long a finished stroke stays after its id is in committedIds (same as iOS). */
+    const val HANDOFF_MS = 50L
     const val HIGHLIGHTER_ALPHA = 0.45
     const val FLAG_CANCELED = 0x20 // MotionEvent.FLAG_CANCELED (API 33)
     val LASSO_COLOR = Color.parseColor("#4338ca")
