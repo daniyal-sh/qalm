@@ -1,0 +1,26 @@
+// Qalm server. Resource ids below are placeholders: see README.md ("Setting up Cloudflare").
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "qalm-server",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "durable_objects": {
+    "bindings": [{ "name": "DOC_ROOM", "class_name": "DocRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DocRoom"] }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "qalm",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "qalm-assets" }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "00000000000000000000000000000000" }],
+  "rules": [{ "type": "Data", "globs": ["**/*.ttf"], "fallthrough": true }],
+  "vars": {
+    "EMAIL_PROVIDER": "console"
+  },
+  "observability": { "enabled": true }
+}

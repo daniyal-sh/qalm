@@ -1,0 +1,204 @@
+import type { Env, McpProps } from './env';
+import { num } from './env';
+import { nbDocId, room } from './docs';
+import { activeGrant, grantedNotebooks, sessionOf, type GrantRow, type NotebookChoice } from './grants';
+import { svgToPng } from './png';
+import { b64, json, now } from './util';
+import type { AgentResult } from './agent';
+
+/**
+ * MCP over Streamable HTTP (stateless, JSON responses). POST /mcp carries JSON-RPC; there is no server-initiated
+ * stream, so GET answers 405 as the transport spec allows.
+ */
+const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
+
+const INSTRUCTIONS =
+  'Qalm notebooks in Q-ink Live format. Call wait() to list sessions, then wait(s) in a loop to follow live writing. ' +
+  'Lines marked [n] are row n of the attached image; ~"…" is the device guess. Save your reading of a line with transcribe, ' +
+  'pin feedback with comment. You can never change ink.';
+
+const sArg = { type: 'string', description: 'Session (from wait with no arguments). Defaults to the last session you waited on.' };
+const TOOLS = [
+  {
+    name: 'wait',
+    description: 'Waits for the next update of a live session (long-poll). Without s, lists the sessions you can see.',
+    inputSchema: { type: 'object', properties: { s: { type: 'string', description: 'Session to follow' } }, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'read',
+    description: 'Reads on demand: "outline", a page "p3", lines "p3:L2-9", or the PDF behind a page "pdf:p2". Text plus an image strip where needed.',
+    inputSchema: { type: 'object', properties: { ref: { type: 'string' }, s: sArg }, required: ['ref'], additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'transcribe',
+    description: "Saves your reading of a line (e.g. ref \"p3:L4\"). It is then sent as trusted text. The student can edit it.",
+    inputSchema: { type: 'object', properties: { ref: { type: 'string' }, text: { type: 'string' }, s: sArg }, required: ['ref', 'text'], additionalProperties: false },
+  },
+  {
+    name: 'comment',
+    description: 'Pins a comment next to a line (e.g. ref "p3:L4"). Never changes ink.',
+    inputSchema: { type: 'object', properties: { ref: { type: 'string' }, text: { type: 'string' }, s: sArg }, required: ['ref', 'text'], additionalProperties: false },
+  },
+];
+
+interface RpcMsg { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> }
+type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
+interface ToolResult { content: Content[]; isError?: boolean }
+
+class ToolError extends Error {}
+
+const LIVE_MS = 10 * 60 * 1000;
+const MAX_TEXT = 4000;
+
+export const mcpHandler = {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext & { props: McpProps }): Promise<Response> {
+    if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: { Allow: 'POST' } });
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }, 400);
+    }
+    const batch = Array.isArray(body);
+    const msgs = (batch ? body : [body]) as RpcMsg[];
+    const out = [];
+    for (const m of msgs) {
+      const r = await handle(m, env, ctx.props);
+      if (r) out.push(r);
+    }
+    if (!out.length) return new Response(null, { status: 202 });
+    return json(batch ? out : out[0]);
+  },
+};
+
+async function handle(m: RpcMsg, env: Env, props: McpProps): Promise<object | null> {
+  if (!m || typeof m !== 'object' || typeof m.method !== 'string') {
+    return m && 'id' in m ? { jsonrpc: '2.0', id: m.id ?? null, error: { code: -32600, message: 'Invalid request' } } : null;
+  }
+  if (m.id === undefined || m.id === null) return null; // notification
+  const ok = (result: unknown) => ({ jsonrpc: '2.0', id: m.id, result });
+  const fail = (code: number, message: string) => ({ jsonrpc: '2.0', id: m.id, error: { code, message } });
+  switch (m.method) {
+    case 'initialize': {
+      const asked = String(m.params?.protocolVersion ?? '');
+      return ok({
+        protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: 'qalm', title: 'Qalm by Apollo', version: '0.1.0' },
+        instructions: INSTRUCTIONS,
+      });
+    }
+    case 'ping':
+      return ok({});
+    case 'tools/list':
+      return ok({ tools: TOOLS });
+    case 'tools/call': {
+      const name = String(m.params?.name ?? '');
+      const args = (m.params?.arguments ?? {}) as Record<string, unknown>;
+      if (!TOOLS.some((t) => t.name === name)) return fail(-32602, `Unknown tool: ${name}`);
+      try {
+        return ok(await callTool(env, props, name, args));
+      } catch (e) {
+        if (e instanceof ToolError || e instanceof Error) return ok({ content: [{ type: 'text', text: e.message }], isError: true });
+        throw e;
+      }
+    }
+    default:
+      return fail(-32601, `Method not found: ${m.method}`);
+  }
+}
+
+const str = (v: unknown, name: string, max = MAX_TEXT): string => {
+  if (typeof v !== 'string' || !v.trim()) throw new ToolError(`${name} is required`);
+  if (v.length > max) throw new ToolError(`${name} is too long (max ${max} characters)`);
+  return v;
+};
+
+function agentCfg(env: Env) {
+  return {
+    idleMs: num(env.WAKE_IDLE_MS, 6000),
+    minIntervalMs: num(env.WAKE_MIN_INTERVAL_MS, 20000),
+    timeoutMs: num(env.WAIT_TIMEOUT_MS, 45000),
+  };
+}
+
+/** Picks the notebook a call is about, and checks it is inside the grant. */
+async function target(env: Env, g: GrantRow, s: unknown): Promise<NotebookChoice> {
+  const nbs = await grantedNotebooks(env, g);
+  const want = typeof s === 'string' && s ? s.toLowerCase() : g.last_session;
+  if (!want) {
+    if (nbs.length === 1) return nbs[0]!;
+    throw new ToolError('Pass s (call wait with no arguments to list sessions)');
+  }
+  const hit = nbs.find((n) => sessionOf(n.id) === want || n.id === want);
+  if (!hit) throw new ToolError(`No session ${want} in this grant`);
+  return hit;
+}
+
+async function callTool(env: Env, props: McpProps, name: string, args: Record<string, unknown>): Promise<ToolResult> {
+  const g = await activeGrant(env, props.grantId);
+  if (!g || g.user_id !== props.userId) throw new ToolError('Access to Qalm has expired or was revoked. Reconnect to continue.');
+
+  if (name === 'wait' && (args.s === undefined || args.s === '')) {
+    const nbs = await grantedNotebooks(env, g);
+    const t = now();
+    const rows = await Promise.all(
+      nbs.map(async (n) => ({ n, at: await room(env, nbDocId(n.id)).lastClientUpdateAt(nbDocId(n.id)) })),
+    );
+    rows.sort((a, b) => b.at - a.at);
+    const lines = ['#q sessions', ...rows.map(({ n, at }) => `s=${sessionOf(n.id)} ${JSON.stringify(n.title)}${t - at < LIVE_MS ? ' live' : ''}`)];
+    const text = lines.join('\n');
+    await log(env, g, 'wait', 'sessions', text, null);
+    return { content: [{ type: 'text', text }] };
+  }
+
+  const nb = await target(env, g, args.s);
+  const docId = nbDocId(nb.id);
+  const stub = room(env, docId);
+  const session = sessionOf(nb.id);
+  await env.DB.prepare('UPDATE grants SET last_used_at = ?2, last_session = ?3 WHERE id = ?1').bind(g.id, now(), session).run();
+
+  if (name === 'wait') {
+    const r = await stub.agentWait(docId, props.clientId, session, agentCfg(env));
+    return result(env, g, 'wait', `${nb.title}${r.changed ? '' : ' (no changes)'}`, r);
+  }
+  if (name === 'read') {
+    const ref = str(args.ref, 'ref', 64);
+    const r = await stub.agentRead(docId, ref);
+    return result(env, g, 'read', `${nb.title} ${ref}`, r);
+  }
+  const ref = str(args.ref, 'ref', 64);
+  const text = str(args.text, 'text');
+  if (name === 'transcribe') {
+    if (!g.can_transcribe) throw new ToolError('This connection may not save transcriptions. The student can turn this on in Settings → AI access.');
+    const msg = await stub.agentEdit(docId, { op: 'transcribe', ref, text });
+    await log(env, g, 'transcribe', `${nb.title} ${ref}`, text, null);
+    return { content: [{ type: 'text', text: msg }] };
+  }
+  if (!g.can_comment) throw new ToolError('This connection may not leave comments. The student can turn this on in Settings → AI access.');
+  const msg = await stub.agentEdit(docId, { op: 'comment', ref, text, agentName: g.client_name });
+  await log(env, g, 'comment', `${nb.title} ${ref}`, text, null);
+  return { content: [{ type: 'text', text: msg }] };
+}
+
+async function result(env: Env, g: GrantRow, tool: string, targetLabel: string, r: AgentResult): Promise<ToolResult> {
+  const content: Content[] = [{ type: 'text', text: r.text }];
+  let img: { width: number; height: number } | null = null;
+  if (r.svg) {
+    const png = await svgToPng(r.svg);
+    img = png;
+    content.push({ type: 'image', data: b64(png.png), mimeType: 'image/png' });
+  }
+  await log(env, g, tool, targetLabel, r.text, img);
+  return { content };
+}
+
+/** Activity log with a rough token estimate: ~4 characters per token, images at width × height / 750. */
+async function log(env: Env, g: GrantRow, tool: string, targetLabel: string, text: string, img: { width: number; height: number } | null) {
+  const tokens = Math.ceil(text.length / 4) + (img ? Math.ceil((img.width * img.height) / 750) : 0);
+  await env.DB.prepare('INSERT INTO activity (user_id, grant_id, client_name, tool, target, tokens, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)')
+    .bind(g.user_id, g.id, g.client_name, tool, targetLabel, tokens, now())
+    .run();
+}

@@ -1,0 +1,4 @@
+# Copy to .dev.vars (gitignored) for `wrangler dev`.
+JWT_SECRET=dev-only-change-me-at-least-32-characters-long
+# EMAIL_PROVIDER=resend
+# RESEND_API_KEY=re_...
