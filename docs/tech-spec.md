@@ -36,7 +36,7 @@ on screen (plus or minus 2) are loaded on the device. Durable Objects hold one d
 
 ```
 nb:{notebookId}            index doc
-  meta:   Y.Map  { id, title, cover, paper, paperColor, size:{w,h}, orientation, aiAccess, createdAt, updatedAt }
+  meta:   Y.Map  { id, title, cover, paper, paperColor, size:{w,h}, orientation, aiAccess, aiPaused?, createdAt, updatedAt }
   pages:  Y.Array<Y.Map>   { id, size:{w,h}, paper, paperColor, background: {kind:'paper'} | {kind:'pdf', assetId, pageIndex} }
   assets: Y.Map<assetId, {id, sha256, mime, name, bytes, pageCount?}>
   asks:   Y.Array<{id, pageId, text, at, sel?: {itemIds, bbox}, commentId?}>   sel: an Ask about a selection; commentId: its thread
@@ -208,7 +208,9 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
   `GET /sync/{docId}?ticket=…` upgrades. Access tokens never appear in URLs.
 - **R2** `ASSETS`: `PUT /assets/{sha256}` and `GET /assets/{sha256}` (Bearer auth; content-addressed).
 - **App API** (Bearer, CORS `*` for the web/Electron build): `GET /ai/grants`, `PATCH /ai/grants/{id} {canComment?, canTranscribe?, notebookIds?, folderIds?}`,
-  `DELETE /ai/grants/{id}`, `GET /ai/requests`, `POST /ai/requests/{id}/deny`, `GET /ai/activity?limit=`, and `DELETE /notebooks/{id}` (owner only,
+  `DELETE /ai/grants/{id}`, `GET /ai/requests`, `POST /ai/requests/{id}/deny`, `GET /ai/activity?limit=`, `GET /ai/presence?nb={notebookId}` (owner only:
+  `{aiAccess, paused, agents: [{name, waiting, lastAt, canComment, canTranscribe}]}`, the agents with a pending `wait` or a call in the last
+  60 s; empty while AI access is off; the editor polls it every 8 s), and `DELETE /notebooks/{id}` (owner only,
   "Delete forever": sets `notebooks.deleted_at`, refuses sync tickets from then on, and purges the notebook's `nb:`/`pg:` room storage, best effort).
   Moving to the trash is only `deletedAt` in the library doc, so restoring from the trash needs no server call.
 - **D1** tables: `users`, `sessions`, `magic_links`, `notebooks(id, owner_id, title, ai_access, deleted_at)`, `sync_tickets`, `email_sends`, OAuth tables, and
@@ -242,13 +244,19 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
   which keeps `lastCommentAt`). Only the changed pages are loaded.
 - **Threads:** the notebook room stores `QinkThreads` (labels `C1`, `C2`, …) and, in each agent's state, `QinkSeen`. `comment {ref}` creates the
   comment in the page room and labels it; `comment {thread, resolve?}` replies there (author: the grant's client name). Agents still never touch ink.
+- **Presence and pause:** every agent call records `presence` (client id → name, grant switches, last call) in the notebook room; pending waits
+  are counted in memory. `meta.aiPaused` ("Pause sharing") is read live like `aiAccess`: while it's on, `wait` delivers nothing (times out as
+  `#q s=… paused`) and the other tools fail; turning it off wakes pending waits.
 
 ## 5. App (`apps/app`, Expo, New Architecture, expo-router)
 
 - **Screens:**
   - Library
   - New notebook sheet
-  - Editor: a virtualized vertical list of pages, each a `PageCanvas` with an `InkOverlay`, plus the floating toolbar, comments panel, Ask button, pinch zoom, and undo/redo
+  - Editor: a virtualized vertical list of pages, each a `PageCanvas` with an `InkOverlay`, plus the floating toolbar, comments panel, Ask button, pinch zoom, and undo/redo.
+    Live agent: a presence pill ("Claude is following along", "… is thinking…" after an Ask until an agent entry arrives or 90 s;
+    tap for what it can do, Pause sharing, Stop), open threads as cards in the margin beside the page when the gutter is ≥ 200 px
+    (pins on the page otherwise, plus a toast when an agent writes), and an unread badge on Comments (per device, `seen:{notebookId}` in kv)
   - Settings: Account, Pen and palm rejection, and AI access (connected agents, pending requests, activity log)
   - Sign-in
 - **Sync:** the client uses the `y-websocket` provider (with tickets) for each loaded doc, with IndexedDB persistence on web and file persistence on native.

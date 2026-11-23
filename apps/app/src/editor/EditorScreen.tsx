@@ -20,6 +20,8 @@ import { Button, IconButton, Pill, TextField, Toggle } from '../ui/controls';
 import { EmptyState, Menu, Row, Sheet, useToast, type MenuItem } from '../ui/layout';
 import { Text } from '../ui/Text';
 import { CommentsPanel } from './CommentsPanel';
+import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence } from './ai';
+import { agentEntryCount, markAllSeen, marginCards, newestAgentEntry, stillThinking, THINKING_MS, unreadCount, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
 import { cloneItems } from './items';
 import { PageView } from './PageView';
@@ -118,6 +120,24 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       return n;
     });
   }, []);
+  // ---- live agent: presence, "thinking…" after an Ask, unread agent comments ----
+  const agents = usePresence(s.user ? s.tm : null, notebookId, !!meta?.aiAccess);
+  const [seen, setSeen] = React.useState<SeenThreads>({});
+  const seenKey = `seen:${notebookId}`;
+  React.useEffect(() => {
+    void kvGet<SeenThreads>(seenKey).then((v) => v && setSeen((cur) => ({ ...v, ...cur })));
+  }, [seenKey]);
+  const [thinking, setThinking] = React.useState<Thinking | null>(null);
+  const agentEntries = agentEntryCount(pageData.values());
+  const isThinking = stillThinking(thinking, agentEntries, Date.now());
+  React.useEffect(() => {
+    if (!thinking) return;
+    if (!isThinking) return setThinking(null);
+    const t = setTimeout(() => setThinking((x) => (x === thinking ? null : x)), Math.max(0, thinking.at + THINKING_MS - Date.now()));
+    return () => clearTimeout(t);
+  }, [thinking, isThinking]);
+  const unread = unreadCount(pageData.values(), seen);
+
   const lastPage = React.useRef<string | null>(null);
   const touchTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchPage = React.useCallback(
@@ -168,6 +188,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const totalH = contentHeight(slots, GAP) + 80;
   const contentW = Math.max(viewport.w, Math.max(0, ...slots.map((x) => x.width)) + 48);
   const [first, last] = mountedRange(slots, scrollY, viewport.h, 2);
+  // Comment cards sit in the margin beside the page when there's room; otherwise pins on the page and the panel.
+  const gutter = (contentW - Math.max(0, ...slots.map((x) => x.width))) / 2;
+  const wideMargin = gutter >= 200;
+  const marginW = Math.min(260, gutter - 28);
   const current = currentPageIndex(slots, scrollY, viewport.h);
   const currentPageId = pages[current]?.id ?? null;
 
@@ -361,10 +385,32 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     notebook.addAsk(lastPage.current ?? currentPageId ?? pages[0]!.id, askText.trim());
     setAskText('');
     setAskOpen(false);
-    showToast(meta?.aiAccess ? 'Sent to your connected agents' : 'Saved. Turn on AI access so agents can see it');
+    if (meta?.aiAccess && agents.length && !meta.aiPaused) setThinking({ baseline: agentEntries, at: Date.now() });
+    else showToast(!meta?.aiAccess ? 'Saved. Turn on AI access so agents can see it' : meta.aiPaused ? 'Saved. Sharing is paused' : 'Sent. No agent is following right now');
   };
 
   const commentCount = [...pageData.values()].reduce((n, d) => n + d.comments.filter((x) => !x.resolved).length, 0);
+  React.useEffect(() => {
+    if (!commentsOpen || !unread) return;
+    const t = setTimeout(() => {
+      setSeen((cur) => {
+        const next = markAllSeen(pageData.values(), cur);
+        if (next !== cur) void kvSet(seenKey, next);
+        return next;
+      });
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [commentsOpen, unread, pageData, seenKey]);
+  // Narrow windows have no margin for cards: say so when an agent writes while the panel is closed.
+  // (Only entries written after the editor opened, so pages loading while scrolling stay quiet.)
+  const newestAgent = newestAgentEntry(pageData.values());
+  const notifiedAt = React.useRef(Date.now());
+  React.useEffect(() => {
+    if (!newestAgent || newestAgent.at <= notifiedAt.current) return;
+    notifiedAt.current = newestAgent.at;
+    if (!commentsOpen && !wideMargin) showToast(`${newestAgent.name} commented. Open comments to read it.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newestAgent?.at]);
 
   const edCtx = React.useMemo<EditorCtx | null>(
     () =>
@@ -428,17 +474,25 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                 Page {current + 1} of {pages.length}
               </Text>
               {!narrow ? syncPill : null}
-              {!narrow && meta.aiAccess ? <Pill label="AI can read" tone="assistant" /> : null}
+              {meta.aiAccess && (agents.length || meta.aiPaused) ? (
+                <PresencePill agents={agents} notebook={notebook} paused={!!meta.aiPaused} thinking={isThinking} compact={narrow} />
+              ) : !narrow && meta.aiAccess ? (
+                <Pill label="AI can read" tone="assistant" />
+              ) : null}
             </View>
           </View>
           <IconButton icon="rotate-ccw" label="Undo" disabled={!undo.canUndo} onPress={() => undo.undo()} />
           <IconButton icon="rotate-cw" label="Redo" disabled={!undo.canRedo} onPress={() => undo.redo()} />
           <View>
             <IconButton icon="message-square" label="Comments" selected={commentsOpen} onPress={() => setCommentsOpen((x) => !x)} />
-            {commentCount > 0 ? (
-              <View pointerEvents="none" style={[styles.badge, { backgroundColor: c.assistant }]}>
+            {unread > 0 || commentCount > 0 ? (
+              <View
+                pointerEvents="none"
+                accessibilityLabel={unread ? `${unread} unread` : undefined}
+                style={[styles.badge, { backgroundColor: unread ? c.assistant : c.muted }]}
+              >
                 <Text variant="meta" tone="onAccent" style={{ fontSize: 10, lineHeight: 14 }}>
-                  {commentCount}
+                  {unread || commentCount}
                 </Text>
               </View>
             ) : null}
@@ -468,6 +522,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                     {slots.map((slot, i) => {
                       const info = pages[i]!;
                       const left = (contentW - slot.width) / 2;
+                      const data = i >= first && i <= last ? pageData.get(info.id) : undefined;
+                      const cards = wideMargin && data ? marginCards(data.lines, data.comments, slot.width / info.size.w, MARGIN_CARD_H, 8, activeCommentId) : [];
                       return (
                         <React.Fragment key={slot.id}>
                           <View style={[styles.page, { left, top: slot.top, width: slot.width, height: slot.height, borderColor: c.line }]}>
@@ -484,6 +540,22 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                             </Text>
                             <IconButton icon="more-horizontal" label={`Page ${i + 1} options`} size={32} onPress={(e) => pageMenu(i, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })} />
                           </View>
+                          {cards.length ? (
+                            <View pointerEvents="box-none" style={{ position: 'absolute', left: left + slot.width + 14, top: slot.top, width: marginW, height: slot.height }}>
+                              {cards.map((m) => (
+                                <MarginCard
+                                  key={m.comment.id}
+                                  comment={m.comment}
+                                  top={m.top}
+                                  width={marginW}
+                                  active={m.comment.id === activeCommentId}
+                                  seen={seen}
+                                  thinking={isThinking && !!m.comment.ask && !m.comment.replies.length}
+                                  onPress={() => edCtx.setActiveComment(m.comment.id)}
+                                />
+                              ))}
+                            </View>
+                          ) : null}
                         </React.Fragment>
                       );
                     })}
