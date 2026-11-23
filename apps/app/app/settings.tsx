@@ -6,6 +6,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensio
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { denyRequest, getAiOverview, grantSummary, revokeGrant, toggleId, updateGrant, type AiOverview, type Grant } from '../src/api/ai';
+import { rejectedTouchText } from '../src/lib/palm';
 import { relativeTime } from '../src/library/actions';
 import { useLibraryData, useSession } from '../src/state/session';
 import { smoothingLevel, useTheme, type Appearance, type DrawWith, type Hand, type Palm, type PenGesture, type SmoothingPref } from '../src/theme/ThemeProvider';
@@ -150,7 +151,7 @@ function PenSection() {
         />
       </View>
       <Text variant="meta" tone={rejected ? 'bad' : 'faint'} style={{ paddingHorizontal: 4 }}>
-        {rejected ? `Touch rejected: ${rejected}` : 'Strokes here fade after a few seconds.'}
+        {rejected ? rejectedTouchText(rejected) : 'Strokes here fade after a few seconds.'}
       </Text>
     </View>
   );
