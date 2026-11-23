@@ -937,7 +937,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             <IconButton icon="message-square" label={unread ? `Comments, ${unread} unread` : 'Comments'} size={hb} selected={commentsOpen} onPress={() => setCommentsOpen((x) => !x)} />
             {unread > 0 ? (
               <View pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden style={[styles.badge, { backgroundColor: c.assistant }]}>
-                <Text variant="meta" tone="onAccent" style={{ fontSize: 10, lineHeight: 14 }}>
+                <Text variant="meta" style={{ fontSize: 10, lineHeight: 14, color: c.onAssistant, fontWeight: '600' }}>
                   {unread}
                 </Text>
               </View>
