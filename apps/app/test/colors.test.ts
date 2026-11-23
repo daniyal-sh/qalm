@@ -39,3 +39,13 @@ describe('colour picker logic', () => {
     expect(dropIndex(2, 500, 42, 6)).toBe(5);
   });
 });
+
+describe('swatch contrast', () => {
+  it('flags swatches that vanish against the toolbar', async () => {
+    const { contrastRatio } = await import('../src/editor/colors.logic');
+    expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 0);
+    expect(contrastRatio('#27272a', '#1c1c1f')).toBeLessThan(1.6); // graphite on the dark toolbar
+    expect(contrastRatio('#4338ca', '#1c1c1f')).toBeGreaterThan(1.6);
+    expect(contrastRatio('#ffffff', '#ffffff')).toBe(1);
+  });
+});

@@ -9,7 +9,7 @@ import { coverInk } from '../theme/tokens';
 import { Icon } from '../ui/Icon';
 import { Menu, type MenuItem } from '../ui/layout';
 import { ColorPicker } from './ColorPicker';
-import { dropIndex, sameColor, swatchLabel } from './colors.logic';
+import { contrastRatio, dropIndex, sameColor, swatchLabel } from './colors.logic';
 
 /** One swatch slot: a 40 px target plus the row's 2 px gap. */
 const SLOT = 42;
@@ -34,7 +34,8 @@ function SwatchDot({ tool, color, selected }: { tool: SwatchTool; color: string;
   const { rgb, alpha } = splitAlpha(color, tool === 'highlighter' ? HIGHLIGHTER_ALPHA : 1);
   const shown = tool === 'highlighter' ? Math.min(1, alpha / HIGHLIGHTER_ALPHA) : 1;
   return (
-    <View style={[styles.dot, { borderColor: c.line, backgroundColor: '#ffffff' }]}>
+    // A swatch close to the toolbar's own colour (graphite in dark mode, white in light) gets a visible outline.
+    <View style={[styles.dot, { backgroundColor: '#ffffff' }, contrastRatio(rgb, c.surface) < 1.6 ? { borderWidth: 1, borderColor: c.faint } : { borderColor: c.line }]}>
       <View style={[StyleSheet.absoluteFill, { backgroundColor: rgb, opacity: shown }]} />
       {selected ? <Icon name="check" size={13} color={coverInk(rgb)} /> : null}
     </View>
@@ -113,6 +114,7 @@ function SwatchButton({
         accessibilityLabel={label}
         accessibilityHint="Hold to move or remove"
         accessibilityState={{ checked: selected }}
+        aria-checked={selected}
         accessibilityActions={[{ name: 'activate' }, { name: 'longpress' }]}
         onAccessibilityAction={(e) => (e.nativeEvent.actionName === 'longpress' ? menuAt() : onSelect())}
         // Keyboard on web: Enter/Space selects, the context-menu key opens the menu.

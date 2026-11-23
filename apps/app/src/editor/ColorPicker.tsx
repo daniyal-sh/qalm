@@ -148,6 +148,7 @@ export function ColorPicker({ visible, tool, initial, saved, anchor, onClose, on
                       accessibilityRole="radio"
                       accessibilityLabel={hex}
                       accessibilityState={{ checked: on }}
+                      aria-checked={on}
                       onPress={() => choose(hex)}
                       style={[styles.tile, { backgroundColor: hex, borderColor: c.line }, on && { borderWidth: 2, borderColor: c.surface, outlineColor: c.ink, outlineWidth: 2, outlineStyle: 'solid' } as ViewStyle]}
                     >

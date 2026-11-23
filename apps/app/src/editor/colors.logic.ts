@@ -17,6 +17,22 @@ export function swatchLabel(tool: SwatchTool, color: string): string {
   return tool === 'highlighter' && color.length === 9 ? `${rgb}, ${Math.round(alpha * 100)}%` : rgb;
 }
 
+/** Relative luminance (WCAG) of a hex colour. */
+export function luminance(hex: string): number {
+  const v = parseInt(splitAlpha(hex).rgb.slice(1), 16);
+  const ch = (x: number) => {
+    const s = x / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * ch((v >> 16) & 255) + 0.7152 * ch((v >> 8) & 255) + 0.0722 * ch(v & 255);
+}
+
+/** WCAG contrast ratio between two colours (1..21). */
+export function contrastRatio(a: string, b: string): number {
+  const [x, y] = [luminance(a), luminance(b)].sort((m, n) => n - m) as [number, number];
+  return (x + 0.05) / (y + 0.05);
+}
+
 /** Same colour (case and #rgb shorthand ignored). */
 export function sameColor(a: string, b: string): boolean {
   return (normalizeColor(a) ?? a) === (normalizeColor(b) ?? b);
