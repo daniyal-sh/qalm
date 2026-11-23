@@ -1,4 +1,11 @@
-# Copy to .dev.vars (gitignored) for `wrangler dev`.
+# Copy to .dev.vars (gitignored) for `wrangler dev`. In production set these with `wrangler secret put`.
 JWT_SECRET=dev-only-change-me-at-least-32-characters-long
+# PUBLIC_URL=https://api.qalm.app
+# MAGIC_LINK_URL=https://qalm.app/auth/email/verify
 # EMAIL_PROVIDER=resend
 # RESEND_API_KEY=re_...
+# EMAIL_FROM=Qalm <signin@qalm.app>
+# APPLE_AUDIENCES=app.qalm.ios,app.qalm.web
+# GOOGLE_AUDIENCES=1234-abc.apps.googleusercontent.com
+# MAX_ASSET_BYTES=52428800
+# MAX_USER_STORAGE_BYTES=1073741824
