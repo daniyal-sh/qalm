@@ -65,6 +65,10 @@ export interface Comment {
   createdAt: number;
   resolved: boolean;
   replies: { author: Author; text: string; at: number }[];
+  /** Page-space box of the selection a thread is about (a student's comment or Ask on a selection). */
+  anchor?: BBox;
+  /** The thread was started by an Ask: its question reaches agents as the `ask`, not as a `note`. */
+  ask?: boolean;
 }
 
 export type Orientation = 'portrait' | 'landscape';
@@ -85,4 +89,14 @@ export interface NotebookMeta {
 
 export interface PageInfo { id: string; size: Size; paper: Paper; paperColor: PaperColor; background: PageBackground }
 export interface Asset { id: string; sha256: string; mime: string; name: string; bytes: number; pageCount?: number }
-export interface Ask { id: string; pageId: string; text: string; at: number }
+/** What a selection Ask is about: the selected item ids and their page-space box. */
+export interface AskSelection { itemIds: string[]; bbox: BBox }
+export interface Ask {
+  id: string;
+  pageId: string;
+  text: string;
+  at: number;
+  sel?: AskSelection;
+  /** The thread (page comment) the answer belongs in. */
+  commentId?: string;
+}

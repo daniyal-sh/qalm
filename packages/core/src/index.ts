@@ -25,4 +25,19 @@ export { renderPageSvg } from './render/svg';
 export { renderLinesStripSvg } from './render/strip';
 export { exportPdf } from './export/pdf';
 export { packQalm, unpackQalm, type QalmBundle } from './export/qalm';
-export { assignLabels, encodeQinkUpdate, encodeQinkRead, resolveRef, type QinkLabels, type QinkSnapshot, type QinkImage } from './qink';
+export {
+  assignLabels,
+  encodeQinkUpdate,
+  encodeQinkRead,
+  resolveRef,
+  resolveThread,
+  threadLabel,
+  emptyThreads,
+  labelList,
+  type QinkLabels,
+  type QinkSnapshot,
+  type QinkImage,
+  type QinkThreads,
+  type QinkSeen,
+  type QinkAsk,
+} from './qink';

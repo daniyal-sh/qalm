@@ -39,7 +39,7 @@ nb:{notebookId}            index doc
   meta:   Y.Map  { id, title, cover, paper, paperColor, size:{w,h}, orientation, aiAccess, createdAt, updatedAt }
   pages:  Y.Array<Y.Map>   { id, size:{w,h}, paper, paperColor, background: {kind:'paper'} | {kind:'pdf', assetId, pageIndex} }
   assets: Y.Map<assetId, {id, sha256, mime, name, bytes, pageCount?}>
-  asks:   Y.Array<{id, pageId, text, at}>
+  asks:   Y.Array<{id, pageId, text, at, sel?: {itemIds, bbox}, commentId?}>   sel: an Ask about a selection; commentId: its thread
 
 pg:{notebookId}:{pageId}   page doc
   items:    Y.Map<itemId, Y.Map>   item fields below; stroke points as Uint8Array
@@ -66,7 +66,8 @@ interface ShapeItem { id: string; type: 'shape'; kind: 'line'|'arrow'|'rect'|'el
 type Item = StrokeItem | TextItem | ImageItem | ShapeItem;
 type BBox = [x0: number, y0: number, x1: number, y1: number];
 interface Line { key: string /* = id of the line's first item; globally unique */; kind: 'line' | 'drawing'; itemIds: string[]; bbox: BBox; text?: string; textSrc?: 'device'|'agent'|'user'; conf?: number }
-interface Comment { id: string; lineKey: string; author: { kind: 'agent'|'user'; name: string }; text: string; createdAt: number; resolved: boolean; replies: { author: {kind:'agent'|'user'; name:string}; text: string; at: number }[] }
+interface Comment { id: string; lineKey: string /* '' if a selection has no ink line */; author: { kind: 'agent'|'user'; name: string }; text: string; createdAt: number; resolved: boolean; replies: { author: {kind:'agent'|'user'; name:string}; text: string; at: number }[]; anchor?: BBox /* selection box */; ask?: boolean /* started by an Ask */ }
+interface Ask { id: string; pageId: string; text: string; at: number; sel?: { itemIds: string[]; bbox: BBox }; commentId?: string }
 ```
 Stroke points are stored as a Float32Array of 6-tuples `(x, y, p, tilt, az, t)`, exposed as a `Uint8Array`
 (`encodePoints` / `decodePoints`).
@@ -79,7 +80,7 @@ class Notebook {                     // wraps the index doc
   meta(): NotebookMeta; setMeta(patch): void
   pages(): PageInfo[]; addPage(opts?: Partial<PageInfo>, index?: number): string; removePage(id): void; movePage(id, index): void
   assets(): Asset[]; addAsset(a: Asset): void
-  addAsk(pageId, text): void; asks(): Ask[]
+  addAsk(pageId, text, extra?: { sel?, commentId? }): string; asks(): Ask[]
   observe(cb): () => void
 }
 class Page {                         // wraps one page doc
@@ -88,7 +89,8 @@ class Page {                         // wraps one page doc
   lines(): Line[]                    // maintained automatically on add/update/remove
   setLineText(lineKey, text, src: 'device'|'agent'|'user', conf?): void
   comments(): Comment[]; addComment(c: Omit<Comment,'id'|'createdAt'|'resolved'|'replies'>): string
-  replyToComment(id, author, text): void; resolveComment(id): void
+  replyToComment(id, author, text): boolean   // a student's reply reopens a resolved thread; false if it's gone
+  resolveComment(id): void
   observe(cb): () => void
 }
 createUndoManager(page: Page): Y.UndoManager   // tracks only local transactions (origin LOCAL_ORIGIN)
@@ -135,7 +137,7 @@ hitTestErase(items: Item[], path: {x:number;y:number}[], radius: number): string
 lassoSelect(items: Item[], polygon: {x:number;y:number}[]): string[]
 paperPattern(paper: Paper, color: PaperColor, size): { lines: [x0,y0,x1,y1][]; dots: [x,y][]; stroke: string; bg: string }  // shared by Skia and SVG
 renderPageSvg(info: PageInfo, page: Page, opts?: { paper?: boolean; assetUrl?: (id) => string }): string
-renderLinesStripSvg(page: Page, lineKeys: string[], labels: string[]): { svg: string; width: number; height: number }  // black on white, "[n]" rows
+renderLinesStripSvg(page: Page, lineKeys: (string | BBox)[], labels: string[]): { svg: string; width: number; height: number }  // black on white, "[n]" rows; a BBox is a crop row
 exportPdf(nb: Notebook, loadPage: (pageId) => Promise<Page>, getAsset: (id) => Promise<Uint8Array>): Promise<Uint8Array>   // pdf-lib
 packQalm(...) / unpackQalm(bytes) -> { index: Y.Doc; pages: Map<pageId, Y.Doc>; assets: Map<id, Uint8Array> }              // zip (fflate)
 ```
@@ -145,11 +147,15 @@ packQalm(...) / unpackQalm(bytes) -> { index: Y.Doc; pages: Map<pageId, Y.Doc>; 
 interface QinkLabels { [pageId: string]: { nextL: number; nextD: number; byKey: Record<string /*lineKey*/, string /*'L7'*/> } }
 interface QinkSnapshot { [pageId: string]: Record<string /*lineKey*/, string /*hash of itemIds + text*/> }
 assignLabels(labels: QinkLabels, pageId: string, lines: Line[]): void       // mutates; existing labels never change, new keys get the next number
-encodeQinkUpdate(nb: Notebook, pages: Record<string, Page> /*the pages to diff*/, labels: QinkLabels, prev: QinkSnapshot, opts: { session; rev; asks? })
-  : { text: string; image: { pageId: string; lineKeys: string[]; labels: string[] } | null; snapshot: QinkSnapshot }
+interface QinkThreads { next: number; byId: Record<string /*commentId*/, { label: string /*'C3'*/; pageId: string }> }   // notebook-wide, server-stored
+type QinkSeen = Record<string /*commentId*/, number /*entries seen: comment + replies*/>                               // per agent
+encodeQinkUpdate(nb: Notebook, pages: Record<string, Page> /*the pages to diff*/, labels: QinkLabels, prev: QinkSnapshot, opts: { session; rev; asks?; threads?; seen? })
+  : { text: string; image: { pageId: string; lineKeys: (string | BBox)[]; labels: string[] } | null; snapshot: QinkSnapshot; seen: QinkSeen }
+  // adds `note`/`re` for the student's new thread entries on the passed pages, and `ask C6 p3:L4-6 [n] "…"` for selection asks
 encodeQinkRead(nb: Notebook, pages: Record<string, Page>, labels: QinkLabels, ref: string /*'outline' | 'p3' | 'p3:L2-9' | 'pdf:p2'*/)
   : { text: string; image: { pageId: string; lineKeys: string[]; labels: string[] } | null }
 resolveRef(labels, nb, ref: 'p3:L4'): { pageId: string; lineKey: string }   // for transcribe and comment
+threadLabel(threads, commentId, pageId): string; resolveThread(threads, 'C3'): { pageId; commentId }   // for comment(thread)
 ```
 Q-ink refers to pages by **1-based position** (`p3`). A line without text, or with `textSrc === 'device'`, goes into the image, with
 `~"guess"` added when device text exists. Lines with `textSrc` agent or user are sent as text only.
@@ -253,8 +259,11 @@ Hover (where supported) shows a brush-size preview. The pen button, squeeze or d
   consent page uses it to mark notebooks with AI access off (they can be granted but stay hidden until it's turned on).
 - **Q-ink labels and snapshots** live in the notebook `DocRoom`'s storage (`QinkLabels`, plus a `QinkSnapshot` per agent session).
   Only that object assigns labels, so they're stable and unique.
-- **Wake rules:** `wait(s)` resolves when (pen idle ≥ 6 s **and** changes since the last delivery **and** ≥ 20 s since the last wake) **or** a new `asks` entry arrives.
-  Only the changed pages are loaded.
+- **Wake rules:** `wait(s)` resolves when (pen idle ≥ 6 s **and** changes since the last delivery **and** ≥ 20 s since the last wake) **or** a new `asks` entry arrives
+  **or** the student added a comment or reply (a page room flags client transactions that touch its `comments` map and tells the notebook room,
+  which keeps `lastCommentAt`). Only the changed pages are loaded.
+- **Threads:** the notebook room stores `QinkThreads` (labels `C1`, `C2`, …) and, in each agent's state, `QinkSeen`. `comment {ref}` creates the
+  comment in the page room and labels it; `comment {thread, resolve?}` replies there (author: the grant's client name). Agents still never touch ink.
 
 ## 5. App (`apps/app`, Expo, New Architecture, expo-router)
 

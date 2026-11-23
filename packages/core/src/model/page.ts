@@ -181,7 +181,7 @@ export class Page {
     const out: Comment[] = [];
     this.commentMap.forEach((m) => {
       const replies = m.get('replies') as Y.Array<Comment['replies'][number]> | undefined;
-      out.push({
+      const c: Comment = {
         id: m.get('id') as string,
         lineKey: m.get('lineKey') as string,
         author: m.get('author') as Author,
@@ -189,11 +189,19 @@ export class Page {
         createdAt: m.get('createdAt') as number,
         resolved: m.get('resolved') === true,
         replies: replies ? replies.toArray() : [],
-      });
+      };
+      const anchor = m.get('anchor');
+      if (Array.isArray(anchor) && anchor.length === 4) c.anchor = anchor as BBox;
+      if (m.get('ask') === true) c.ask = true;
+      out.push(c);
     });
     return out.sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
   }
 
+  /**
+   * Starts a thread on a line (`lineKey`; '' when the selection has no ink line) or on a selection (`anchor`).
+   * Agents start threads only on lines.
+   */
   addComment(c: Omit<Comment, 'id' | 'createdAt' | 'resolved' | 'replies'>): string {
     const id = newId();
     this.tx(() => {
@@ -206,15 +214,22 @@ export class Page {
       m.set('createdAt', Date.now());
       m.set('resolved', false);
       m.set('replies', new Y.Array());
+      if (c.anchor) m.set('anchor', [...c.anchor]);
+      if (c.ask) m.set('ask', true);
     });
     return id;
   }
 
-  replyToComment(id: string, author: Author, text: string): void {
+  /** Adds a reply. A student's reply reopens a resolved thread. Returns false if the thread is gone. */
+  replyToComment(id: string, author: Author, text: string): boolean {
+    const m = this.commentMap.get(id);
+    const replies = m?.get('replies') as Y.Array<unknown> | undefined;
+    if (!m || !replies) return false;
     this.tx(() => {
-      const replies = this.commentMap.get(id)?.get('replies') as Y.Array<unknown> | undefined;
-      replies?.push([{ author, text, at: Date.now() }]);
+      replies.push([{ author, text, at: Date.now() }]);
+      if (author.kind === 'user' && m.get('resolved') === true) m.set('resolved', false);
     });
+    return true;
   }
 
   resolveComment(id: string): void {

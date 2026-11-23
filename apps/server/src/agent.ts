@@ -1,5 +1,20 @@
 import * as Y from 'yjs';
-import { Notebook, Page, encodeQinkUpdate, encodeQinkRead, resolveRef, renderLinesStripSvg, type QinkLabels, type QinkSnapshot, type QinkImage } from '@qalm/core';
+import {
+  Notebook,
+  Page,
+  emptyThreads,
+  encodeQinkUpdate,
+  encodeQinkRead,
+  resolveRef,
+  resolveThread,
+  renderLinesStripSvg,
+  threadLabel,
+  type QinkLabels,
+  type QinkSnapshot,
+  type QinkImage,
+  type QinkSeen,
+  type QinkThreads,
+} from '@qalm/core';
 import type { Env } from './env';
 import { pgDocId, room } from './docs';
 import type { DocRoom } from './room';
@@ -9,7 +24,13 @@ export interface AgentConfig { idleMs: number; minIntervalMs: number; timeoutMs:
 export interface AgentResult { text: string; svg: string | null; changed: boolean; error?: boolean }
 export type AgentEdit =
   | { op: 'transcribe'; ref: string; text: string }
-  | { op: 'comment'; ref: string; text: string; agentName: string };
+  /** A new thread on `ref`, or a reply in `thread` (optionally resolving it). */
+  | { op: 'comment'; ref?: string; thread?: string; text: string; agentName: string; resolve?: boolean };
+/** What the notebook room asks a page room to do. Agents never touch ink. */
+export type PageEdit =
+  | { op: 'transcribe'; ref: string; text: string; lineKey: string }
+  | { op: 'comment'; ref: string; text: string; agentName: string; lineKey: string }
+  | { op: 'reply'; ref: string; text: string; agentName: string; commentId: string; resolve?: boolean };
 
 /** What one agent (OAuth client) has been sent from this notebook. */
 interface AgentState {
@@ -20,6 +41,8 @@ interface AgentState {
   lastWakeAt: number;
   /** Number of `asks` entries already delivered. */
   askCount: number;
+  /** Thread entries already seen (missing in states saved before threads existed). */
+  seen?: QinkSeen;
 }
 
 const agentKey = (clientId: string) => `agent:${clientId}`;
@@ -28,7 +51,8 @@ export const AI_OFF = 'AI access is off for this notebook. The student can turn 
 
 /**
  * Lives in a notebook's DocRoom. Only this object assigns Q-ink labels, so they stay stable and unique.
- * Storage: `labels` (QinkLabels), `changed` (pageId → last client update), `agent:{clientId}` (AgentState).
+ * Storage: `labels` (QinkLabels), `threads` (QinkThreads), `changed` (pageId → last client update),
+ * `lastCommentAt` (the student's last comment or reply), `agent:{clientId}` (AgentState).
  */
 export class AgentHub {
   private waiters = new Set<() => void>();
@@ -46,6 +70,10 @@ export class AgentHub {
     return this.r.kvGet<QinkLabels>('labels') ?? {};
   }
 
+  private threads(): QinkThreads {
+    return this.r.kvGet<QinkThreads>('threads') ?? emptyThreads();
+  }
+
   /** The notebook's AI access switch, read live from the index doc. Unknown (never synced) counts as off. */
   aiAccess(): boolean {
     return this.nb().meta().aiAccess === true;
@@ -59,10 +87,12 @@ export class AgentHub {
     return Math.max(0, this.r.kvGet<number>('lastClientUpdateAt') ?? 0);
   }
 
-  onPageChanged(pageId: string, at: number): void {
+  /** `comment`: the student added a comment or reply. Like an Ask, that is delivered at once. */
+  onPageChanged(pageId: string, at: number, comment = false): void {
     this.changed[pageId] = Math.max(this.changed[pageId] ?? 0, at);
     this.r.kvPut('changed', this.changed);
     this.r.kvPut('lastClientUpdateAt', Math.max(this.lastClientUpdateAt(), at));
+    if (comment) this.r.kvPut('lastCommentAt', Math.max(this.r.kvGet<number>('lastCommentAt') ?? 0, at));
     this.wakeAll();
   }
 
@@ -147,7 +177,9 @@ export class AgentHub {
       .filter(([id, at]) => at > st.deliveredAt && live.has(id))
       .map(([id]) => id);
     const t0 = Date.now();
-    if (!asks.length) {
+    // A new ask, comment or reply goes out at once; ink waits for a pause (and the rate limit).
+    const urgent = asks.length > 0 || (this.r.kvGet<number>('lastCommentAt') ?? 0) > st.deliveredAt;
+    if (!urgent) {
       if (!changedIds.length) return { retryAt: Infinity };
       const ready = Math.max(this.lastClientUpdateAt() + cfg.idleMs, st.lastWakeAt + cfg.minIntervalMs);
       if (t0 < ready) return { retryAt: ready };
@@ -159,9 +191,11 @@ export class AgentHub {
     const cur = this.state(clientId);
     if (cur.rev !== st.rev || cur.askCount !== st.askCount) return { retryAt: 0 };
     const labels = this.labels();
-    const u = encodeQinkUpdate(nb, pages, labels, st.snapshot, { session, rev: st.rev + 1, asks });
+    const threads = this.threads();
+    const u = encodeQinkUpdate(nb, pages, labels, st.snapshot, { session, rev: st.rev + 1, asks, threads, seen: st.seen });
     this.r.kvPut('labels', labels);
-    const next: AgentState = { ...st, snapshot: u.snapshot, deliveredAt: t0, askCount: allAsks.length };
+    this.r.kvPut('threads', threads);
+    const next: AgentState = { ...st, snapshot: u.snapshot, seen: u.seen, deliveredAt: t0, askCount: allAsks.length };
     // Nothing the agent can see changed (e.g. only a comment was added): absorb it and keep waiting.
     if (!asks.length && !u.text.includes('\n')) {
       this.r.kvPut(agentKey(clientId), next);
@@ -195,10 +229,27 @@ export class AgentHub {
 
   async edit(edit: AgentEdit): Promise<string> {
     this.requireAccess();
+    if (edit.op === 'comment' && edit.thread) {
+      const ref = edit.thread.trim().toUpperCase();
+      const { pageId, commentId } = resolveThread(this.threads(), ref);
+      if (!this.nb().pages().some((p) => p.id === pageId)) throw new Error(`Thread ${ref} was on a deleted page`);
+      return this.applyOn(pageId, { op: 'reply', ref, text: edit.text, agentName: edit.agentName, commentId, resolve: edit.resolve });
+    }
+    if (!edit.ref) throw new Error('Pass ref (a line, e.g. "p3:L4") or thread (e.g. "C3")');
     const { pageId, lineKey } = resolveRef(this.labels(), this.nb(), edit.ref);
+    if (edit.op === 'transcribe') return this.applyOn(pageId, { op: 'transcribe', ref: edit.ref, text: edit.text, lineKey });
+    return this.applyOn(pageId, { op: 'comment', ref: edit.ref, text: edit.text, agentName: edit.agentName, lineKey });
+  }
+
+  /** Runs an edit in the page's room. A new thread gets its label here (only this room assigns labels). */
+  private async applyOn(pageId: string, edit: PageEdit): Promise<string> {
     const docId = pgDocId(this.notebookId, pageId);
-    const r = await room(this.env, docId).applyAgentEdit(docId, { ...edit, lineKey });
+    const r = await room(this.env, docId).applyAgentEdit(docId, edit);
     if (!r.ok) throw new Error(r.text);
-    return r.text;
+    if (!r.id) return r.text;
+    const threads = this.threads();
+    const label = threadLabel(threads, r.id, pageId);
+    this.r.kvPut('threads', threads);
+    return `${r.text} as thread ${label}`;
   }
 }
