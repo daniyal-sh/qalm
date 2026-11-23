@@ -264,6 +264,16 @@ export type TextFieldProps = TextInputProps & { icon?: IconName; containerStyle?
 export function TextField({ icon, containerStyle, style, onFocus, onBlur, ref, ...rest }: TextFieldProps) {
     const { c } = useTheme();
     const [focused, setFocused] = React.useState(false);
+    const inner = React.useRef<React.ComponentRef<typeof TextInput> | null>(null);
+    const setRef = React.useCallback(
+      (node: React.ComponentRef<typeof TextInput> | null) => {
+        inner.current = node;
+        if (typeof ref === 'function') ref(node);
+        else if (ref) (ref as React.RefObject<typeof node>).current = node;
+      },
+      [ref],
+    );
+    useKeepAutoFocus(!!rest.autoFocus, inner);
     return (
       <View
         style={[
@@ -274,7 +284,7 @@ export function TextField({ icon, containerStyle, style, onFocus, onBlur, ref, .
       >
         {icon ? <Icon name={icon} size={16} color={c.faint} /> : null}
         <TextInput
-          ref={ref}
+          ref={setRef}
           placeholderTextColor={c.faint}
           {...rest}
           onFocus={(e) => {
@@ -289,6 +299,29 @@ export function TextField({ icon, containerStyle, style, onFocus, onBlur, ref, .
         />
       </View>
     );
+}
+
+/**
+ * Web: `autoFocus` can lose to focus moves that land right after a sheet opens, e.g. the menu it was opened from
+ * handing focus back as it closes (Rename opened with focus on the sheet's Close button). For a moment after mounting,
+ * take focus back unless it went to another text field.
+ */
+function useKeepAutoFocus(autoFocus: boolean, input: React.RefObject<React.ComponentRef<typeof TextInput> | null>) {
+  React.useEffect(() => {
+    if (Platform.OS !== 'web' || !autoFocus || typeof document === 'undefined') return;
+    const grab = () => {
+      const a = document.activeElement as HTMLElement | null;
+      if (!a || !(a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) input.current?.focus();
+    };
+    const first = setTimeout(grab, 0);
+    document.addEventListener('focusin', grab);
+    const stop = setTimeout(() => document.removeEventListener('focusin', grab), 600);
+    return () => {
+      clearTimeout(first);
+      clearTimeout(stop);
+      document.removeEventListener('focusin', grab);
+    };
+  }, [autoFocus, input]);
 }
 
 const styles = StyleSheet.create({
