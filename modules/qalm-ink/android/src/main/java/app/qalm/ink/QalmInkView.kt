@@ -38,6 +38,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   var tool = "pen"
   var colorString = "#27272a"
   var strokeWidth = 1.8
+  var penStyle = "fountain"
+  var smoothing = 0
   var drawWith = "pen"
   var hand = "right"
   var palm = "standard"
@@ -74,6 +76,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     val color: String,
     val colorInt: Int,
     val width: Double,
+    val style: String,
+    val smoothing: Int,
     val downTime: Long,
   ) {
     val points = ArrayList<InkPoint>()
@@ -269,6 +273,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
       color = colorString,
       colorInt = parseColor(colorString),
       width = strokeWidth,
+      style = penStyle,
+      smoothing = smoothing,
       downTime = ev.eventTime,
     )
     live = l
@@ -326,7 +332,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
         val id = UUID.randomUUID().toString()
         val last = l.points.last()
         val heldMs = max(0.0, max(last.t, (ev.eventTime - l.downTime).toDouble()) - l.holdT)
-        val path = QalmFreehand.toPath(QalmFreehand.outline(l.tool, l.width, l.points))
+        val path = QalmFreehand.toPath(QalmFreehand.outline(l.tool, l.width, l.points, l.style, l.smoothing))
         synchronized(pending) { pending.add(Pending(id, path, l.colorInt, alphaFor(l.tool))) }
         layer.commit()
         // Never committed (e.g. the app snapped it to a shape): drop it anyway, as iOS does.
@@ -341,6 +347,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
               mapOf("x" to it.x, "y" to it.y, "p" to it.p, "tilt" to it.tilt, "az" to it.az, "t" to it.t)
             },
             "heldMs" to Math.round(heldMs).toDouble(),
+            "style" to l.style,
+            "smoothing" to l.smoothing,
           ),
         )
       }
@@ -395,7 +403,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   private fun render(l: Live) {
     val frame = when (l.kind) {
       "ink" -> Frame(
-        fill = QalmFreehand.toPath(QalmFreehand.outline(l.tool, l.width, l.points + l.predicted)),
+        fill = QalmFreehand.toPath(QalmFreehand.outline(l.tool, l.width, l.points + l.predicted, l.style, l.smoothing)),
         fillColor = l.colorInt,
         fillAlpha = alphaFor(l.tool),
       )

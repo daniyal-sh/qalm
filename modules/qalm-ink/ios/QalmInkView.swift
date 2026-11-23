@@ -35,6 +35,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private var colorString = "#27272a"
   private var color = UIColor(red: 0x27 / 255.0, green: 0x27 / 255.0, blue: 0x2a / 255.0, alpha: 1)
   private var strokeWidth = 1.8
+  private var penStyle = "fountain"
+  private var smoothing = 0
   private var drawWithPen = true
   private var rightHanded = true
   private var palmThresholdMm = 7.0
@@ -53,19 +55,24 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     let colorString: String
     let color: UIColor
     let width: Double
+    let style: String
+    let smoothing: Int
     let start: TimeInterval
     let startLocation: CGPoint
     var points: [Pt] = []
     var pendingEstimates: [NSNumber: Int] = [:]
     var erasedUpTo = 0  // eraser: points already emitted
     var claimToken = 0
-    init(touch: UITouch, isPencil: Bool, tool: Tool, colorString: String, color: UIColor, width: Double, location: CGPoint) {
+    init(touch: UITouch, isPencil: Bool, tool: Tool, colorString: String, color: UIColor, width: Double,
+         style: String, smoothing: Int, location: CGPoint) {
       self.touch = touch
       self.isPencil = isPencil
       self.tool = tool
       self.colorString = colorString
       self.color = color
       self.width = width
+      self.style = style
+      self.smoothing = smoothing
       self.start = touch.timestamp
       self.startLocation = location
     }
@@ -157,6 +164,14 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
 
   func setStrokeWidth(_ value: Double) {
     if value.isFinite && value > 0 { strokeWidth = value }
+  }
+
+  func setPenStyle(_ value: String) {
+    penStyle = FreehandSettings.penStyles[value] != nil ? value : "fountain"
+  }
+
+  func setSmoothing(_ value: Int) {
+    smoothing = (0...3).contains(value) ? value : 0
   }
 
   func setInput(drawWith: String, hand: String, palm: String) {
@@ -375,7 +390,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
 
   private func begin(_ touch: UITouch, event: UIEvent, isPencil: Bool) {
     let a = Active(touch: touch, isPencil: isPencil, tool: tool, colorString: colorString, color: color,
-                   width: strokeWidth, location: touch.location(in: self))
+                   width: strokeWidth, style: penStyle, smoothing: smoothing, location: touch.location(in: self))
     active = a
     cursorLayer.isHidden = true
     configureLiveLayer(a)
@@ -435,13 +450,17 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     }
   }
 
-  private func outline(_ points: [Pt], tool: Tool, width: Double) -> [FHVec] {
-    if tool == .highlighter {
+  /// Exactly @qalm/core `strokeOutline`: style and smoothing apply to pens only.
+  private func outline(_ points: [Pt], _ a: Active) -> [FHVec] {
+    if a.tool == .highlighter {
       let input = points.map { FHInput(x: $0.x, y: $0.y, pressure: FreehandSettings.highlighterPressure) }
-      return Freehand.stroke(input, FreehandSettings.highlighter(width: width))
+      return Freehand.stroke(input, FreehandSettings.highlighter(width: a.width))
     }
-    let input = points.map { FHInput(x: $0.x, y: $0.y, pressure: FreehandSettings.tiltPressure(p: $0.p, tilt: $0.tilt)) }
-    return Freehand.stroke(input, FreehandSettings.pen(width: width))
+    let input = points.map {
+      FHInput(x: $0.x, y: $0.y, pressure: FreehandSettings.penPressure(p: $0.p, tilt: $0.tilt, style: a.style))
+    }
+    return Freehand.stroke(FreehandSettings.stabilize(input, smoothing: a.smoothing),
+                           FreehandSettings.pen(width: a.width, style: a.style, smoothing: a.smoothing))
   }
 
   /// Redraw the in-progress stroke. `predicted` points are drawn this frame only and then discarded.
@@ -452,7 +471,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     let pts = predicted.isEmpty ? a.points : a.points + predicted
     switch a.tool {
     case .pen, .highlighter:
-      liveLayer.path = pts.isEmpty ? nil : Freehand.path(from: outline(pts, tool: a.tool, width: a.width), sx: sx, sy: sy)
+      liveLayer.path = pts.isEmpty ? nil : Freehand.path(from: outline(pts, a), sx: sx, sy: sy)
     case .lasso:
       let path = CGMutablePath()
       if let first = pts.first {
@@ -475,7 +494,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     switch a.tool {
     case .pen, .highlighter:
       guard !a.points.isEmpty else { clearLive(); return }
-      let outlinePts = outline(a.points, tool: a.tool, width: a.width)
+      let outlinePts = outline(a.points, a)  // real points only: exactly what PageCanvas draws
       let points: [[String: Any]] = a.points.map {
         ["x": $0.x, "y": $0.y, "p": $0.p, "tilt": $0.tilt, "az": $0.az, "t": $0.t]
       }
@@ -510,6 +529,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
         "width": a.width,
         "points": points,
         "heldMs": held,
+        "style": a.style,
+        "smoothing": a.smoothing,
       ])
     case .eraser:
       emitErase(a, isFinal: true)

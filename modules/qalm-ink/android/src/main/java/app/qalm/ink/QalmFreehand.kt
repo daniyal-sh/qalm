@@ -39,16 +39,77 @@ object QalmFreehand {
   /** Tech-spec §2 tilt shading. */
   fun tiltPressure(p: Double, tilt: Double): Double = min(1.0, p * (1 + 0.6 * (1 - tilt / (PI / 2))))
 
-  fun penOptions(width: Double) = Options(width, 0.6, 0.5, 0.35, simulatePressure = false, last = true)
+  /** Pen nibs, as PEN_STYLES in @qalm/core: thinning, and the pressure curve exponent (1 = none). */
+  class PenStyle(val thinning: Double, val curve: Double)
+  val PEN_STYLES = mapOf(
+    "fountain" to PenStyle(0.6, 1.0),
+    "ball" to PenStyle(0.15, 1.0),
+    "brush" to PenStyle(0.75, 0.6),
+  )
+
+  /** Stabilisation levels 0..3, as SMOOTHING in @qalm/core. Level 0 is the original pen. */
+  class SmoothingLevel(val minStep: Double, val passes: Int, val streamline: Double)
+  val SMOOTHING = listOf(
+    SmoothingLevel(0.0, 0, 0.35),
+    SmoothingLevel(0.3, 1, 0.4),
+    SmoothingLevel(0.6, 2, 0.45),
+    SmoothingLevel(1.0, 4, 0.5),
+  )
+
+  fun penOptions(width: Double, style: String = "fountain", smoothing: Int = 0) =
+    Options(width, (PEN_STYLES[style] ?: PEN_STYLES.getValue("fountain")).thinning, 0.5, (SMOOTHING.getOrNull(smoothing) ?: SMOOTHING[0]).streamline, simulatePressure = false, last = true)
   fun highlighterOptions(width: Double) = Options(width, 0.0, 0.5, 0.5, simulatePressure = false, last = true)
 
-  /** Outline of a stroke in the spec settings for [tool] ("pen" | "highlighter"). Input points are page units. */
-  fun outline(tool: String, width: Double, points: List<InkPoint>): List<DoubleArray> =
-    if (tool == "highlighter") {
-      getStroke(points.map { doubleArrayOf(it.x, it.y, 0.5) }, highlighterOptions(width))
-    } else {
-      getStroke(points.map { doubleArrayOf(it.x, it.y, tiltPressure(it.p, it.tilt)) }, penOptions(width))
+  /**
+   * Outline of a stroke in the spec settings for [tool] ("pen" | "highlighter"). Input points are page units.
+   * Exactly @qalm/core `strokeOutline`; [style] and [smoothing] apply to pens only.
+   */
+  fun outline(tool: String, width: Double, points: List<InkPoint>, style: String = "fountain", smoothing: Int = 0): List<DoubleArray> {
+    if (tool == "highlighter") return getStroke(points.map { doubleArrayOf(it.x, it.y, 0.5) }, highlighterOptions(width))
+    val st = PEN_STYLES[style] ?: PEN_STYLES.getValue("fountain")
+    val sm = SMOOTHING.getOrNull(smoothing) ?: SMOOTHING[0]
+    val input = points.map {
+      val p = tiltPressure(it.p, it.tilt)
+      doubleArrayOf(it.x, it.y, if (st.curve == 1.0) p else p.pow(st.curve))
     }
+    return getStroke(stabilize(input, sm.minStep, sm.passes), penOptions(width, style, smoothing))
+  }
+
+  /** Exactly `stabilize` in @qalm/core: drop points closer than minStep, then [1 2 1]/4 passes with pinned ends. */
+  fun stabilize(pts: List<DoubleArray>, minStep: Double, passes: Int): List<DoubleArray> {
+    val n = pts.size
+    if (n < 3) return pts
+    var out = ArrayList<DoubleArray>(n)
+    out.add(pts[0])
+    if (minStep > 0) {
+      val min2 = minStep * minStep
+      for (i in 1 until n - 1) {
+        val a = out[out.size - 1]
+        val b = pts[i]
+        val dx = b[0] - a[0]
+        val dy = b[1] - a[1]
+        if (dx * dx + dy * dy >= min2) out.add(b)
+      }
+    } else {
+      for (i in 1 until n - 1) out.add(pts[i])
+    }
+    out.add(pts[n - 1])
+    for (k in 0 until passes) {
+      val m = out.size
+      if (m < 3) break
+      val next = ArrayList<DoubleArray>(m)
+      next.add(out[0])
+      for (i in 1 until m - 1) {
+        val a = out[i - 1]
+        val b = out[i]
+        val c = out[i + 1]
+        next.add(doubleArrayOf((a[0] + 2 * b[0] + c[0]) / 4, (a[1] + 2 * b[1] + c[1]) / 4, (a[2] + 2 * b[2] + c[2]) / 4))
+      }
+      next.add(out[m - 1])
+      out = next
+    }
+    return out
+  }
 
   /**
    * Exactly src/outlinePath.ts `traceOutline` (= @qalm/core `outlineToSvgPath`, iOS `Freehand.path`):
