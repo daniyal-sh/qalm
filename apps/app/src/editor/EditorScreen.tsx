@@ -25,7 +25,6 @@ import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence } from './ai';
 import { markAllSeen, marginCards, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
 import { getClip, pasteItems, setClip, useClip } from './clipboard';
-import { entryMirror, notebookFound, pendingScrollY, type PendingScroll } from './editor.logic';
 import { cloneItems, recolorPatch, selectionBBox } from './items';
 import { trackModifiers } from './modifiers';
 import { SelectionThumb } from './SelectionThumb';
@@ -34,6 +33,7 @@ import { SwatchStrip } from './Swatches';
 import { Toolbar } from './Toolbar';
 import { keyTarget, NAV_SIDEBAR_MIN, NAV_SIDEBAR_W, parseGoTo } from './navigator.logic';
 import { PageNavigator } from './PageNavigator';
+import { entryMirror, notebookFound, pendingScrollY, type PendingScroll } from './editor.logic';
 import { Thumbnails } from './thumbnails';
 import { CrossPageUndo } from './undoStack';
 import {
