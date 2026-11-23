@@ -26,6 +26,8 @@ export interface Env {
   GOOGLE_AUDIENCES?: string;
   /** Max asset upload size in bytes. Default 50 MB. */
   MAX_ASSET_BYTES?: string;
+  /** Per-user storage cap for assets in bytes (free beta). Default 1 GiB. */
+  MAX_USER_STORAGE_BYTES?: string;
   /** Wake rules (ms). Defaults 6000 / 20000; long-poll limit 45000. Tests shorten them. */
   WAKE_IDLE_MS?: string;
   WAKE_MIN_INTERVAL_MS?: string;

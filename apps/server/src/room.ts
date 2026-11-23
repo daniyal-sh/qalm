@@ -299,8 +299,10 @@ export class DocRoom extends DurableObject<Env> {
     this.setDocId(docId);
     if (this.ref?.kind !== 'pg') throw new Error('Not a page room');
     const page = new Page(this.doc);
-    if (!page.lines().some((l) => l.key === edit.lineKey)) throw new Error(`Line ${edit.ref} no longer exists`);
+    const line = page.lines().find((l) => l.key === edit.lineKey);
+    if (!line) throw new Error(`Line ${edit.ref} no longer exists`);
     if (edit.op === 'transcribe') {
+      if (line.textSrc === 'user') throw new Error(`The student typed ${edit.ref} themselves; leave a comment instead`);
       page.setLineText(edit.lineKey, edit.text, 'agent');
       return `Saved ${edit.ref}`;
     }

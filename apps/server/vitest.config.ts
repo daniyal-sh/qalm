@@ -16,6 +16,7 @@ export default defineConfig(async () => {
             WAKE_MIN_INTERVAL_MS: '800',
             WAIT_TIMEOUT_MS: '2500',
             MAX_ASSET_BYTES: '1024',
+            MAX_USER_STORAGE_BYTES: '1500',
           },
         },
       }),

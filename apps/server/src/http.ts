@@ -31,6 +31,7 @@ export const appHandler = {
 async function route(req: Request, env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
   if (path === '/' && req.method === 'GET') return json({ name: 'qalm', mcp: `${origin(req, env.PUBLIC_URL)}/mcp` });
+  if (path === '/health' && req.method === 'GET') return json({ ok: true });
 
   // ---- sync ----
   if (path === '/sync/ticket' && req.method === 'POST') {
@@ -69,11 +70,14 @@ async function route(req: Request, env: Env, url: URL): Promise<Response | null>
   // ---- assets (content-addressed) ----
   const am = /^\/assets\/([^/]+)$/.exec(path);
   if (am) {
-    await requireUser(req, env);
+    const userId = await requireUser(req, env);
     const sha = am[1]!.toLowerCase();
     if (!SHA.test(sha)) throw new HttpError(400, 'Asset id must be a sha256 hex digest');
-    if (req.method === 'PUT') return putAsset(req, env, sha);
+    if (req.method === 'PUT') return putAsset(req, env, userId, sha);
     if (req.method === 'GET') {
+      // Only users who uploaded the bytes may read them (each device of a user uploads before referencing).
+      const own = await env.DB.prepare('SELECT 1 FROM user_assets WHERE user_id = ?1 AND sha256 = ?2').bind(userId, sha).first();
+      if (!own) throw new HttpError(404, 'Not found');
       const obj = await env.ASSETS.get(sha);
       if (!obj) throw new HttpError(404, 'Not found');
       const h = new Headers();
@@ -90,17 +94,27 @@ async function route(req: Request, env: Env, url: URL): Promise<Response | null>
   return null;
 }
 
-async function putAsset(req: Request, env: Env, sha: string): Promise<Response> {
+async function putAsset(req: Request, env: Env, userId: string, sha: string): Promise<Response> {
   const max = num(env.MAX_ASSET_BYTES, 50 * 1024 * 1024);
+  const quota = num(env.MAX_USER_STORAGE_BYTES, 1024 * 1024 * 1024);
   const len = Number(req.headers.get('Content-Length') ?? NaN);
   if (Number.isFinite(len) && len > max) throw new HttpError(413, `Asset larger than ${max} bytes`);
-  const existing = await env.ASSETS.head(sha);
-  if (existing) return json({ sha256: sha, bytes: existing.size, existed: true });
+  const mine = await env.DB.prepare('SELECT bytes FROM user_assets WHERE user_id = ?1 AND sha256 = ?2').bind(userId, sha).first<{ bytes: number }>();
+  if (mine) return json({ sha256: sha, bytes: mine.bytes, existed: true });
+  // Always read and verify the body, even when the object exists: owning an asset requires having its bytes.
   const body = await req.arrayBuffer();
   if (body.byteLength > max) throw new HttpError(413, `Asset larger than ${max} bytes`);
   if ((await sha256Hex(body)) !== sha) throw new HttpError(400, 'Body does not match its sha256');
-  await env.ASSETS.put(sha, body, { httpMetadata: { contentType: req.headers.get('Content-Type') ?? 'application/octet-stream' }, sha256: sha });
-  return json({ sha256: sha, bytes: body.byteLength, existed: false }, 201);
+  const used = (await env.DB.prepare('SELECT COALESCE(SUM(bytes), 0) AS n FROM user_assets WHERE user_id = ?1').bind(userId).first<{ n: number }>())?.n ?? 0;
+  if (used + body.byteLength > quota) throw new HttpError(507, 'Storage limit reached');
+  const existing = await env.ASSETS.head(sha);
+  if (!existing) {
+    await env.ASSETS.put(sha, body, { httpMetadata: { contentType: req.headers.get('Content-Type') ?? 'application/octet-stream' }, sha256: sha });
+  }
+  await env.DB.prepare('INSERT INTO user_assets (user_id, sha256, bytes, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT DO NOTHING')
+    .bind(userId, sha, body.byteLength, now())
+    .run();
+  return json({ sha256: sha, bytes: body.byteLength, existed: !!existing }, existing ? 200 : 201);
 }
 
 function grantJson(g: GrantRow) {
