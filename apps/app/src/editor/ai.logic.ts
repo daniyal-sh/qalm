@@ -1,4 +1,4 @@
-import { agentEntriesAfter, threadBox as coreThreadBox, type BBox, type Comment, type Item, type Line, type ThreadSummary } from '@qalm/core';
+import { agentEntriesAfter, threadBox as coreThreadBox, type BBox, type Comment, type Item, type ThreadSummary } from '@qalm/core';
 
 /** Per notebook, on this device: comment id -> thread entries (comment + replies) the student has seen. */
 export type SeenThreads = Record<string, number>;
@@ -54,8 +54,8 @@ export function unreadIds(threads: Iterable<ThreadEntries>, seen: SeenThreads): 
  * Where a thread sits on its page, live: a selection thread follows its items (null once they are all deleted),
  * an older one keeps its stored box, a line thread sits at its line.
  */
-export function threadBox(c: Comment, lines: Line[], items: readonly Item[] = []): BBox | null {
-  return coreThreadBox(c, items, lines);
+export function threadBox(c: Comment, items: readonly Item[] = []): BBox | null {
+  return coreThreadBox(c, items);
 }
 
 export interface MarginCard {
@@ -65,12 +65,11 @@ export interface MarginCard {
 }
 
 /**
- * Open threads for the page margin, top to bottom next to their line, pushed down so they never overlap
+ * Open threads for the page margin, top to bottom next to their ink, pushed down so they never overlap
  * (`height` px each plus `gap`). With `pageH` (px), cards that would run past the page's bottom are pulled back up
- * (when they all fit), so they don't spill onto the next page's cards. Threads whose line is gone are left to the panel.
+ * (when they all fit), so they don't spill onto the next page's cards. Threads whose ink is gone (or on the whole page) are left to the panel.
  */
 export function marginCards(
-  lines: Line[],
   comments: Comment[],
   scale: number,
   height: number,
@@ -81,7 +80,7 @@ export function marginCards(
 ): MarginCard[] {
   const placed = comments
     .filter((c) => !c.resolved || c.id === activeId)
-    .map((c) => ({ c, box: threadBox(c, lines, items) }))
+    .map((c) => ({ c, box: threadBox(c, items) }))
     .filter((x): x is { c: Comment; box: BBox } => x.box !== null)
     .sort((a, b) => a.box[1] - b.box[1] || a.c.createdAt - b.c.createdAt);
   const out: MarginCard[] = [];

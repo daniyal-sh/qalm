@@ -84,9 +84,9 @@ export async function denyRequest(tm: Authed, id: string): Promise<void> {
 
 /** "Read + comment", "Read only", … */
 export function grantSummary(g: Pick<Grant, 'canComment' | 'canTranscribe'>): string {
-  if (g.canComment && g.canTranscribe) return 'Read, comment and transcribe';
+  if (g.canComment && g.canTranscribe) return 'Read, comment and save readings';
   if (g.canComment) return 'Read and comment';
-  if (g.canTranscribe) return 'Read and transcribe';
+  if (g.canTranscribe) return 'Read and save readings';
   return 'Read only';
 }
 

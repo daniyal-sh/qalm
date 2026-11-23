@@ -194,11 +194,11 @@ function GrantCard({ g, onChange, onRevoke }: { g: Grant; onChange(next: Grant):
       </View>
       {open ? (
         <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line2 }}>
-          <Row title="Leave comments" description="Shown as pins next to your lines. Never changes ink">
+          <Row title="Leave comments" description="Pinned next to your ink. Never changes ink">
             <Toggle label="Leave comments" value={g.canComment} onChange={(v) => void patch({ canComment: v })} />
           </Row>
-          <Row title="Save transcriptions" description="Stores its reading of a line. You can edit it">
-            <Toggle label="Save transcriptions" value={g.canTranscribe} onChange={(v) => void patch({ canTranscribe: v })} />
+          <Row title="Save readings" description="Stores what it reads in your handwriting. You can edit it under Reading">
+            <Toggle label="Save readings" value={g.canTranscribe} onChange={(v) => void patch({ canTranscribe: v })} />
           </Row>
           <SectionLabel style={{ paddingHorizontal: 16 }}>Notebooks it can see</SectionLabel>
           {notebooks.length === 0 ? (

@@ -1,4 +1,4 @@
-import { Page, summarizeThreads, type Comment, type Line } from '@qalm/core';
+import { Page, summarizeThreads, type BBox, type Comment } from '@qalm/core';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 
@@ -12,16 +12,17 @@ const you = { kind: 'user' as const, name: 'You' };
 function pageWith(build: (p: Page) => void): PageData {
   const page = new Page(new Y.Doc());
   build(page);
-  return { page, index: 0, lines: page.lines(), comments: page.comments(), items: page.items() };
+  return { page, index: 0, readings: page.readings(), comments: page.comments(), items: page.items() };
 }
 
 /** The page's threads as the thread index has them. */
-const sums = (d: PageData, pageId = 'p1') => summarizeThreads(pageId, d.page.comments(), d.lines);
+const sums = (d: PageData, pageId = 'p1') => summarizeThreads(pageId, d.page.comments(), d.readings);
 
-const line = (key: string, y: number): Line => ({ key, kind: 'line', itemIds: [key], bbox: [50, y, 200, y + 20] });
-const comment = (id: string, lineKey: string, extra: Partial<Comment> = {}): Comment => ({
+/** A thread on a box at row `y` (or, with `y` null, on ink that's gone). */
+const at = (y: number): BBox => [50, y, 200, y + 20];
+const comment = (id: string, y: number | null, extra: Partial<Comment> = {}): Comment => ({
   id,
-  lineKey,
+  ...(y === null ? { anchorIds: ['zzz'] } : { anchor: at(y) }),
   author: agent,
   text: id,
   createdAt: 1,
@@ -34,17 +35,17 @@ describe('live agent logic', () => {
   it('counts unread agent entries and marks only read threads', () => {
     let a = '';
     const d = pageWith((p) => {
-      a = p.addComment({ lineKey: 'k', author: agent, text: 'hi' });
+      a = p.addComment({ author: agent, text: 'hi' });
       p.replyToComment(a, you, 'why');
       p.replyToComment(a, agent, 'because');
-      p.addComment({ lineKey: 'k', author: you, text: 'mine' });
+      p.addComment({ author: you, text: 'mine' });
     });
     expect(agentEntryCount(sums(d))).toBe(2);
     expect(unreadCount(sums(d), {})).toBe(2);
     expect(unreadCount(sums(d), { [a]: 2 })).toBe(1);
     expect([...unreadIds(sums(d), {})]).toEqual([a]);
     // Only the threads that were read are marked (not every loaded thread).
-    const other = d.page.addComment({ lineKey: 'k', author: agent, text: 'later' });
+    const other = d.page.addComment({ author: agent, text: 'later' });
     const seen = markSeen(sums(d).filter((x) => x.id === a), {});
     expect(unreadCount(sums(d), seen)).toBe(1);
     expect([...unreadIds(sums(d), seen)]).toEqual([other]);
@@ -55,11 +56,9 @@ describe('live agent logic', () => {
     expect(newestAgentEntry(sums(d))).toMatchObject({ name: 'Claude', pageId: 'p1' });
   });
 
-  it('stacks margin cards beside their lines without overlap, skipping resolved and orphaned threads', () => {
-    const lines = [line('a', 100), line('b', 110), line('c', 400)];
+  it('stacks margin cards beside their ink without overlap, skipping resolved and orphaned threads', () => {
     const cards = marginCards(
-      lines,
-      [comment('c1', 'a'), comment('c2', 'b'), comment('c3', 'c'), comment('gone', 'zzz'), comment('done', 'a', { resolved: true }), comment('sel', '', { anchor: [0, 300, 10, 310] })],
+      [comment('c1', 100), comment('c2', 110), comment('c3', 400), comment('gone', null), comment('done', 100, { resolved: true }), comment('sel', null, { anchorIds: undefined, anchor: [0, 300, 10, 310] })],
       2,
       64,
       8,
@@ -73,27 +72,27 @@ describe('live agent logic', () => {
   });
 
   it('keeps margin cards on their page: a stack running past the bottom is pulled back up', () => {
-    const lines = [line('a', 380), line('b', 390), line('c', 395)];
-    const cards = marginCards(lines, [comment('c1', 'a'), comment('c2', 'b'), comment('c3', 'c')], 1, 64, 8, null, 420);
+    const three = [comment('c1', 380), comment('c2', 390), comment('c3', 395)];
+    const cards = marginCards(three, 1, 64, 8, null, 420);
     expect(cards.map((c) => c.top)).toEqual([212, 284, 356]);
     // A stack taller than the page keeps its order and overflows instead of overlapping.
-    expect(marginCards(lines, [comment('c1', 'a'), comment('c2', 'b'), comment('c3', 'c')], 1, 64, 8, null, 200).map((c) => c.top)).toEqual([376, 448, 520]);
+    expect(marginCards(three, 1, 64, 8, null, 200).map((c) => c.top)).toEqual([376, 448, 520]);
   });
 
   it('thinking ends when an agent writes anywhere in the notebook, or after a timeout', () => {
     let a = '';
     const p1 = pageWith((p) => {
-      a = p.addComment({ lineKey: 'k', author: agent, text: 'earlier answer' });
+      a = p.addComment({ author: agent, text: 'earlier answer' });
     });
     const now = Date.now();
     const t = startThinking(sums(p1), now);
     expect(stillThinking(t, sums(p1), now + 1000)).toBe(true);
     // A far page's old agent thread turning up in the index (an older notebook being indexed) doesn't end it.
-    const old = pageWith((p) => p.addComment({ lineKey: 'k', author: agent, text: 'old' }));
+    const old = pageWith((p) => p.addComment({ author: agent, text: 'old' }));
     const oldSums = sums(old, 'p9').map((x) => ({ ...x, createdAt: now - 2 * THINKING_MS }));
     expect(stillThinking(t, [...sums(p1), ...oldSums], now + 1000)).toBe(true);
     // A reply, or a new agent thread on any page, ends it.
-    const fresh = pageWith((p) => p.addComment({ lineKey: 'k', author: agent, text: 'new' }));
+    const fresh = pageWith((p) => p.addComment({ author: agent, text: 'new' }));
     expect(stillThinking(t, [...sums(p1), ...sums(fresh, 'p30')], now + 1000)).toBe(false);
     p1.page.replyToComment(a, agent, 'the answer');
     expect(stillThinking(t, sums(p1), now + 1000)).toBe(false);
@@ -119,13 +118,12 @@ describe('live agent logic', () => {
 });
 
 describe('selection threads', () => {
-  it('pin at their selection box, keyed by comment id', async () => {
+  it('pin at their box, keyed by comment id; none on the whole page', async () => {
     const { commentAnchors } = await import('../src/editor/view');
-    const lines = [line('a', 100)];
-    const anchors = commentAnchors(lines, [comment('c1', 'a'), comment('s1', 'a', { anchor: [300, 300, 340, 330] }), comment('s2', '', { anchor: [10, 10, 20, 20], resolved: true })], 's1');
+    const anchors = commentAnchors([comment('c1', 100), comment('s1', null, { anchorIds: undefined, anchor: [300, 300, 340, 330] }), comment('s2', 10, { resolved: true }), comment('pg', null, { anchorIds: undefined })], 's1');
     expect(anchors).toEqual([
-      { lineKey: 'a', bbox: [50, 100, 200, 120], active: false },
-      { lineKey: 's1', bbox: [300, 300, 340, 330], active: true },
+      { id: 'c1', bbox: [50, 100, 200, 120], active: false },
+      { id: 's1', bbox: [300, 300, 340, 330], active: true },
     ]);
   });
 
@@ -135,14 +133,14 @@ describe('selection threads', () => {
     const page = new Page(new Y.Doc());
     const pts = (x: number, y: number) => [0, 1, 2, 3].map((i) => ({ x: x + i * 10, y: y + i * 5, p: 0.5, tilt: Math.PI / 2, az: 0, t: i * 8 }));
     page.addItem({ id: 'w', type: 'stroke', tool: 'pen', color: '#000', width: 2, points: pts(100, 100), bbox: [99, 99, 131, 116], createdAt: 0 });
-    const id = page.addComment({ lineKey: 'w', author: you, text: 'this', anchor: [99, 99, 131, 116], anchorIds: ['w'] });
+    const id = page.addComment({ author: you, text: 'this', anchor: [99, 99, 131, 116], anchorIds: ['w'] });
     page.doc.transact(() => page.updateItem('w', { points: pts(100, 400), bbox: [99, 399, 131, 416] }), LOCAL_ORIGIN);
-    const at = () => commentAnchors(page.lines(), page.comments(), null, page.items());
-    expect(at()).toEqual([{ lineKey: id, bbox: [99, 399, 131, 416], active: false }]);
-    expect(marginCards(page.lines(), page.comments(), 1, 64, 8, null, undefined, page.items()).map((c) => c.top)).toEqual([395]);
+    const pins = () => commentAnchors(page.comments(), null, page.items());
+    expect(pins()).toEqual([{ id, bbox: [99, 399, 131, 416], active: false }]);
+    expect(marginCards(page.comments(), 1, 64, 8, null, undefined, page.items()).map((c) => c.top)).toEqual([395]);
     page.removeItems(['w']);
-    expect(at()).toEqual([]);
-    expect(marginCards(page.lines(), page.comments(), 1, 64, 8, null, undefined, page.items())).toEqual([]);
+    expect(pins()).toEqual([]);
+    expect(marginCards(page.comments(), 1, 64, 8, null, undefined, page.items())).toEqual([]);
     expect(anchorInkRemoved(page.comments()[0]!, page.items())).toBe(true);
   });
 });

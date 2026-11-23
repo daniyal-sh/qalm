@@ -1,8 +1,8 @@
-import { Page, type Line, type StrokeItem } from '@qalm/core';
+import { Page, type StrokeItem, type TextItem } from '@qalm/core';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 
-import { MAX_READING_LINES, readingSource, resetReading, saveReading, selectionLines } from '../src/editor/reading.logic';
+import { addReading, MAX_READINGS, readingSource, saveReading, selectionInk, selectionReadings } from '../src/editor/reading.logic';
 
 const stroke = (id: string, x0: number, y0: number, x1: number, y1: number): StrokeItem => ({
   id,
@@ -14,61 +14,66 @@ const stroke = (id: string, x0: number, y0: number, x1: number, y1: number): Str
   bbox: [x0, y0, x1, y1],
   createdAt: 0,
 });
+const text: TextItem = { id: 't', type: 'text', x: 300, y: 300, w: 80, text: 'hi', fontSize: 14, color: '#000' };
 
-const line = (key: string, y: number, extra: Partial<Line> = {}): Line => ({ key, kind: 'line', itemIds: [key, `${key}2`], bbox: [50, y, 200, y + 20], ...extra });
+/** `x^2` (a, b) read by Claude, `dx` (z) unread, far below. */
+function setup() {
+  const p = new Page(new Y.Doc());
+  p.addItems([stroke('a', 50, 100, 60, 120), stroke('b', 62, 100, 70, 120), stroke('z', 50, 400, 60, 420), text]);
+  p.setReading(['a', 'b'], 'x^2', 'agent', 'Claude');
+  const get = () => p.readings().find((r) => r.ids.includes('a'));
+  return { p, get };
+}
 
-describe('selectionLines', () => {
-  it('keeps handwritten lines the selection touches, top to bottom, never drawings', () => {
-    const lines = [line('b', 300), line('a', 100), { ...line('d', 200), kind: 'drawing' as const }, line('c', 500)];
-    expect(selectionLines(lines, ['b2', 'a', 'd', 'img1']).map((l) => l.key)).toEqual(['a', 'b']);
-    expect(selectionLines(lines, ['d', 'img1'])).toEqual([]); // only a drawing and an image: no Reading
-    const many = Array.from({ length: 20 }, (_, i) => line(`l${i}`, i * 30));
-    expect(selectionLines(many, many.map((l) => l.key))).toHaveLength(MAX_READING_LINES);
+describe('selection readings', () => {
+  it('the ink of a selection (no text boxes or images), and the readings that overlap it, top to bottom', () => {
+    const { p } = setup();
+    expect(selectionInk(p.items(), ['b', 't', 'z'])).toEqual(['b', 'z']);
+    expect(selectionInk(p.items(), ['t'])).toEqual([]); // only a text box: no Reading
+    p.setReading(['z'], 'dx', 'user');
+    expect(selectionReadings(p.readings(), p.items(), ['z', 'b']).map((r) => r.text)).toEqual(['x^2', 'dx']);
+    expect(selectionReadings(p.readings(), p.items(), ['z']).map((r) => r.text)).toEqual(['dx']);
+    const q = new Page(new Y.Doc());
+    for (let i = 0; i < 20; i++) {
+      q.addItem(stroke(`s${i}`, 50, i * 30, 60, i * 30 + 10));
+      q.setReading([`s${i}`], `r${i}`, 'agent');
+    }
+    expect(selectionReadings(q.readings(), q.items(), q.items().map((i) => i.id))).toHaveLength(MAX_READINGS);
   });
-});
 
-describe('readingSource', () => {
   it('names the source', () => {
-    expect(readingSource({})).toEqual({ label: 'No reading yet', tone: 'none' });
-    expect(readingSource({ text: 'x', textSrc: 'device' })).toEqual({ label: 'On-device guess', tone: 'device' });
-    expect(readingSource({ text: 'x', textSrc: 'agent', by: 'Claude' })).toEqual({ label: 'Read by Claude', tone: 'agent' });
-    expect(readingSource({ text: 'x', textSrc: 'agent' }).label).toBe('Read by your agent');
-    expect(readingSource({ text: 'x', textSrc: 'user' })).toEqual({ label: 'Yours', tone: 'user' });
+    expect(readingSource({ src: 'agent', by: 'Claude' })).toEqual({ label: 'Read by Claude', tone: 'agent' });
+    expect(readingSource({ src: 'agent' }).label).toBe('Read by your agent');
+    expect(readingSource({ src: 'user' })).toEqual({ label: 'Yours', tone: 'user' });
   });
 });
 
-describe('saveReading', () => {
-  const setup = () => {
-    const p = new Page(new Y.Doc());
-    p.addItems([stroke('a', 50, 100, 60, 120), stroke('b', 62, 100, 70, 120)]);
-    p.setLineText('a', 'x^2', 'agent', undefined, 'Claude');
-    const get = () => p.lines().find((l) => l.key === 'a')!;
-    return { p, get };
-  };
-
-  it("saves the student's text as theirs", () => {
+describe('saving a reading', () => {
+  it("saves the student's text as theirs (agents can't overwrite it)", () => {
     const { p, get } = setup();
-    expect(saveReading(p, get(), '  x² + 1 ')).toBe('saved');
-    expect(get()).toMatchObject({ text: 'x² + 1', textSrc: 'user' });
-    expect(get().by).toBeUndefined();
+    expect(saveReading(p, get()!, '  x² + 1 ')).toBe('saved');
+    expect(get()).toMatchObject({ text: 'x² + 1', src: 'user' });
+    expect(get()!.by).toBeUndefined();
+    expect(p.setReading(['a', 'b'], 'x^3', 'agent', 'Claude')).toBeNull();
   });
 
-  it('leaves an unchanged automatic reading automatic', () => {
+  it("leaves an agent's unchanged fresh reading as it is; confirming a stale one makes it the student's", () => {
     const { p, get } = setup();
-    expect(saveReading(p, get(), 'x^2')).toBe('unchanged');
-    expect(get()).toMatchObject({ textSrc: 'agent', by: 'Claude' });
+    expect(saveReading(p, get()!, 'x^2')).toBe('unchanged');
+    expect(get()).toMatchObject({ src: 'agent', by: 'Claude' });
+    p.addItem(stroke('sup', 72, 92, 76, 100));
+    expect(get()!.stale).toBe(true);
+    expect(saveReading(p, get()!, 'x^2')).toBe('saved');
+    expect(get()).toMatchObject({ src: 'user' });
+    expect(get()!.stale).toBeUndefined();
   });
 
-  it('empty text or reset goes back to automatic', () => {
+  it('empty text removes it; the student can read unread ink', () => {
     const { p, get } = setup();
-    expect(saveReading(p, get(), '   ')).toBe('cleared');
-    expect(get().text).toBeUndefined();
-    expect(saveReading(p, get(), '')).toBe('unchanged');
-    saveReading(p, get(), 'mine');
-    expect(resetReading(p, get())).toBe(true);
-    expect(get().text).toBeUndefined();
-    p.setLineText('a', 'guess', 'device', 0.4);
-    expect(resetReading(p, get())).toBe(false); // only the student's own text resets
-    expect(get().text).toBe('guess');
+    expect(saveReading(p, get()!, '   ')).toBe('removed');
+    expect(get()).toBeUndefined();
+    expect(addReading(p, ['z'], ' dx ')).toBe('saved');
+    expect(p.readings()).toMatchObject([{ ids: ['z'], text: 'dx', src: 'user' }]);
+    expect(addReading(p, ['z'], '  ')).toBe('unchanged');
   });
 });

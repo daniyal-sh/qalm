@@ -13,7 +13,6 @@ import { useEditor } from './context';
 import { DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, dropEmptyText, TEXT_LINE_HEIGHT, hitText, typeText, makeStroke, pointsBBox, transformPatch } from './items';
 import { isAdditive } from './modifiers';
 import { PAPER_ACCENT, SelectionFrame, type LiveEdit } from './SelectionFrame';
-import { RecognitionScheduler } from './recognition';
 import { pageDocQueue, pdfQueue } from './renderQueue';
 import { commentAnchors, pdfRenderWidth } from './view';
 
@@ -189,26 +188,24 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   const sub = React.useMemo(() => (page ? (cb: () => void) => page.observe(cb) : null), [page]);
   const v = useVersion(sub);
   const items = React.useMemo(() => page?.items() ?? [], [page, v]);
-  const lines = React.useMemo(() => page?.lines() ?? [], [page, v]);
+  const readings = React.useMemo(() => page?.readings() ?? [], [page, v]);
   const comments = React.useMemo(() => page?.comments() ?? [], [page, v]);
   const scale = width / info.size.w;
   const height = Math.round(info.size.h * scale);
 
-  // Undo manager and on-device recognition while the page is mounted.
+  // Undo manager while the page is mounted.
   React.useEffect(() => {
     if (!page) return;
     ed.undoManagerFor(info.id, page);
-    const rec = new RecognitionScheduler(page, (lines, lang) => QalmInk.recognize(lines, lang));
-    return rec.start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, info.id]);
 
-  // Comments and lines for the comments panel.
+  // Comments and readings for the comments panel.
   React.useEffect(() => {
     if (!page) return;
-    ed.reportPage(info.id, { page, index, lines, comments, items });
+    ed.reportPage(info.id, { page, index, readings, comments, items });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, lines, comments, items, index]);
+  }, [page, readings, comments, items, index]);
   React.useEffect(() => () => ed.reportPage(info.id, null), [info.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   React.useEffect(() => {
@@ -287,7 +284,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   const toPage = (wx: number, wy: number, fn: (x: number, y: number) => void) =>
     rootRef.current?.measureInWindow((x, y) => fn((wx - x) / scale, (wy - y) / scale));
 
-  const anchors = React.useMemo(() => commentAnchors(lines, comments, ed.activeCommentId, items), [lines, comments, ed.activeCommentId, items]);
+  const anchors = React.useMemo(() => commentAnchors(comments, ed.activeCommentId, items), [comments, ed.activeCommentId, items]);
   const assetUri = React.useCallback((id: string) => imageUris.get(id), [imageUris]);
   const onDrawn = React.useCallback(
     (ids: string[], complete: boolean) => {
@@ -399,10 +396,10 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
         />
       ) : null}
       {anchors.map((a) => {
-        const c = comments.find((x) => x.id === a.lineKey) ?? comments.find((x) => x.lineKey === a.lineKey && !x.anchor && !x.anchorIds?.length && !x.resolved) ?? comments.find((x) => x.lineKey === a.lineKey);
+        const c = comments.find((x) => x.id === a.id);
         return c ? (
           <Pressable
-            key={a.lineKey}
+            key={a.id}
             accessibilityLabel={`Comment from ${c.author.name}`}
             onPress={() => ed.setActiveComment(c.id)}
             style={{ position: 'absolute', left: (a.bbox[2] + 9) * scale - 22, top: (a.bbox[1] + 5) * scale - 22, width: 44, height: 44 }}

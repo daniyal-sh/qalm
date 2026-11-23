@@ -66,9 +66,9 @@ describe('export wiring', () => {
     nb.addAsset(asset);
     const page1 = await src.loadPage(first);
     const p1 = new Page(page1.doc);
-    const lineKey = p1.lines()[0]!.key;
-    p1.setLineText(lineKey, 'x^2', 'user');
-    p1.addComment({ lineKey, author: { kind: 'agent', name: 'Tutor' }, text: 'Nice' });
+    const ink = p1.items().filter((i) => i.type === 'stroke').map((i) => i.id);
+    p1.setReading(ink, 'x^2', 'user');
+    p1.addComment({ anchorIds: ink, author: { kind: 'agent', name: 'Tutor' }, text: 'Nice' });
     src.assetBytes = async () => new Uint8Array([1, 2, 3]);
     const before = { index: Y.encodeStateAsUpdate(nb.doc), page: Y.encodeStateAsUpdate(page1.doc) };
 
@@ -97,7 +97,9 @@ describe('export wiring', () => {
     const page = new Page(new Y.Doc());
     Y.applyUpdate(page.doc, written.get(docIds.page(meta.id, pages[0]!.id))!);
     expect(page.items().map((i) => i.type)).toEqual(['stroke', 'text']);
-    expect(page.lines().find((l) => l.key === lineKey)).toMatchObject({ text: 'x^2', textSrc: 'user' });
+    // The reading and the thread follow the copied strokes (new ids).
+    const copied = page.items().filter((i) => i.type === 'stroke').map((i) => i.id);
+    expect(page.readings()).toMatchObject([{ ids: copied, text: 'x^2', src: 'user' }]);
     expect(page.comments().map((c) => c.text)).toEqual(['Nice']);
 
     // The original docs are unchanged.

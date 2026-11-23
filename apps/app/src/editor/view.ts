@@ -1,5 +1,5 @@
 /** Pure editor view maths: zoom, page layout and virtualization, PDF width buckets, pen-button tool switching. */
-import { threadBox, type BBox, type Comment, type Item, type Line, type PageInfo } from '@qalm/core';
+import { readingsOf, threadBox, type BBox, type Comment, type Item, type PageInfo, type Reading } from '@qalm/core';
 
 export const MIN_ZOOM = 0.75;
 export const MAX_ZOOM = 4;
@@ -134,35 +134,33 @@ export function penButtonTool(gesture: 'eraser' | 'last' | 'none', tool: ToolId,
 }
 
 export interface Anchor {
-  /** the line's key, or the comment's id for a thread on a selection */
-  lineKey: string;
+  /** the thread's comment id */
+  id: string;
   bbox: BBox;
   active: boolean;
 }
 
 /**
- * Comment pins for a page: one per line with an open comment, one per open thread on a selection (at its box),
- * plus the active comment's, even if resolved.
+ * Comment pins for a page: one per open thread with a place (its strokes, live, or its box), plus the active
+ * comment's, even if resolved. Threads whose ink is gone, or on the whole page, have no pin.
  */
-export function commentAnchors(lines: Line[], comments: Comment[], activeCommentId: string | null, items: readonly Item[] = []): Anchor[] {
-  const keyOf = (c: Comment) => (c.anchor || c.anchorIds?.length ? c.id : c.lineKey);
-  const active = comments.find((c) => c.id === activeCommentId);
-  const activeKey = active ? keyOf(active) : undefined;
-  const out = new Map<string, Anchor>();
+export function commentAnchors(comments: Comment[], activeCommentId: string | null, items: readonly Item[] = []): Anchor[] {
+  const out: Anchor[] = [];
   for (const c of comments) {
     if (c.resolved && c.id !== activeCommentId) continue;
-    // Live: a selection thread's pin follows its ink, and has none once that ink is deleted.
-    const bbox = threadBox(c, items, lines);
-    if (!bbox) continue;
-    const key = keyOf(c);
-    out.set(key, { lineKey: key, bbox, active: activeKey === key });
+    const bbox = threadBox(c, items);
+    if (bbox) out.push({ id: c.id, bbox, active: c.id === activeCommentId });
   }
-  return [...out.values()];
+  return out;
 }
 
-/** Quote for a comment card: the line's text, if known. */
-export function lineQuote(lines: Line[], lineKey: string): string | null {
-  const t = lines.find((l) => l.key === lineKey)?.text?.trim();
+/** Quote for a comment card: the readings of its strokes (fresh ones; none while they are stale). */
+export function threadQuote(readings: readonly Reading[], c: Comment): string | null {
+  const t = readingsOf(readings, c.anchorIds ?? [])
+    .filter((r) => !r.stale)
+    .map((r) => r.text.trim())
+    .filter(Boolean)
+    .join(' / ');
   return t || null;
 }
 

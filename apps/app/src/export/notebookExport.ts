@@ -67,7 +67,7 @@ export function exportFileName(title: string, ext: 'pdf' | 'qalm'): string {
 }
 
 /**
- * Restores a `.qalm` backup as a NEW notebook: fresh notebook and page ids, title suffixed " (restored)". Items, lines,
+ * Restores a `.qalm` backup as a NEW notebook: fresh notebook and page ids, title suffixed " (restored)". Items, readings,
  * comments, pages, assets and meta are copied; the original notebook (if it still exists) is never touched.
  * Returns the new notebook's meta.
  */
@@ -109,7 +109,7 @@ export async function restoreQalm(
     const doc = b.pages.get(oldPage);
     if (!doc) continue;
     const page = new Page(doc);
-    nb.putThreads(summarizeThreads(newPage, page.comments(), page.lines()));
+    nb.putThreads(summarizeThreads(newPage, page.comments(), page.readings()));
   }
   index.transact(() => index.getMap('meta').set('threadsIndexed', true), LOCAL_ORIGIN);
   await writeDoc(docIds.notebook(id), Y.encodeStateAsUpdate(index));

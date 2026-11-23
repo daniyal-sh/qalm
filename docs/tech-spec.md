@@ -273,7 +273,7 @@ drawn ids.
 
 ```ts
 // PageCanvas (TS, all platforms)
-interface PageCanvasProps { info: PageInfo; items: Item[]; selection?: string[]; anchors?: { lineKey: string; bbox: BBox; active: boolean }[]; pdfImage?: string /*uri*/; width: number /*px*/; onDrawn?(ids: string[]): void /*item ids, once Skia has them*/;
+interface PageCanvasProps { info: PageInfo; items: Item[]; selection?: string[]; anchors?: { id: string /*comment id*/; bbox: BBox; active: boolean }[]; pdfImage?: string /*uri*/; width: number /*px*/; onDrawn?(ids: string[]): void /*item ids, once Skia has them*/;
   live?: { ids: string[]; transform: Sim } /* a selection being dragged: drawn transformed, paths not rebuilt */ }
 // InkOverlay (native view QalmInkView; web: src/InkOverlay.web.tsx)
 type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'none';

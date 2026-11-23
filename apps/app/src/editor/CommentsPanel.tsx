@@ -11,22 +11,22 @@ import { EmptyState } from '../ui/layout';
 import { Text } from '../ui/Text';
 import { filterFor, filterRows, rowsInView, type CommentFilter, type CommentRow, type RowBox } from './CommentsPanel.logic';
 import type { PageData } from './context';
-import { lineQuote } from './view';
+import { threadQuote } from './view';
 
 /** px width of the comments panel (docked or floating). */
 export const PANEL_W = 344;
 
 type PressState = { pressed: boolean; hovered?: boolean; focused?: boolean };
 
-/** Where a thread sits, in words. A row from the index (page not loaded) only knows the line's reading. */
+/** Where a thread sits, in words. A row from the index (page not loaded) only knows the reading of its ink. */
 function whereText(row: CommentRow): { where: string; hasLine: boolean } {
   const { summary: t, data, comment: cm } = row;
-  if (!data || !cm) return { where: t.quote ? `“${t.quote}”` : t.onSelection ? 'On a selection' : 'Handwritten line', hasLine: true };
-  const quote = lineQuote(data.lines, cm.lineKey);
-  const onSelection = !!cm.anchor || !!cm.anchorIds?.length;
-  const hasLine = onSelection || data.lines.some((l) => l.key === cm.lineKey);
-  const where = anchorInkRemoved(cm, data.items) ? 'Ink removed' : quote ? `“${quote}”` : onSelection ? 'On a selection' : hasLine ? 'Handwritten line' : 'The line was erased';
-  return { where, hasLine };
+  if (!data || !cm) return { where: t.quote ? `“${t.quote}”` : t.onSelection ? 'On your ink' : 'On this page', hasLine: true };
+  const quote = threadQuote(data.readings, cm);
+  const anchored = !!cm.anchor || !!cm.anchorIds?.length;
+  const where = anchorInkRemoved(cm, data.items) ? 'Ink removed' : quote ? `“${quote}”` : anchored ? 'On your ink' : 'On this page';
+  // "Show" scrolls to its ink; a thread on the whole page or on erased ink has nothing to show.
+  return { where, hasLine: anchored && !anchorInkRemoved(cm, data.items) };
 }
 
 /**

@@ -1,39 +1,46 @@
-import { LOCAL_ORIGIN, type Line, type Page } from '@qalm/core';
+import { LOCAL_ORIGIN, type Page } from '@qalm/core';
 import * as React from 'react';
 import { View } from 'react-native';
 
 import { Button, Pill, TextField, type PillTone } from '../ui/controls';
 import { Sheet } from '../ui/layout';
 import { Text } from '../ui/Text';
-import { readingSource, resetReading, saveReading, type ReadingTone } from './reading.logic';
+import { addReading, readingSource, saveReading, selectionReadings, type ReadingTone } from './reading.logic';
 
-const PILL: Record<ReadingTone, PillTone> = { user: 'accent', agent: 'assistant', device: 'neutral', none: 'neutral' };
+const PILL: Record<ReadingTone, PillTone> = { user: 'accent', agent: 'assistant' };
 
 /**
- * See and edit what the selected lines say: the saved reading and where it came from (the device's guess, an agent's
- * transcription, or the student's own text). Saving makes it the student's text, which agents can't overwrite.
+ * What an agent read in the selected ink (or what the student wrote for it): each reading with who it's from and a
+ * "stale" badge once the ink changed since. Editing makes a reading the student's own, which agents can't overwrite.
+ * With no reading yet, the student can write one.
  */
-export function ReadingSheet({ page, lines, onClose, onDone }: { page: Page; lines: Line[]; onClose(): void; onDone(msg: string | null): void }) {
-  const [drafts, setDrafts] = React.useState(() => lines.map((l) => l.text ?? ''));
-  const many = lines.length > 1;
+export function ReadingSheet({ page, ink, onClose, onDone }: { page: Page; ink: string[]; onClose(): void; onDone(msg: string | null): void }) {
+  const readings = React.useMemo(() => selectionReadings(page.readings(), page.items(), ink), [page, ink]);
+  const [drafts, setDrafts] = React.useState(() => readings.map((r) => r.text));
+  const [own, setOwn] = React.useState('');
+  const many = readings.length > 1;
   const save = () => {
     let saved = 0;
-    let cleared = 0;
+    let removed = 0;
     // One transaction: one undo step for the whole sheet.
     page.doc.transact(() => {
-      lines.forEach((l, i) => {
-        const r = saveReading(page, l, drafts[i] ?? '');
-        if (r === 'saved') saved++;
-        else if (r === 'cleared') cleared++;
+      if (!readings.length) {
+        if (addReading(page, ink, own) === 'saved') saved++;
+        return;
+      }
+      readings.forEach((r, i) => {
+        const res = saveReading(page, r, drafts[i] ?? '');
+        if (res === 'saved') saved++;
+        else if (res === 'removed') removed++;
       });
     }, LOCAL_ORIGIN);
-    onDone(saved ? (many ? 'Readings saved' : 'Reading saved') : cleared ? 'Back to automatic' : null);
+    onDone(saved ? (many ? 'Readings saved' : 'Reading saved') : removed ? 'Reading removed' : null);
   };
   return (
     <Sheet
       visible
       onClose={onClose}
-      title={many ? 'Readings' : 'Reading'}
+      title="Reading"
       width={520}
       footer={
         <>
@@ -42,46 +49,43 @@ export function ReadingSheet({ page, lines, onClose, onDone }: { page: Page; lin
         </>
       }
     >
-      <Text tone="muted">
-        {many ? 'What these lines say' : 'What this line says'}, as your agents see it. Text you type is yours: agents
-        can’t change it. Leave it empty to go back to automatic.
-      </Text>
-      {lines.map((l, i) => {
-        const src = readingSource(l);
+      {readings.length ? (
+        <Text tone="muted">
+          What your agent read in this ink. Fix it if it's wrong: your text is yours, and agents can't change it. Leave it
+          empty to remove it.
+        </Text>
+      ) : (
+        <>
+          <Text tone="muted">No agent has read this yet. Agents see your handwriting as an image and can save what they read here.</Text>
+          <TextField
+            value={own}
+            onChangeText={setOwn}
+            placeholder="Or type what it says"
+            accessibilityLabel="Your reading"
+            autoFocus
+            onSubmitEditing={save}
+          />
+        </>
+      )}
+      {readings.map((r, i) => {
+        const src = readingSource(r);
         return (
-          <View key={l.key} style={{ gap: 8 }}>
+          <View key={r.id} style={{ gap: 8 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 36 }}>
-              {many ? (
-                <Text variant="meta" tone="faint">
-                  Line {i + 1}
-                </Text>
-              ) : null}
               <Pill label={src.label} tone={PILL[src.tone]} />
-              <View style={{ flex: 1 }} />
-              {l.textSrc === 'user' ? (
-                <Button
-                  label="Use automatic"
-                  size="sm"
-                  variant="ghost"
-                  icon="rotate-ccw"
-                  onPress={() => {
-                    resetReading(page, l);
-                    onDone('Back to automatic');
-                  }}
-                />
-              ) : null}
+              {r.stale ? <Pill label="Stale" tone="warn" icon="alert-triangle" /> : null}
             </View>
             <TextField
               value={drafts[i]}
               onChangeText={(t) => setDrafts((d) => d.map((x, k) => (k === i ? t : x)))}
-              placeholder="Type what this line says"
-              accessibilityLabel={many ? `Reading of line ${i + 1}` : 'Reading'}
+              placeholder="Type what it says"
+              accessibilityLabel={many ? `Reading ${i + 1}` : 'Reading'}
               autoFocus={i === 0}
               onSubmitEditing={many ? undefined : save}
             />
-            {src.tone === 'none' ? (
+            {r.stale ? (
               <Text variant="meta" tone="faint">
-                Connected agents read it from the image until it has a reading.
+                The ink changed since this was read. Agents see it as an image again until it's read again.
               </Text>
             ) : null}
           </View>

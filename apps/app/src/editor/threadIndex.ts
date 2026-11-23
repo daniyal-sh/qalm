@@ -28,7 +28,7 @@ export function useThreadIndex(notebook: Notebook | null): ThreadSummary[] {
  * not; or one that reached this page doc before the index). Cheap when nothing changed: nothing is written.
  */
 export function mirrorLoadedThreads(notebook: Notebook, loaded: ReadonlyMap<string, PageData>): void {
-  for (const [pageId, d] of loaded) notebook.putThreads(summarizeThreads(pageId, d.comments, d.lines));
+  for (const [pageId, d] of loaded) notebook.putThreads(summarizeThreads(pageId, d.comments, d.readings));
 }
 
 const START_MS = 3000;
@@ -58,7 +58,7 @@ export function useThreadBackfill(dm: DocManager, notebook: Notebook | null, not
             const prov = h.provider();
             if (prov && !prov.synced) complete = false;
             const page = new Page(h.doc);
-            notebook.putThreads(summarizeThreads(p.id, page.comments(), page.lines()));
+            notebook.putThreads(summarizeThreads(p.id, page.comments(), page.readings()));
           } finally {
             h.release();
           }

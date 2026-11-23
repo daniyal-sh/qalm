@@ -1,52 +1,63 @@
-import type { Line, Page } from '@qalm/core';
+import { isInk, itemBBox, readingsOf, type BBox, type Item, type Page, type Reading } from '@qalm/core';
 
-/** How many lines the Reading sheet lists at once. */
-export const MAX_READING_LINES = 12;
+/** How many readings the Reading sheet lists at once. */
+export const MAX_READINGS = 12;
 
-/**
- * The handwritten lines a selection touches, top to bottom. Drawings, images and text boxes have no reading, so a
- * selection of only those has none.
- */
-export function selectionLines(lines: Line[], ids: readonly string[]): Line[] {
+/** The ink (strokes and shapes) in a selection: what readings are of. Images and text boxes have none. */
+export function selectionInk(items: readonly Item[], ids: readonly string[]): string[] {
   const sel = new Set(ids);
-  return lines
-    .filter((l) => l.kind === 'line' && l.itemIds.some((id) => sel.has(id)))
-    .sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0])
-    .slice(0, MAX_READING_LINES);
+  return items.filter((it) => sel.has(it.id) && isInk(it)).map((it) => it.id);
 }
 
-export type ReadingTone = 'user' | 'agent' | 'device' | 'none';
-
-/** Where a line's saved text came from, in plain words. */
-export function readingSource(l: Pick<Line, 'text' | 'textSrc' | 'by'>): { label: string; tone: ReadingTone } {
-  if (l.text === undefined) return { label: 'No reading yet', tone: 'none' };
-  if (l.textSrc === 'user') return { label: 'Yours', tone: 'user' };
-  if (l.textSrc === 'agent') return { label: l.by ? `Read by ${l.by}` : 'Read by your agent', tone: 'agent' };
-  return { label: 'On-device guess', tone: 'device' };
+/** The readings of any of `ink`, top to bottom by where their strokes are. */
+export function selectionReadings(readings: readonly Reading[], items: readonly Item[], ink: readonly string[]): Reading[] {
+  const box = new Map(items.map((it) => [it.id, it]));
+  const top = (r: Reading) => {
+    let b: BBox | null = null;
+    for (const id of r.ids) {
+      const it = box.get(id);
+      if (!it) continue;
+      const q = itemBBox(it);
+      if (!b || q[1] < b[1] || (q[1] === b[1] && q[0] < b[0])) b = q;
+    }
+    return b ?? [0, 0, 0, 0];
+  };
+  return readingsOf(readings, ink)
+    .map((r) => ({ r, b: top(r) }))
+    .sort((a, b) => a.b[1] - b.b[1] || a.b[0] - b.b[0])
+    .slice(0, MAX_READINGS)
+    .map((x) => x.r);
 }
 
-export type ReadingResult = 'saved' | 'cleared' | 'unchanged';
+export type ReadingTone = 'user' | 'agent';
+
+/** Who a reading is from, in plain words. */
+export function readingSource(r: Pick<Reading, 'src' | 'by'>): { label: string; tone: ReadingTone } {
+  if (r.src === 'user') return { label: 'Yours', tone: 'user' };
+  return { label: r.by ? `Read by ${r.by}` : 'Read by your agent', tone: 'agent' };
+}
+
+export type ReadingResult = 'saved' | 'removed' | 'unchanged';
 
 /**
- * Saves what the student typed for a line. Their text is `textSrc: 'user'`, which agents can't overwrite. Empty text
- * goes back to automatic (no reading: the device guesses again and agents read the image). Unchanged text leaves an
- * automatic reading automatic.
+ * Saves what the student typed for a reading: it becomes theirs (fresh, no agent name), which agents can't overwrite.
+ * Empty text removes the reading. Unchanged text leaves an agent's fresh reading as it is (a stale one becomes
+ * the student's: they confirmed it).
  */
-export function saveReading(page: Page, line: Pick<Line, 'key' | 'text' | 'textSrc'>, typed: string): ReadingResult {
+export function saveReading(page: Page, r: Pick<Reading, 'id' | 'text' | 'src' | 'stale'>, typed: string): ReadingResult {
   const text = typed.trim();
   if (!text) {
-    if (line.text === undefined) return 'unchanged';
-    page.clearLineText(line.key);
-    return 'cleared';
+    page.editReading(r.id, '');
+    return 'removed';
   }
-  if (text === line.text) return 'unchanged';
-  page.setLineText(line.key, text, 'user');
+  if (text === r.text && !r.stale) return 'unchanged';
+  page.editReading(r.id, text);
   return 'saved';
 }
 
-/** Back to automatic: forget the student's own reading. */
-export function resetReading(page: Page, line: Pick<Line, 'key' | 'textSrc'>): boolean {
-  if (line.textSrc !== 'user') return false;
-  page.clearLineText(line.key);
-  return true;
+/** The student's own reading of ink that has none yet. */
+export function addReading(page: Page, ink: readonly string[], typed: string): ReadingResult {
+  const text = typed.trim();
+  if (!text || !ink.length) return 'unchanged';
+  return page.setReading(ink, text, 'user') ? 'saved' : 'unchanged';
 }
