@@ -271,6 +271,7 @@ describe('bulk edits: undo and sync', () => {
     p.now.addItems(items);
     p.old.doc.transact(() => items.forEach((it) => p.old.addItem(it)), LOCAL_ORIGIN);
     const added = p.now.lines();
+    const addedState = state(p.now);
     for (const s of [
       { s: 1, r: 0, ox: 0, oy: 0, dx: 0, dy: 160 },
       { s: 0.7, r: 0.3, ox: 100, oy: 100, dx: 0, dy: 0 },
@@ -286,18 +287,26 @@ describe('bulk edits: undo and sync', () => {
     expectSame(p, 'undo 1');
     undoNow.undo();
     undoOld.undo();
-    expectSame(p, 'undo 2');
-    // Same lines and keys (Yjs undo may leave or drop empty line entries; the old code did the same, checked above).
+    // Back to exactly the state before the moves. (The old code's undo also restores the lines, but drops a few line
+    // entries that no item uses any more: it created and deleted them within the move, which Yjs undo handles less
+    // exactly. The new code doesn't write those, so only the lines are compared with it here.)
+    expect(state(p.now)).toEqual(addedState);
     expect(p.now.lines()).toEqual(added);
+    expect(p.now.lines()).toEqual(p.old.lines());
     undoNow.redo();
     undoOld.redo();
     undoNow.redo();
     undoOld.redo();
-    expectSame(p, 'redo');
     expect(p.now.lines()).toEqual(moved);
-    // Edits after undo/redo (the index must have been rebuilt from the restored doc).
+    expect(p.now.lines()).toEqual(p.old.lines());
+    // Edits after undo/redo: the index must have been rebuilt from the restored doc, so lines equal a fresh read.
     const r2 = rng(4);
-    run(p, randomOps(r2, 'u', () => p.now.items()).slice(0, 30), r2, 'after redo');
+    for (const op of randomOps(r2, 'u', () => p.now.items()).slice(0, 30)) {
+      op(p.now);
+      const fresh = new Y.Doc();
+      Y.applyUpdate(fresh, Y.encodeStateAsUpdate(p.now.doc));
+      expect(p.now.lines()).toEqual(new Page(fresh).lines());
+    }
   });
 
   it('two devices: concurrent bulk edits converge to the same state as the old code', () => {

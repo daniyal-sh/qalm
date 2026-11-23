@@ -41,6 +41,11 @@ interface LineIndex {
   mark: number;
   /** `medianLineHeight` of the groups; null when a group was added or removed or a line's height or kind changed. */
   median: number | null;
+  /**
+   * `lines` entries created by line splits during the current `Page` call, by key and kind, written when it returns:
+   * moving a whole line splits it item by item and merges the parts back, so most are deleted again in the same call.
+   */
+  virtual: Map<string, Line['kind']>;
 }
 
 /**
@@ -510,7 +515,7 @@ export class Page {
     const ix = this.peek();
     if (ix) return ix;
     const tx = this.doc._transaction;
-    const built: LineIndex = { tx, pos: new Map(), next: 0, ghosts: new Set(), lineOf: new Map(), bb: new Map(), groups: new Map(), dirty: new Set(), pending: new Map(), mark: 0, median: null };
+    const built: LineIndex = { tx, pos: new Map(), next: 0, ghosts: new Set(), lineOf: new Map(), bb: new Map(), groups: new Map(), dirty: new Set(), pending: new Map(), mark: 0, median: null, virtual: new Map() };
     for (const id of this.order.toArray()) {
       if (built.pos.has(id) || built.ghosts.has(id)) continue;
       const m = this.itemMap.get(id);
@@ -550,6 +555,12 @@ export class Page {
   private flushLines(): void {
     const ix = indexes.get(this.doc);
     if (!ix) return;
+    for (const [key, kind] of ix.virtual) {
+      const e = new Y.Map<unknown>();
+      this.lineMap.set(key, e);
+      e.set('kind', kind);
+    }
+    ix.virtual.clear();
     for (const [id, key] of ix.pending) {
       const m = this.itemMap.get(id);
       if (!m || ix.lineOf.has(id)) continue; // grouped since: its group writes it
@@ -637,6 +648,8 @@ export class Page {
 
   /** A group's kind: its entry's, or (entry missing, e.g. deleted concurrently) a drawing if it has a shape. */
   private kindOf(g: Group): Line['kind'] {
+    const v = indexes.get(this.doc)?.virtual.get(g.key);
+    if (v) return v;
     const e = this.lineMap.get(g.key);
     if (e) return e.get('kind') === 'drawing' ? 'drawing' : 'line';
     return g.ids.some((id) => this.itemMap.get(id)?.get('type') === 'shape') ? 'drawing' : 'line';
@@ -754,7 +767,18 @@ export class Page {
   }
 
   private deleteEntry(key: string): void {
-    this.lineMap.delete(key);
+    if (!this.peek()?.virtual.delete(key)) this.lineMap.delete(key);
+    this.refreshKind(key);
+  }
+
+  /** `newEntry` for a line split off in a `Page` call: virtual until the call returns (see `LineIndex.virtual`). */
+  private splitEntry(key: string, kind: Line['kind']): void {
+    const ix = this.peek();
+    if (!ix || this.lineMap.has(key)) {
+      this.newEntry(key, kind);
+      return;
+    }
+    ix.virtual.set(key, kind);
     this.refreshKind(key);
   }
 
@@ -858,7 +882,10 @@ export class Page {
       }
     }
     const e = this.lineMap.get(id);
-    if (e) {
+    if (ix.virtual.has(id)) {
+      ix.virtual.set(id, drawing ? 'drawing' : 'line');
+      this.refreshKind(id);
+    } else if (e) {
       e.set('kind', drawing ? 'drawing' : 'line');
       this.refreshKind(id);
     } else this.newEntry(id, drawing ? 'drawing' : 'line');
@@ -917,7 +944,7 @@ export class Page {
       }
       // The line follows its key item; the remaining items split off under their first item's id.
       const rest = others[0]!;
-      this.newEntry(rest, g.kind);
+      this.splitEntry(rest, g.kind);
       if (!this.splitOff(ix, g, id, others)) this.setLines(others, rest);
       groups = this.groups();
     }
