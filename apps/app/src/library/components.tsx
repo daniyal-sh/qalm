@@ -2,13 +2,17 @@ import type { Folder, LibraryEntry, Paper, PaperColor } from '@qalm/core';
 import * as React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { hoverTransition } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
-import { COVERS, coverInk, font, PAPER_SWATCH, radius, shadow1 } from '../theme/tokens';
+import { COVERS, coverInk, font, PAPER_SWATCH, radius, shadow1, space } from '../theme/tokens';
 import { Button, IconButton, Pill, Segmented, TextField, Toggle } from '../ui/controls';
 import { Icon } from '../ui/Icon';
 import { Row, Sheet } from '../ui/layout';
 import { Text } from '../ui/Text';
 import { DEFAULT_TITLE, relativeTime, type NewNotebookForm, type PageSizeName } from './actions';
+
+const spineW = (w: number) => Math.max(8, Math.round(w * 0.06));
+const stickerSize = (w: number) => Math.max(10, Math.min(13, Math.round(w / 13)));
 
 /** Solid cover: 4 px spine side, 10 px open side, with a surface label sticker. */
 export function Cover({ color, title, width, pdf }: { color: string; title: string; width: number; pdf?: boolean }) {
@@ -23,10 +27,16 @@ export function Cover({ color, title, width, pdf }: { color: string; title: stri
       ]}
     >
       {/* Spine: a solid darker band with a hairline crease (no gradients, per brand.md). */}
-      <View style={[styles.spine, { width: Math.max(8, Math.round(width * 0.06)) }]} />
-      <View style={[styles.crease, { left: Math.max(8, Math.round(width * 0.06)) }]} />
-      <View style={[styles.sticker, { backgroundColor: c.surface, borderColor: c.line, maxWidth: width - 28 }]}>
-        <Text variant="meta" numberOfLines={2} style={{ color: c.ink, fontFamily: font.semibold, fontSize: Math.max(10, Math.min(13, width / 13)) }}>
+      <View style={[styles.spine, { width: spineW(width) }]} />
+      <View style={[styles.crease, { left: spineW(width) }]} />
+      {/* A fixed-width label (not a shrink-to-fit one): Android measures a shrink-wrapped two-line label too narrow and clips it. */}
+      <View style={[styles.sticker, { backgroundColor: c.surface, borderColor: c.line, width: Math.round((width - spineW(width)) * 0.74), marginLeft: spineW(width) }]}>
+        <Text
+          variant="meta"
+          numberOfLines={3}
+          textBreakStrategy="simple"
+          style={{ color: c.ink, fontFamily: font.semibold, textAlign: 'center', fontSize: stickerSize(width), lineHeight: Math.round(stickerSize(width) * 1.3) }}
+        >
           {title || DEFAULT_TITLE}
         </Text>
       </View>
@@ -62,13 +72,16 @@ export function NotebookCard({
     el.measureInWindow((x, y, _w, h) => onMenu({ x, y: y + h + 4 }));
   };
   return (
-    <View style={{ width, gap: 8 }}>
+    <View style={{ width, gap: space.sm }}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={entry.deletedAt ? `Options for ${entry.title || DEFAULT_TITLE}` : `Open ${entry.title || DEFAULT_TITLE}`}
         onPress={press}
         onLongPress={(e) => onMenu({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
-        style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}
+        style={(s) => [
+          hoverTransition,
+          s.pressed ? { transform: [{ scale: 0.98 }] } : (s as { hovered?: boolean }).hovered ? { transform: [{ translateY: -2 }] } : null,
+        ]}
       >
         <Cover color={entry.cover} title={entry.title} width={width} pdf={pdf} />
       </Pressable>
@@ -78,7 +91,7 @@ export function NotebookCard({
           <Text variant="label" numberOfLines={1}>
             {entry.title || DEFAULT_TITLE}
           </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs, flexWrap: 'wrap', minHeight: 20 }}>
             <Text variant="meta" tone="faint">
               {entry.deletedAt ? `Deleted ${relativeTime(entry.deletedAt).toLowerCase()}` : relativeTime(entry.updatedAt)}
             </Text>
@@ -108,11 +121,14 @@ export function FolderTile({ folder, count, width, onOpen, onMenu }: { folder: F
       onLongPress={(e) => onMenu({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })}
       style={(s) => [
         styles.folder,
-        { width, backgroundColor: (s as { hovered?: boolean }).hovered || s.pressed ? c.surface2 : c.surface, borderColor: c.line },
+        hoverTransition,
+        { width, backgroundColor: s.pressed ? c.soft : (s as { hovered?: boolean }).hovered ? c.surface2 : c.surface, borderColor: c.line },
         shadow1,
       ]}
     >
-      <Icon name="folder" size={20} color={c.accentInk} />
+      <View style={[styles.folderIcon, { backgroundColor: c.accentSoft, borderColor: c.accentLine }]}>
+        <Icon name="folder" size={18} color={c.accentInk} />
+      </View>
       <View style={{ flex: 1 }}>
         <Text variant="label" numberOfLines={1}>
           {folder.name}
@@ -266,7 +282,11 @@ export function PaperChoice({ value, onChange }: { value: Paper; onChange(p: Pap
             accessibilityLabel={p.label}
             accessibilityState={{ checked: on }}
             onPress={() => onChange(p.value)}
-            style={[styles.paperChip, { backgroundColor: on ? c.accentSoft : c.surface, borderColor: on ? c.accentLine : c.line }]}
+            style={(s) => [
+              styles.paperChip,
+              hoverTransition,
+              { backgroundColor: on ? c.accentSoft : (s as { hovered?: boolean }).hovered ? c.surface2 : c.surface, borderColor: on ? c.accentLine : c.line },
+            ]}
           >
             <PaperGlyph paper={p.value} color={on ? c.accentInk : c.muted} />
             <Text variant="label" style={{ color: on ? c.accentInk : c.ink2 }}>
@@ -503,27 +523,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  sticker: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 4, borderWidth: StyleSheet.hairlineWidth, marginLeft: 6 },
+  sticker: { paddingHorizontal: space.sm, paddingVertical: space.xs, borderRadius: radius.tiny, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center' },
   spine: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.14)' },
   crease: { position: 'absolute', top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.22)' },
   folder: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingLeft: 14,
-    paddingRight: 6,
+    gap: space.md,
+    paddingLeft: space.md,
+    paddingRight: space.xs,
     height: 64,
     borderRadius: radius.panel,
     borderWidth: StyleSheet.hairlineWidth,
   },
+  folderIcon: { width: 36, height: 36, borderRadius: radius.control, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
   swatchHit: { padding: 2, borderRadius: 20, borderWidth: 2, borderColor: 'transparent' },
   swatch: { width: 32, height: 32, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
   paperChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: space.sm,
     height: 44,
-    paddingHorizontal: 12,
+    flexGrow: 1,
+    flexBasis: 120,
+    paddingHorizontal: space.md,
     borderRadius: radius.control,
     borderWidth: StyleSheet.hairlineWidth,
   },
