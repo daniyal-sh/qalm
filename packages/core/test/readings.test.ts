@@ -124,9 +124,9 @@ describe('readings', () => {
     page.addItems(strokes);
     for (let r = 0; r < 20; r++) page.setReading(strokes.slice(r * 50, r * 50 + 50).map((s) => s.id), `row ${r}`, 'agent');
     const um = createUndoManager(page);
-    const t0 = performance.now();
+    const t0 = Date.now();
     move(page, strokes.map((s) => s.id), { s: 1, r: 0, ox: 0, oy: 0, dx: 3, dy: 40 });
-    const ms = performance.now() - t0;
+    const ms = Date.now() - t0;
     expect(page.readings().every((r) => !r.stale)).toBe(true);
     expect(ms).toBeLessThan(2000);
     um.undo();

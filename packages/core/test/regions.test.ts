@@ -71,10 +71,10 @@ describe('clustering', () => {
 
   it('handles thousands of boxes quickly', () => {
     const boxes: BBox[] = Array.from({ length: 5000 }, (_, i) => [(i % 50) * 11, Math.floor(i / 50) * 30, (i % 50) * 11 + 8, Math.floor(i / 50) * 30 + 12]);
-    const t0 = performance.now();
+    const t0 = Date.now();
     const g = clusterBoxes(boxes, 10);
     expect(g).toHaveLength(100); // one per row (rows 18 apart, gap 10)
-    expect(performance.now() - t0).toBeLessThan(1500);
+    expect(Date.now() - t0).toBeLessThan(1500);
   });
 });
 
