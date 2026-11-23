@@ -648,7 +648,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                     }}
                   />
                   <IconButton icon="message-square" label="Comment on selection" size={36} onPress={() => openSelection('comment')} />
-                  <Button label="Ask" icon="help-circle" variant="assistant" size="sm" onPress={() => openSelection('ask')} />
+                  <Button label="Ask" accessibilityLabel="Ask about selection" icon="help-circle" variant="assistant" size="sm" onPress={() => openSelection('ask')} />
                   <IconButton icon="trash-2" label="Delete selection" tone="bad" size={36} onPress={deleteSelection} />
                   <IconButton icon="x" label="Deselect" size={36} onPress={() => setSelection(null)} />
                 </View>
