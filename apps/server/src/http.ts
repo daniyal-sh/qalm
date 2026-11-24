@@ -17,7 +17,7 @@ const CORS_PATHS = /^\/(auth\/(email\/start|email\/lookup|email\/verify|refresh|
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Audio-Duration-Ms',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Audio-Duration-Ms, X-Qalm-Lecture',
   'Access-Control-Max-Age': '86400',
 };
 

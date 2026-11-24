@@ -336,6 +336,9 @@ describe('review 2: uploads, imports, shared page assets', () => {
       const r = await call(`/assets/${sha}`, { method: 'PUT', token: t.accessToken, body: bytes as unknown as BodyInit, headers: { 'Content-Type': 'audio/webm', 'X-Qalm-Lecture': doc } });
       return { sha, status: r.status };
     };
+    // The app sends the header cross-origin (app:// → the API): the preflight must allow it, or uploads never go.
+    const pre = await call(`/assets/${'0'.repeat(64)}`, { method: 'OPTIONS', headers: { Origin: 'app://qalm', 'Access-Control-Request-Method': 'PUT', 'Access-Control-Request-Headers': 'content-type,x-qalm-lecture' } });
+    expect(pre.headers.get('Access-Control-Allow-Headers')?.toLowerCase()).toContain('x-qalm-lecture');
     const first = await put(new Uint8Array(200).fill(4));
     expect(first.status).toBe(201);
     expect(await refs(doc)).toEqual([first.sha]); // before the session doc even mentions it
