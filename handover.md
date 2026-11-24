@@ -50,7 +50,7 @@ likes to work. Read it first, then `docs/decisions.md`, `docs/tech-spec.md`, `do
 | Recognition | **None on device** (ML Kit removed; the app is ~20 MB lighter per language). The agent reads handwriting from the image with its own vision |
 | Pen extras | Hover preview; pen button, squeeze or double-tap for the eraser; tilt shading |
 | Minimum OS | iPadOS 17, Android 10, Windows 10, macOS 13 |
-| Accounts | Apple, Google and email magic link. Cloud sync from day one. Free in beta with capped storage, no payments |
+| Accounts | **Email only** (like Apollo): an emailed link or a 6-digit code; Apple and Google sign-in were removed. qalm's own accounts, nothing shared with Apollo. Cloud sync from day one. Free in beta with **250 MB per user** (PDFs, images and notebook data), no payments |
 | Backend | Cloudflare: Workers, Durable Objects, R2, D1. Encrypted at rest (Cloudflare default), no E2E |
 | AI | MCP only. Updates go out on a pen pause (≥ 6 s) or the **Ask** button, at most one per 20 s (Ask exempt). What changed is sent as **regions** (Q-ink v1.0): new ink black, context grey, erased red, on a 0–1000 grid. No lines (they split maths apart). `transcribe` saves a reading of strokes. The agent keeps its own chat history; updates are self-contained |
 | Server AI | **None.** The image crop goes to the user's agent, which reads it |
@@ -114,7 +114,8 @@ apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Objec
     hibernating WebSockets and compacts every 200 updates. The client pings after 20 s of silence (the room auto-responds
     `pong` without waking) and reconnects if nothing comes back within 8 s, on `online` and in the foreground.
   - **Access:** every doc is checked against its owner. Assets in R2 are content-addressed (sha256), readable only by
-    their uploader, and capped per user (1 GiB by default).
+    their uploader. Each user has **250 MB** (`MAX_USER_STORAGE_BYTES`) for assets plus notebook data: DocRooms report
+    their stored bytes to D1 `doc_sizes`; `GET /me/storage` sums both. Over the cap, asset uploads get a 413; sync never stops.
   - **Agents:** MCP at `/mcp` (Streamable HTTP, OAuth 2.1 with dynamic client registration, via
     `@cloudflare/workers-oauth-provider`) exposes 4 tools: `wait`, `read`, `transcribe`, `comment`. Region images are
     rendered to PNG with resvg-wasm.
@@ -155,7 +156,8 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
 
 **What the app has:**
 - **Sign-in:**
-  - Apple (iOS), Google (when configured) and email link or 6-digit code.
+  - Email only: one field sends a link and a 6-digit code; "Check your email" takes the code (or the pasted link), with
+    resend after 30 s and "Use a different email".
   - You can continue without an account.
 - **Library:**
   - Folders, favorites, "Shared with AI", trash and restore, and delete forever (which also deletes on the server).
@@ -197,7 +199,8 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
 - **Sign-out:** `POST /auth/logout` ends the server session.
 - **iOS palm size:** uses `2 × majorRadius`, matching Android and web.
 
-D1 migrations: `0001_init`, `0002_user_assets`, `0003_notebook_deleted`, `0004_auth_hardening`.
+D1 migrations: `0001_init`, `0002_user_assets`, `0003_notebook_deleted`, `0004_auth_hardening`, `0005_storage` (`doc_sizes`). `users.apple_sub` and `google_sub` are unused since
+email-only sign-in and stay in place.
 
 ## 6. Not verified, and known gaps
 
@@ -208,8 +211,8 @@ D1 migrations: `0001_init`, `0002_user_assets`, `0003_notebook_deleted`, `0004_a
 - `renderPdfPage` on Android hasn't been run on a device. (ML Kit is gone, so there's no model download to test.)
 - **Regions are tuned on synthetic handwriting.** The clustering and context constants (2 / ½ / 1½ units) and the image
   scale (64 px per unit) need checking on real pages and with a real MCP client (image token counts per provider).
-- **Sign-in:** Apple and Google are untested end to end, and they **don't work in the desktop app** (no redirect back
-  into the app; this needs a web redirect page). Real Resend email delivery is untested.
+- **Sign-in:** real Resend email delivery is untested, and the new email template hasn't been checked in real inboxes
+  (Gmail, Outlook, Apple Mail dark mode).
 - **Agents:** no real MCP client has connected yet, and image-token costs per provider haven't been measured.
 - **Builds:** the macOS DMG and the Windows arm64 installer haven't been built. Nothing is signed.
 - **Production is live (2026-11-24):** `https://qalm.apollolearn.app` (site, app at `/app/`) and
@@ -261,7 +264,7 @@ pnpm --filter @qalm/desktop e2e         # a build with a server URL: QALM_E2E_SI
 cd modules/qalm-ink/example/android && ./gradlew assembleDebug --max-workers=1
 ```
 
-App env vars: `EXPO_PUBLIC_QALM_SERVER_URL`, plus `EXPO_PUBLIC_GOOGLE_{WEB,IOS,ANDROID}_CLIENT_ID`. Server secrets are
+App env vars: `EXPO_PUBLIC_QALM_SERVER_URL`. Server secrets are
 listed in `apps/server/.dev.vars.example`.
 
 **Environment gotchas** (from the development PC: Windows 11, 15 GB RAM):
@@ -339,7 +342,7 @@ listed in `apps/server/.dev.vars.example`.
   3. Put the D1 `database_id` and the KV `id` into `env.production` in `apps/server/wrangler.jsonc`, replacing
      `REPLACE_ME_D1_QALM_PROD_ID` and `REPLACE_ME_KV_QALM_OAUTH_PROD_ID`. Commit.
   4. Secrets: `npx wrangler secret put JWT_SECRET --env production` (a new random value, not staging's) and
-     `npx wrangler secret put RESEND_API_KEY --env production`. Apple/Google secrets too, once those are set up.
+     `npx wrangler secret put RESEND_API_KEY --env production`.
   5. Migrate and deploy:
      ```bash
      pnpm --filter @qalm/server migrate:prod
@@ -359,12 +362,11 @@ listed in `apps/server/.dev.vars.example`.
 2. **Android tablet with a stylus:** test the same list, plus whether the front-buffered renderer's latency feels right.
 3. **Deploy staging on Cloudflare**, once the owner agrees and with their accounts:
    - create D1, R2 and the Durable Objects;
-   - set the secrets (JWT, Resend, Apple and Google);
+   - set the secrets (JWT, Resend);
    - apply the migrations;
    - set `MAGIC_LINK_URL` to the real web app.
 4. **Connect a real MCP client** (e.g. Claude) and measure tokens per update against the `docs/qink-live.md` estimates.
-5. **Desktop Google and Apple sign-in:** add a web redirect page that hands off to `qalm://`.
-6. **Smaller gaps from §6**, as the owner prioritises them. Ask before adding scope.
+5. **Smaller gaps from §6**, as the owner prioritises them. Ask before adding scope.
 
 ## 9. Thread history (brief)
 

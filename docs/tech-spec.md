@@ -340,15 +340,24 @@ from the region images with its own vision. That keeps the app about 20 MB light
 - **Sync auth:** `POST /sync/ticket {docId}` with `Authorization: Bearer <accessToken>` returns a single-use ticket that expires in 30 s. Then
   `GET /sync/{docId}?ticket=…` upgrades. Access tokens never appear in URLs.
 - **R2** `ASSETS`: `PUT /assets/{sha256}` and `GET /assets/{sha256}` (Bearer auth; content-addressed).
+- **Storage cap** (`MAX_USER_STORAGE_BYTES`, default 250 MB = 250 000 000 bytes): counts the user's uploaded assets (`user_assets`, each
+  sha once per user) plus their notebook data. Notebook data is the bytes each `DocRoom` keeps in its SQLite storage (snapshot parts +
+  update log), tracked in memory as it persists and written to D1 `doc_sizes(doc_id, user_id, bytes)` by a DO alarm 5 s after a write (so
+  a burst of strokes costs one D1 write). The owner is the library's user or `notebooks.owner_id`. "Delete forever" removes the rows.
+  `GET /me/storage` → `{usedBytes, limitBytes, assetBytes, notebookBytes}`. A `PUT /assets` that doesn't fit gets **413** with
+  `{error, code: 'storage_full', …usage}`; sync is never refused, so ink is never blocked or lost (usage can go past the cap from ink alone).
+  The app checks `/me/storage` before a PDF, image or `.qalm` import and refuses with the same message; offline it imports locally and the
+  upload waits in the queue (a 413 stays queued).
 - **App API** (Bearer, CORS `*` for the web/Electron build): `GET /ai/grants`, `PATCH /ai/grants/{id} {canComment?, canTranscribe?, notebookIds?, folderIds?}`,
   `DELETE /ai/grants/{id}`, `GET /ai/requests`, `POST /ai/requests/{id}/deny`, `GET /ai/activity?limit=`, `GET /ai/presence?nb={notebookId}` (owner only:
   `{aiAccess, paused, agents: [{name, waiting, lastAt, canComment, canTranscribe}]}`, the agents with a pending `wait` or a call in the last
   60 s; empty while AI access is off; the editor polls it every 8 s), and `DELETE /notebooks/{id}` (owner only,
   "Delete forever": sets `notebooks.deleted_at`, refuses sync tickets from then on, and purges the notebook's `nb:`/`pg:` room storage, best effort).
   Moving to the trash is only `deletedAt` in the library doc, so restoring from the trash needs no server call.
-- **D1** tables: `users`, `sessions`, `magic_links`, `notebooks(id, owner_id, title, ai_access, deleted_at)`, `sync_tickets`, `email_sends`, OAuth tables, and
+- **D1** tables: `users`, `sessions`, `magic_links`, `notebooks(id, owner_id, title, ai_access, deleted_at)`, `sync_tickets`, `email_sends`, `user_assets`, `doc_sizes`, OAuth tables, and
   `grants(client_id, user_id, notebook_ids|folder_ids, can_comment, can_transcribe, expires_at)`.
-- **Auth:** `POST /auth/email/start`, `POST /auth/email/verify`, `POST /auth/apple`, `POST /auth/google`. These return `{accessToken (JWT, 1h), refreshToken}`,
+- **Auth (email only):** `POST /auth/email/start` and `POST /auth/email/verify` return `{accessToken (JWT, 1h), refreshToken}`. There is no Apple or
+  Google sign-in (removed; `users.apple_sub` / `google_sub` from `0001_init` are unused and left in place, since SQLite can't drop UNIQUE columns),
   `POST /auth/refresh` renews them and `POST /auth/logout` ends the session. In dev, emails are logged to the console.
   - **Email links are bound to the device that asked.** The app sends `{email, nonceHash}` (sha256 of a random nonce it keeps for 15 min).
     The email has a link to the app's verify route (`MAGIC_LINK_URL`, normally the web app's `/auth/email/verify`; universal link / `qalm://` on native)

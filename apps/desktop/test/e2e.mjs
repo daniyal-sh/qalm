@@ -81,7 +81,8 @@ try {
       const logStart = readFileSync(serverLog, 'utf8').length;
       await win.getByLabel('Email').first().fill(email);
       await win.getByText('Email me a sign-in link').first().click();
-      await win.getByText(`We sent a sign-in link and code to ${email}`).first().waitFor({ timeout: 20_000 });
+      await win.getByText('Check your email').first().waitFor({ timeout: 20_000 });
+      await win.getByText(email).first().waitFor({ timeout: 5_000 });
       let mail = null;
       for (let i = 0; i < 40 && !mail; i++) {
         mail = emailFromLog(email, logStart);
@@ -89,8 +90,8 @@ try {
       }
       if (!mail) throw new Error(`no sign-in email to ${email} in ${serverLog}`);
       if (signInMode === 'code') {
-        await win.getByLabel('Code or link from the email').first().fill(mail.code);
-        await win.getByRole('button', { name: 'Sign in', exact: true }).first().click();
+        // The sixth digit signs in by itself.
+        await win.getByLabel('6-digit code from the email').first().fill(mail.code);
       } else {
         const opener = spawn(exe, [mail.link], { env, stdio: 'ignore' });
         await new Promise((r) => opener.on('exit', r));
