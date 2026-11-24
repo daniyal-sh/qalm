@@ -20,7 +20,7 @@ export interface BakeOptions {
   maxPixels: number;
 }
 
-export const BAKE: BakeOptions = { minInk: 100, tailMin: 16, tailMax: 96, maxPixels: 8_000_000 };
+export const BAKE: BakeOptions = { minInk: 1000, tailMin: 16, tailMax: 96, maxPixels: 8_000_000 };
 
 /**
  * Pixels all mounted pages' bases may hold together (4 bytes each), so memory stays bounded at any zoom: about ten

@@ -258,11 +258,11 @@ objects are never garbage-collected). Images decode off the main thread on web (
 dragged (`live`) is recorded in chunks of its own, drawn inside the live transform, so a drag only changes that transform.
 
 **Baked bases (iOS/Android):** react-native-skia replays a canvas's whole recording on every redraw, on Android on the main
-thread, so pictures alone still re-rasterised every stroke of a dense page on each change. A page with ≥ 100 strokes and shapes
+thread, so pictures alone still re-rasterised every stroke of a dense page on each change. A page with ≥ 1000 strokes and shapes
 therefore keeps a **base**: one raster image of the paper, PDF background, comment highlights and every item except the newest
 (`modules/qalm-ink/src/bake.ts` plans it, `PageCanvas` draws it). The base is drawn on the JS thread in 8 ms slices; the items after
 it (the **tail**, 16–96 of them) are drawn as vectors on top. A stroke or an undo inside the tail redraws one image plus the tail;
-when the tail passes 96 items it is drawn onto the base (one small draw). An edit under the base (erasing or moving older ink, undo
+when the tail passes 96 items it is drawn onto the base (one small draw). A page's first bake waits 300 ms after it mounts, so pages flung past never bake. An edit under the base (erasing or moving older ink, undo
 past the tail, a paper colour change) falls back to the chunk pictures and re-bakes 250 ms after edits pause; a new zoom or
 background keeps showing the old base until the new one is ready. The base stops before the first image item (and before text until
 its font has loaded), so z-order stays exact. All mounted bases share a 16 MP budget (64 MB); a page that doesn't fit draws pictures.

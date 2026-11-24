@@ -404,6 +404,8 @@ function drawItem(c: SkCanvas, it: Item, pathOf: (it: InkItem) => SkPath, paints
 const BAKE_SLICE_MS = 8;
 /** After the base was invalidated (an older stroke erased or moved, undo past the tail), re-bake once edits pause. */
 const REBAKE_DELAY_MS = 250;
+/** A page's first bake waits this long after it mounts: pages flung past never bake (that CPU time made flinging stutter). */
+const FIRST_BAKE_DELAY_MS = 300;
 
 interface Base {
   baked: Baked;
@@ -560,7 +562,7 @@ function useBase(
     };
     running.current = bake;
     bakeBudget.hold(base, Math.max(w * h, base.current ? base.current.baked.w * base.current.baked.h : 0));
-    timer = setTimeout(step, hadBase.current && !plan.use ? REBAKE_DELAY_MS : 0);
+    timer = setTimeout(step, hadBase.current ? (plan.use ? 0 : REBAKE_DELAY_MS) : FIRST_BAKE_DELAY_MS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan]);
 
