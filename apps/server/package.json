@@ -11,7 +11,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "deploy:staging": "wrangler deploy --env staging",
-    "migrate:staging": "wrangler d1 migrations apply qalm-staging --remote --env staging"
+    "migrate:staging": "wrangler d1 migrations apply qalm-staging --remote --env staging",
+    "deploy:prod": "wrangler deploy --env production",
+    "migrate:prod": "wrangler d1 migrations apply qalm-prod --remote --env production"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.4",

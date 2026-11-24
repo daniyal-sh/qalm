@@ -1,0 +1,32 @@
+// qalm's website: one Worker for the landing page (/) and the web app (/app/). dist/ is built by scripts/build.mjs.
+// Static assets are served first; src/worker.js runs only for /app routes, for the SPA fallback (see run_worker_first).
+// Deploy (see handover.md): EXPO_PUBLIC_QALM_SERVER_URL=<api> pnpm --filter @qalm/site deploy:staging | deploy:prod
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "qalm-web",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // The landing page's missing paths get its 404.html, never the app.
+    "not_found_handling": "404-page",
+    // App routes go to the Worker (SPA fallback); the app's own files skip it.
+    "run_worker_first": ["/app", "/app/*", "!/app/_expo/*", "!/app/assets/*", "!/app/*.wasm", "!/app/*.mjs", "!/app/*.ico"]
+  },
+  "observability": { "enabled": true },
+  "env": {
+    // https://qalm-web-staging.apollolearn.workers.dev: landing at /, the app at /app/
+    "staging": {
+      "name": "qalm-web-staging",
+      "workers_dev": true
+    },
+    // https://qalm.apollolearn.app: landing at /, the app at /app/. The custom domain needs the apollolearn.app zone on
+    // this Cloudflare account (its DNS was on Vercel; see handover.md).
+    "production": {
+      "name": "qalm-web",
+      "workers_dev": false,
+      "routes": [{ "pattern": "qalm.apollolearn.app", "custom_domain": true }]
+    }
+  }
+}

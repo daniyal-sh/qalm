@@ -48,7 +48,36 @@
       "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "42a58f320e4e442790c98aa0e1d1e241" }],
       "vars": {
         "PUBLIC_URL": "https://qalm-api-staging.apollolearn.workers.dev",
-        "MAGIC_LINK_URL": "https://qalm-web-staging.apollolearn.workers.dev/auth/email/verify",
+        "MAGIC_LINK_URL": "https://qalm-web-staging.apollolearn.workers.dev/app/auth/email/verify",
+        "EMAIL_PROVIDER": "resend",
+        "EMAIL_FROM": "qalm <qalm@apollolearn.app>"
+      },
+      "observability": { "enabled": true }
+    },
+
+    // Production on https://qalm-api.apollolearn.app (deploy: pnpm --filter @qalm/server deploy:prod). The web app is
+    // on https://qalm.apollolearn.app/app (apps/site). REPLACE_ME ids: create the resources and fill them in (handover.md).
+    "production": {
+      "name": "qalm-api",
+      "workers_dev": false,
+      "routes": [{ "pattern": "qalm-api.apollolearn.app", "custom_domain": true }],
+      "durable_objects": {
+        "bindings": [{ "name": "DOC_ROOM", "class_name": "DocRoom" }]
+      },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DocRoom"] }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "qalm-prod",
+          "database_id": "REPLACE_ME_D1_QALM_PROD_ID",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "qalm-assets-prod" }],
+      "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "REPLACE_ME_KV_QALM_OAUTH_PROD_ID" }],
+      "vars": {
+        "PUBLIC_URL": "https://qalm-api.apollolearn.app",
+        "MAGIC_LINK_URL": "https://qalm.apollolearn.app/app/auth/email/verify",
         "EMAIL_PROVIDER": "resend",
         "EMAIL_FROM": "qalm <qalm@apollolearn.app>"
       },

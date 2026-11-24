@@ -13,8 +13,7 @@
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "bench:micro": "vitest run --config scripts/bench/vitest.micro.mts",
-    "bench": "node scripts/bench/run.mjs",
-    "deploy:staging": "node scripts/web-assets.mjs && expo export -p web && npx wrangler deploy --env staging"
+    "bench": "node scripts/bench/run.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/figtree": "^0.4.1",
