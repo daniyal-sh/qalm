@@ -5,7 +5,8 @@
 // Checks the rules of modules/qalm-ink/src/InkOverlay.web.tsx: palm size per setting, the 600 ms pen lockout, the
 // writing hand's side, a palm resting while the pen writes, a second finger retracting a finger stroke, "pen only"
 // (one finger scrolls, two fingers zoom, neither draws, a palm neither draws nor scrolls), "pen and finger" (a finger
-// draws, a palm doesn't), the barrel button and the right mouse button erasing, and the Settings test area's messages.
+// draws, a palm doesn't, two fingers pan and pinch, a late second finger keeps the stroke), the barrel button and the
+// right mouse button erasing, the Settings test area's messages, and "draw with" auto-picked once a pen is seen.
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -97,7 +98,9 @@ try {
   const setInput = (input) =>
     win.evaluate((input) => {
       const cur = JSON.parse(localStorage.getItem('qalm:prefs') ?? '{}');
-      localStorage.setItem('qalm:prefs', JSON.stringify({ ...cur, input: { ...(cur.input ?? {}), ...input } }));
+      // Setting drawWith here stands for choosing it in Settings (else the first pen would have auto-picked "pen").
+      const chosen = input.drawWith ? { drawWithAuto: false } : {};
+      localStorage.setItem('qalm:prefs', JSON.stringify({ ...cur, input: { ...(cur.input ?? {}), ...input, ...chosen } }));
     }, input);
   const scrollTops = () =>
     win.evaluate(() =>
@@ -129,7 +132,24 @@ try {
   };
   const idle = 'Strokes here fade after a few seconds.';
 
+  // ---- Auto-pick: a fresh profile has seen no pen, so fingers draw; the first pen switches to pen only, once ----
+  const picked = () => win.locator('text=/Picked automatically|Your choice/').first().textContent();
+  check('auto-pick: no pen yet, so pen and finger', /One finger draws.*no pen detected/.test((await picked()) ?? ''), await picked());
+  await penEvent('mouseMoved', px - 100, py - 40); // a hovering pen is enough
+  await win.getByText('Pen detected: fingers now scroll. Change in Settings.').first().waitFor({ timeout: 5000 }).then(
+    () => check('auto-pick: the first pen shows the toast', true),
+    () => check('auto-pick: the first pen shows the toast', false),
+  );
+  check('auto-pick: …and switches to pen only', /only the pen draws.*a pen was detected/.test((await picked()) ?? ''), await picked());
+  await sleep(700);
+  await drag([{ x: px - 150, y: py - 60, mm: FINGER }], 0, -8, 4);
+  check('auto-pick: a finger now scrolls', (await message()) === 'Ignored: only the pen writes (fingers scroll)');
+  const stored = await win.evaluate(() => JSON.parse(localStorage.getItem('qalm:prefs') ?? '{}').input);
+  check('auto-pick: "pen seen" is saved', stored?.penSeen === true && stored?.drawWith === 'pen' && stored?.drawWithAuto === true, JSON.stringify(stored));
+
   await choose('Pen and finger');
+  check('auto-pick: a choice in Settings wins over the pen', ((await picked()) ?? '').includes('Your choice'), await picked());
+  await sleep(2100); // the hovering pen's hand side
   for (const [label, palm, finger, wide] of [
     ['Relaxed · 30 mm', 'relaxed', 12, 35],
     ['Standard · 20 mm', 'standard', 12, 25],
@@ -162,9 +182,12 @@ try {
   await drag([{ x: px - 250, y: py + 40, mm: FINGER }], 0, 0, 1);
   check('test area: left hand, a finger left of and below the pen', (await message()) === 'Ignored: on your writing hand’s side');
   await choose('Right');
-  await sleep(3100);
+  await sleep(1500);
+  await drag([{ x: px + 120, y: py + 40, mm: FINGER }], 0, 0, 1);
+  check('test area: the hand side still holds after 1.5 s', (await message()) === 'Ignored: on your writing hand’s side');
+  await sleep(600);
   await drag([{ x: px + 120, y: py + 40, mm: FINGER }], 8, 0, 4);
-  check('test area: the hand side expires after 3 s', (await message()) === idle);
+  check('test area: the hand side expires after 2 s', (await message()) === idle);
   await choose('Pen only');
   await drag([{ x: px, y: py, mm: FINGER }], 0, -8, 4);
   check('test area, pen only: a finger scrolls', (await message()) === 'Ignored: only the pen writes (fingers scroll)');
@@ -204,6 +227,7 @@ try {
 
   // Pen and finger
   let before = await ink(clip);
+  let top = 0;
   await drag([{ x: cx - 200, y: cy - 200, mm: FINGER }], 12, 3);
   await settle();
   let after = await ink(clip);
@@ -270,10 +294,73 @@ try {
   check('right mouse button: the drag erases', after < before - penOnly * 0.5, `${after - before} px`);
   check('right mouse button: no context menu', (await win.evaluate(() => window.__menus)) === 0);
 
+  // Pen and finger: two fingers pan (with a fling) and pinch; a second finger after a real stroke keeps it.
+  const zoom = async () =>
+    fullscreen
+      ? `${Math.round((await win.locator('canvas[style*="crosshair"]').first().boundingBox()).width)} px wide`
+      : (await win.getByLabel('Reset zoom').first().textContent())?.trim();
+  const twoFingers = async (a, b, da, db, steps = 10) => {
+    await touch('touchStart', [{ id: 1, ...a, mm: FINGER }, { id: 2, ...b, mm: FINGER }]);
+    for (let i = 1; i <= steps; i++) {
+      await touch('touchMove', [
+        { id: 1, x: a.x + da.x * i, y: a.y + da.y * i, mm: FINGER },
+        { id: 2, x: b.x + db.x * i, y: b.y + db.y * i, mm: FINGER },
+      ]);
+      await sleep(16);
+    }
+    await touch('touchEnd', []);
+  };
+  await open({ drawWith: 'any' });
+  before = await ink(clip);
+  top = await scrollTops();
+  await twoFingers({ x: cx - 40, y: cy + 150 }, { x: cx + 40, y: cy + 150 }, { x: 0, y: -15 }, { x: 0, y: -15 });
+  const panned = (await scrollTops()) - top;
+  await sleep(800);
+  const flung = (await scrollTops()) - top;
+  check('pen and finger: two fingers scroll', panned > 100, `scrolled ${panned} px`);
+  check('pen and finger: …with momentum after lifting', flung > panned + 20, `${panned} → ${flung} px`);
+  check('pen and finger: …and draw nothing', Math.abs((await ink(clip)) - before) < 40, `${(await ink(clip)) - before} px`);
+  await open({ drawWith: 'any' });
+  before = await ink(clip);
+  const zA = await zoom();
+  await twoFingers({ x: cx - 40, y: cy }, { x: cx + 40, y: cy }, { x: -10, y: 0 }, { x: 10, y: 0 });
+  await sleep(800);
+  const zB = await zoom();
+  check('pen and finger: two fingers zoom the page', zB !== zA, `${zA} → ${zB}`);
+  check('pen and finger: …and never zoom the whole window', (await win.evaluate(() => visualViewport?.scale ?? 1)) === 1);
+  if (fullscreen) await setFull(false);
+  await win.getByLabel('Reset zoom').first().click();
+  await sleep(800);
+  if (fullscreen) {
+    await setFull(true);
+    await sleep(1000);
+  }
+  check('pen and finger: pinching draws nothing', Math.abs((await ink(clip)) - before) < 40);
+  // A finger that has been drawing for a while, then a second finger: the stroke stays, and the page scrolls.
+  await open({ drawWith: 'any' });
+  before = await ink(clip);
+  top = await scrollTops();
+  await touch('touchStart', [{ id: 1, x: cx - 200, y: cy - 150, mm: FINGER }]);
+  for (let i = 1; i <= 12; i++) {
+    await touch('touchMove', [{ id: 1, x: cx - 200 + i * 15, y: cy - 150 + i * 2, mm: FINGER }]);
+    await sleep(25);
+  }
+  const at = { x: cx - 20, y: cy - 126 };
+  for (let i = 0; i <= 10; i++) {
+    const pts = [{ id: 1, x: at.x, y: at.y - i * 15, mm: FINGER }, { id: 2, x: at.x + 120, y: at.y - i * 15, mm: FINGER }];
+    await touch(i ? 'touchMove' : 'touchStart', pts);
+    await sleep(16);
+  }
+  await touch('touchEnd', []);
+  await sleep(800);
+  const kept = (await ink(clip)) - before;
+  check('pen and finger: a second finger after a real stroke keeps it', kept > 50, `${kept} px`);
+  check('pen and finger: …and then scrolls', (await scrollTops()) > top + 50, `scrolled ${(await scrollTops()) - top} px`);
+
   // Pen only
   await open({ drawWith: 'pen' });
   before = await ink(clip);
-  let top = await scrollTops();
+  top = await scrollTops();
   await drag([{ x: cx, y: cy + 150, mm: FINGER }], 0, -15, 10, 16);
   await settle();
   after = await ink(clip);
@@ -291,10 +378,6 @@ try {
   check('pen only: a finger right after the pen does not scroll', (await scrollTops()) === top, `scrolled ${(await scrollTops()) - top} px`);
   await open({ drawWith: 'pen' });
   before = await ink(clip);
-  const zoom = async () =>
-    fullscreen
-      ? `${Math.round((await win.locator('canvas[style*="crosshair"]').first().boundingBox()).width)} px wide`
-      : (await win.getByLabel('Reset zoom').first().textContent())?.trim();
   const z0 = await zoom();
   await touch('touchStart', [{ id: 1, x: cx - 40, y: cy, mm: FINGER }, { id: 2, x: cx + 40, y: cy, mm: FINGER }]);
   for (let i = 1; i <= 10; i++) {

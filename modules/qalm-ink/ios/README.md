@@ -49,12 +49,16 @@ If `s.platforms` stays below 16.1, the code still compiles because `zOffset` and
      (relaxed, standard, strict). Fingertips (7–12 mm) draw at every level; palms (20–40 mm) are rejected from standard. **Tune on device.**
      This is checked on every move too, so a finger stroke that grows into a palm is retracted.
   3. A finger is rejected within 600 ms of pencil activity, which includes Pencil hover where `zOffset > 0`. It's also rejected if it lands below or
-     beside (±10 mm) the last pen position on the `hand` side, but only within 3 s of the last pen activity.
+     beside (±10 mm) the last pen position on the `hand` side, but only within 2 s of the last pen activity.
      A palm that's rejected is still claimed, so it doesn't scroll the page, with `drawWith: 'pen'` too (as is a finger landing while
      the Pencil writes).
   4. `touchesCancelled` (or the recognizer resetting mid-stroke) retracts the stroke without emitting. `onRejectedTouch` reasons are `palm-size`,
      `pen-lockout`, `hand-side`, `pen-active`, `pen-took-over`, `multi-touch` and `cancelled`.
-- **`drawWith: 'any'`:** a finger stroke draws at once but only claims the touches after 3 pt of movement or 80 ms. If a second finger lands before
+- **`drawWith: 'any'` (since the finger-mode change):** while a finger draws, the ancestor scroll views' pan needs two touches and may run
+  alongside the ink recognizer, so two fingers scroll natively. A second finger within 150 ms or 3 mm of travel retracts the stroke; later, it
+  is kept (finished where it was). Either way the recognizer relinquishes and the pan and pinch take over. `onPenSeen` fires on the first
+  Pencil touch or hover (hover only from iOS 16.1, where `zOffset` tells a Pencil from a trackpad).
+- **Before that change:** a finger stroke drew at once but only claimed the touches after 3 pt of movement or 80 ms. If a second finger landed before
   that, the stroke is retracted and the scroll or zoom proceeds. After that, the RNGH pinch can still start alongside a finger stroke; the stroke is then retracted and the
   pinch wins. Two-finger *scroll* only works if both fingers land within that 80 ms window.
 - **Pen button:** `UIPencilInteraction` sends `double-tap` (`pencilInteractionDidTap` before 17.5, `didReceiveTap` from 17.5 on) and `squeeze`
@@ -81,7 +85,8 @@ If `s.platforms` stays below 16.1, the code still compiles because `zOffset` and
 **Input and palm rejection**
 - [ ] `drawWith: 'pen'`: one finger scrolls the page list and two fingers pinch-zoom while the pen tool is active. The Pencil never scrolls,
       even with a palm resting first.
-- [ ] `drawWith: 'any'`: one finger draws, two fingers landing together scroll or zoom, and a late second finger retracts the stroke and zooms.
+- [ ] `drawWith: 'any'`: one finger draws, two fingers landing together scroll (with momentum) or zoom, and a second finger after a real stroke
+      keeps the stroke and then scrolls. One finger with the tool off still scrolls (the two-touch pan is restored).
 - [ ] Resting a palm (on the `hand` side) before or while writing never draws, scrolls or leaves marks. Try relaxed, standard and strict with
       fingers, flat fingers and palms, and adjust the `majorRadiusTolerance` handling if needed.
 - [ ] `hand: 'left'` mirrors the hand-side rule.
