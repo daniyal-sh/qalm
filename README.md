@@ -1,8 +1,13 @@
 <p align="center">
-  <a href="https://qalm.apollolearn.app"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/hero-dark.png"><img src="apps/site/public/showcase/hero-light.png" alt="qalm on a laptop and a tablet: lecture slides annotated by hand, and a labelled diagram of an animal cell." width="860"></picture></a>
+  <a href="https://qalm.apollolearn.app"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/brand/qalm-mark-dark.svg"><img src="assets/brand/qalm-mark.svg" alt="qalm logo: a pen nib in orbit" width="96" height="88"></picture></a>
 </p>
 
-# qalm by Apollo
+<h1 align="center">qalm</h1>
+<p align="center"><sub>by Apollo</sub></p>
+
+<p align="center">
+  <a href="https://qalm.apollolearn.app"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/hero-dark.png"><img src="apps/site/public/showcase/hero-light.png" alt="qalm on a laptop and a tablet: lecture slides annotated by hand, and a labelled diagram of an animal cell." width="860"></picture></a>
+</p>
 
 **Finally, a handwriting app that doesn't suck.** Ink that keeps up with your pen, palm rejection that actually works,
 and pages that feel like paper. Free while in beta.
