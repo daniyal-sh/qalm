@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
+declare const console: { log(...a: unknown[]): void };
 import { LectureDoc, type InkPoint, type LectureEvent, type StrokeItem } from '../src';
 
 /** A deterministic pseudo-random handwriting stroke: `n` points over ~`n * 4` ms, wobbling like real writing. */
