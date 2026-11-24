@@ -212,9 +212,11 @@ D1 migrations: `0001_init`, `0002_user_assets`, `0003_notebook_deleted`, `0004_a
   into the app; this needs a web redirect page). Real Resend email delivery is untested.
 - **Agents:** no real MCP client has connected yet, and image-token costs per provider haven't been measured.
 - **Builds:** the macOS DMG and the Windows arm64 installer haven't been built. Nothing is signed.
-- **Production isn't deployed yet.** Staging is live. The production resource ids in `apps/server/wrangler.jsonc`
-  (`env.production`) are `REPLACE_ME_…` placeholders: see the production checklist in §7. For local dev,
-  `MAGIC_LINK_URL` is `http://localhost:8081/auth/email/verify` (the dev web app stays at the root).
+- **Production is live (2026-11-24):** `https://qalm.apollolearn.app` (site, app at `/app/`) and
+  `https://qalm-api.apollolearn.app` (API, `/mcp`). `apollolearn.app` DNS moved from Vercel to Cloudflare (Free plan,
+  every Apollo/email record DNS-only; Apollo stays hosted on Vercel). Resources: D1 `qalm-prod`, R2 `qalm-assets-prod`,
+  KV `qalm-oauth-prod`, R2 `qalm-downloads` / `qalm-downloads-staging`; secrets `JWT_SECRET` and `RESEND_API_KEY` set.
+  For local dev, `MAGIC_LINK_URL` is `http://localhost:8081/auth/email/verify` (the dev web app stays at the root).
 - **Round 2, untested on devices:** pen styles/smoothing feel, the 50 ms native ink hand-off, tap-vs-scroll and handle
   dragging with touch/stylus, swatch drag in the toolbar, the new dialogs/sheets and the maths fallback font on
   iOS/Android, thumbnails and chunked pictures on a real GPU. Swatch sync and the thread index were only tested with
