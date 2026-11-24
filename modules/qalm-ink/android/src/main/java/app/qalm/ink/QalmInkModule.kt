@@ -36,7 +36,7 @@ class QalmInkModule : Module() {
     }
 
     View(QalmInkView::class) {
-      Events("onStrokeEnd", "onErase", "onLasso", "onPenButton", "onRejectedTouch")
+      Events("onStrokeEnd", "onErase", "onLasso", "onPenButton", "onRejectedTouch", "onShapeHold")
 
       Prop("pageSize") { view: QalmInkView, v: PageSizeRecord ->
         view.pageW = if (v.w > 0) v.w else 595.0
@@ -54,6 +54,19 @@ class QalmInkModule : Module() {
         view.palm = v.palm
       }
       Prop("committedIds") { view: QalmInkView, v: List<String> -> view.setCommittedIds(v) }
+      Prop("shapeSnap") { view: QalmInkView, v: Boolean? -> view.shapeSnap = v ?: false }
+
+      // The answer to onShapeHold: { kind, pts: [[x, y], …] } or null (not a shape).
+      AsyncFunction("setShapePreview") { view: QalmInkView, requestId: Int, shape: Map<String, Any?>? ->
+        val kind = shape?.get("kind") as? String
+        val pts = (shape?.get("pts") as? List<*>)?.mapNotNull { p ->
+          val xy = p as? List<*> ?: return@mapNotNull null
+          val x = (xy.getOrNull(0) as? Number)?.toDouble() ?: return@mapNotNull null
+          val y = (xy.getOrNull(1) as? Number)?.toDouble() ?: return@mapNotNull null
+          doubleArrayOf(x, y)
+        }
+        view.post { view.shapePreview(requestId, if (kind != null && !pts.isNullOrEmpty()) kind else null, pts ?: emptyList()) }
+      }
 
       OnViewDidUpdateProps { view: QalmInkView -> view.propsChanged() }
     }

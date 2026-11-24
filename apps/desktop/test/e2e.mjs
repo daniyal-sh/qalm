@@ -1,6 +1,7 @@
 // Smoke test of the packaged app (release/win-unpacked, or QALM_EXE): library renders, PDF import through the
 // native open dialog (stubbed in main), drawing with the mouse, reload on a deep route (SPA fallback), PDF export
-// through the native save dialog (stubbed), a qalm:// link handed to a second instance, and no console errors.
+// through the native save dialog (stubbed), a live shape drawn with a simulated pen (hold to snap, drag to resize, lift,
+// undo), a qalm:// link handed to a second instance, and no console errors.
 //
 // A build with a server URL (EXPO_PUBLIC_QALM_SERVER_URL) opens on the sign-in screen with a fresh profile:
 //   QALM_E2E_SIGNIN=skip  (default) "Continue without an account"
@@ -9,7 +10,7 @@
 // code and link read the email from the server's console: QALM_E2E_SERVER_LOG=<file with `wrangler dev` output>
 // (a dev server without an email provider logs every email). QALM_E2E_EMAIL picks the address.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -30,6 +31,9 @@ const tmp = mkdtempSync(join(tmpdir(), 'qalm-e2e-'));
 const userData = join(tmp, 'profile');
 const pdfIn = join(tmp, 'Lecture notes.pdf');
 const pdfOut = join(tmp, 'export.pdf');
+/** Screenshots of the live-shape step (QALM_E2E_SHOTS keeps them; by default they go with the other artifacts). */
+const shots = process.env.QALM_E2E_SHOTS ?? tmp;
+mkdirSync(shots, { recursive: true });
 
 const { PDFDocument, StandardFonts } = require('pdf-lib');
 {
@@ -150,6 +154,94 @@ try {
   writeFileSync(join(tmp, 'drawn.png'), after);
   if (before.equals(after)) throw new Error('drawing changed nothing on screen');
   log('drew a stroke with the mouse (screenshot changed):', join(tmp, 'drawn.png'));
+
+  // 4b. Live shapes with a simulated pen: draw a wobbly circle, hold, and the clean shape appears before pen-up; drag
+  // outward to resize it; lift; the page has one shape; one undo brings the hand-drawn stroke back.
+  {
+    const cdp = await win.context().newCDPSession(win);
+    const pen = (type, x, y) =>
+      cdp.send('Input.dispatchMouseEvent', {
+        type,
+        x,
+        y,
+        button: type === 'mouseMoved' ? 'none' : 'left',
+        buttons: type === 'mouseReleased' ? 0 : penDown ? 1 : 0,
+        clickCount: type === 'mouseMoved' ? 0 : 1,
+        pointerType: 'pen',
+        force: 0.5,
+      });
+    let penDown = false;
+    const shot = (name) => win.screenshot({ clip }).then((b) => writeFileSync(join(shots, name), b));
+    const underPen = () => ink.getAttribute('data-shape');
+    /** Copies everything on the page (Ctrl+A, Ctrl+C) and reads the clip the app saved: the page's items. */
+    const pageItems = async () => {
+      await win.evaluate(() => localStorage.removeItem('qalm:clipboard'));
+      await win.keyboard.press('Control+a');
+      await win.keyboard.press('Control+c');
+      let clipItems = null;
+      for (let i = 0; i < 40 && !clipItems; i++) {
+        clipItems = await win.evaluate(() => JSON.parse(localStorage.getItem('qalm:clipboard') ?? 'null')?.items ?? null);
+        if (!clipItems) await win.waitForTimeout(100);
+      }
+      await win.keyboard.press('Escape');
+      if (!clipItems) throw new Error('select all + copy saved no clip');
+      return clipItems;
+    };
+    const R = 70;
+    const cx = box.x + box.width * 0.6;
+    const cy = box.y + Math.min(box.height, 600) * 0.3;
+    const at = (a, r) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    const start = at(-Math.PI / 2, R);
+    await pen('mouseMoved', ...start);
+    penDown = true;
+    await pen('mousePressed', ...start);
+    let last = start;
+    for (let i = 1; i <= 52; i++) {
+      const a = -Math.PI / 2 + (i / 48) * 2 * Math.PI; // a little past the start
+      last = at(a, R + Math.sin(i / 3) * 4);
+      await pen('mouseMoved', ...last);
+      if (i === 30) {
+        await shot('shape-1-drawing.png');
+        if (await underPen()) throw new Error('snapped while still drawing');
+      }
+    }
+    // Hold: a resting hand wobbles by a pixel or so (well inside 2.5 mm).
+    for (let i = 0; i < 6; i++) {
+      await win.waitForTimeout(110);
+      await pen('mouseMoved', last[0] + (i % 2), last[1] + ((i + 1) % 2));
+    }
+    let kind = null;
+    for (let i = 0; i < 20 && !kind; i++) {
+      kind = await underPen();
+      if (!kind) await win.waitForTimeout(50);
+    }
+    if (kind !== 'ellipse') throw new Error(`held a circle; under the pen: ${kind}`);
+    await shot('shape-2-held.png');
+    log('live shape: a held circle snapped before pen-up');
+    // Drag outward: the circle grows about its centre.
+    const out = [cx + (last[0] - cx) * 1.6, cy + (last[1] - cy) * 1.6];
+    for (let i = 1; i <= 10; i++) await pen('mouseMoved', last[0] + ((out[0] - last[0]) * i) / 10, last[1] + ((out[1] - last[1]) * i) / 10);
+    await shot('shape-3-resized.png');
+    penDown = false;
+    await pen('mouseReleased', ...out);
+    await win.waitForTimeout(800);
+    await shot('shape-4-placed.png');
+    const placed = await pageItems();
+    const shapes = placed.filter((it) => it.type === 'shape');
+    if (shapes.length !== 1 || shapes[0].kind !== 'ellipse') throw new Error(`after lifting: ${JSON.stringify(placed.map((it) => it.kind ?? it.type))}`);
+    const w = Math.hypot(shapes[0].pts[1][0] - shapes[0].pts[0][0], shapes[0].pts[1][1] - shapes[0].pts[0][1]);
+    const pxPerUnit = box.width / 612; // the imported PDF page is 612 wide
+    if (w * pxPerUnit < 2 * R * 1.4) throw new Error(`the drag did not resize the circle (${(w * pxPerUnit).toFixed(0)} px across)`);
+    log(`live shape: one ellipse on the page, ${(w * pxPerUnit).toFixed(0)} px across after the drag (drawn ${2 * R})`);
+    await win.keyboard.press('Control+z');
+    await win.waitForTimeout(500);
+    await shot('shape-5-undone.png');
+    const undone = await pageItems();
+    if (undone.some((it) => it.type === 'shape') || undone.filter((it) => it.type === 'stroke').length !== placed.length) {
+      throw new Error(`after undo: ${JSON.stringify(undone.map((it) => it.kind ?? it.type))}`);
+    }
+    log('live shape: one undo brought the hand-drawn stroke back; screenshots in', shots);
+  }
 
   // 5. Reload on the deep route: the app:// protocol serves index.html for /notebook/<id>.
   const nbUrl = win.url();

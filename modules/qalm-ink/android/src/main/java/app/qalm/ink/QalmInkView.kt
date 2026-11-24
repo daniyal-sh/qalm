@@ -10,6 +10,7 @@ import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
 import android.os.Build
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.SurfaceView
 import android.view.View
@@ -81,6 +82,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   var penStyle = "fountain"
   var smoothing = 0
   var lassoMode = "free" // free | rect
+  /** Live shapes on (the app passed `recognizeShape`): report holds with onShapeHold. */
+  var shapeSnap = false
   var drawWith by input::drawWith
   var hand by input::hand
   var palm by input::palm
@@ -107,6 +110,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   private val onLasso by EventDispatcher()
   private val onPenButton by EventDispatcher()
   private val onRejectedTouch by EventDispatcher()
+  private val onShapeHold by EventDispatcher()
 
   // ---- state ----
   private class Live(
@@ -126,10 +130,20 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     var holdX = 0.0
     var holdY = 0.0
     var holdT = 0.0
+    /** Index of the point where the hold began. */
+    var holdIdx = 0
+    /** The onShapeHold this stroke is waiting on (-1: none). */
+    var holdRequest = -1
+    /** Snapped while held: the shape under the pen ([base] as recognised, [cur] adjusted), and where the pen was. */
+    var snapKind: String? = null
+    var snapBase: List<DoubleArray> = emptyList()
+    var snapCur: List<DoubleArray> = emptyList()
+    var snapFrom = doubleArrayOf(0.0, 0.0)
     var erasedUpTo = 0
   }
 
-  class Pending(val id: String, val path: Path, val color: Int, val alpha: Int)
+  /** A finished stroke (filled outline) or snapped shape (stroked at [lineWidth] page units) until PageCanvas has it. */
+  class Pending(val id: String, val path: Path, val color: Int, val alpha: Int, val lineWidth: Float = 0f)
 
   private var live: Live? = null
   private val pending = ArrayList<Pending>()
@@ -188,14 +202,67 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   }
 
   private fun addPoint(live: Live, pt: InkPoint) {
+    val kind = live.snapKind
+    if (kind != null) {
+      // Adjusting: the stroke stays as drawn; the shape follows the pen.
+      live.snapCur = LiveShape.adjust(kind, live.snapBase, live.snapFrom, doubleArrayOf(pt.x, pt.y))
+      return
+    }
     val prev = live.points.lastOrNull()
     if (prev != null && prev.x == pt.x && prev.y == pt.y) return
     live.points.add(pt)
+    // Holding still: within HOLD_MM of where the hold began (not of the previous point, so a slow drift ends it).
     val mmPerUnit = unitPxX() * mmPerPx
-    if (live.points.size == 1 || hypot(pt.x - live.holdX, pt.y - live.holdY) * mmPerUnit > HOLD_MOVE_MM) {
+    if (live.points.size == 1 || hypot(pt.x - live.holdX, pt.y - live.holdY) * mmPerUnit > LiveShape.HOLD_MM) {
       live.holdX = pt.x
       live.holdY = pt.y
       live.holdT = pt.t
+      live.holdIdx = live.points.size - 1
+      live.holdRequest = -1 // an answer to an earlier hold is stale now
+      armHold(live)
+    }
+  }
+
+  // ---- live shapes: the hold is timed here, recognition runs in JS (onShapeHold → setShapePreview) ----
+  private var holdCounter = 0
+  private val holdTimeout = Runnable { holdElapsed() }
+
+  private fun armHold(l: Live) {
+    removeCallbacks(holdTimeout)
+    if (shapeSnap && l.kind == "ink" && l.tool == "pen" && l.snapKind == null) postDelayed(holdTimeout, LiveShape.HOLD_MS)
+  }
+
+  private fun holdElapsed() {
+    val l = live ?: return
+    if (l.snapKind != null || l.kind != "ink" || l.points.size < 2) return
+    l.holdRequest = ++holdCounter
+    onShapeHold(
+      mapOf(
+        "requestId" to l.holdRequest,
+        "points" to l.points.subList(0, l.holdIdx + 1).map { mapOf("x" to it.x, "y" to it.y) },
+      ),
+    )
+  }
+
+  /** JS answered a hold: snap if the pen is still down and still holding there (else the answer is stale). */
+  fun shapePreview(requestId: Int, kind: String?, pts: List<DoubleArray>) {
+    val l = live ?: return
+    if (kind == null || l.holdRequest != requestId || l.snapKind != null) return
+    val last = l.points.last()
+    l.snapKind = kind
+    l.snapBase = pts
+    l.snapCur = pts
+    l.snapFrom = doubleArrayOf(last.x, last.y)
+    l.predicted = emptyList()
+    performHapticFeedback(
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.CLOCK_TICK,
+    )
+    render(l)
+  }
+
+  private fun shapePath(kind: String, pts: List<DoubleArray>): Path = Path().apply {
+    for (pl in LiveShape.polylines(kind, pts)) {
+      pl.forEachIndexed { i, p -> if (i == 0) moveTo(p[0].toFloat(), p[1].toFloat()) else lineTo(p[0].toFloat(), p[1].toFloat()) }
     }
   }
 
@@ -245,7 +312,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     for (h in 0 until ev.historySize) addPoint(l, point(ev, idx, h, l))
     addPoint(l, point(ev, idx, -1, l))
     l.predicted = emptyList()
-    if (l.kind == "ink") {
+    if (l.kind == "ink" && l.snapKind == null) {
       val predicted = predictor.predict()
       if (predicted != null) {
         val pIdx = predicted.findPointerIndex(l.pointerId)
@@ -263,6 +330,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     val l = live ?: return
     addPoint(l, point(ev, idx, -1, l))
     live = null
+    removeCallbacks(holdTimeout)
     when (l.kind) {
       "erase" -> {
         emitErase(l, final = true)
@@ -276,8 +344,13 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
         val id = UUID.randomUUID().toString()
         val last = l.points.last()
         val heldMs = max(0.0, max(last.t, (ev.eventTime - l.downTime).toDouble()) - l.holdT)
-        val path = QalmFreehand.toPath(QalmFreehand.outline(l.tool, l.width, l.points, l.style, l.smoothing))
-        synchronized(pending) { pending.add(Pending(id, path, l.colorInt, alphaFor(l))) }
+        val shapeKind = l.snapKind
+        val pend = if (shapeKind != null) {
+          Pending(id, shapePath(shapeKind, l.snapCur), l.colorInt, alphaFor(l), l.width.toFloat())
+        } else {
+          Pending(id, QalmFreehand.toPath(QalmFreehand.outline(l.tool, l.width, l.points, l.style, l.smoothing)), l.colorInt, alphaFor(l))
+        }
+        synchronized(pending) { pending.add(pend) }
         layer.commit()
         // Never committed (e.g. the app snapped it to a shape): drop it anyway, as iOS does.
         postDelayed({ dropPending(id) }, PENDING_FALLBACK_MS)
@@ -293,13 +366,14 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
             "heldMs" to Math.round(heldMs).toDouble(),
             "style" to l.style,
             "smoothing" to l.smoothing,
-          ),
+          ) + (if (shapeKind != null) mapOf("shape" to mapOf("kind" to shapeKind, "pts" to l.snapCur.map { listOf(it[0], it[1]) })) else emptyMap()),
         )
       }
     }
   }
 
   private fun retract() {
+    removeCallbacks(holdTimeout)
     live = null
     layer.drawFrame(null)
   }
@@ -338,6 +412,9 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     val lasso: Path? = null,
     val cursor: DoubleArray? = null, // x, y, radius
     val cursorColor: Int = 0,
+    /** A snapped shape: stroked at [shapeWidth] page units in [fillColor] / [fillAlpha]. */
+    val shape: Path? = null,
+    val shapeWidth: Float = 0f,
   )
 
   /** Pens are opaque; a highlighter uses its colour's own alpha (#rrggbbaa) or HIGHLIGHTER_ALPHA (tech-spec §2). */
@@ -348,13 +425,20 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   }
 
   private fun render(l: Live) {
-    val frame = when (l.kind) {
-      "ink" -> Frame(
+    val snapKind = l.snapKind
+    val frame = when {
+      l.kind == "ink" && snapKind != null -> Frame(
+        shape = shapePath(snapKind, l.snapCur),
+        shapeWidth = l.width.toFloat(),
+        fillColor = l.colorInt,
+        fillAlpha = alphaFor(l),
+      )
+      l.kind == "ink" -> Frame(
         fill = QalmFreehand.toPath(QalmFreehand.outline(l.tool, l.width, l.points + l.predicted, l.style, l.smoothing)),
         fillColor = l.colorInt,
         fillAlpha = alphaFor(l),
       )
-      "lasso" -> Frame(
+      l.kind == "lasso" -> Frame(
         lasso = Path().apply {
           val a = l.points.firstOrNull()
           val b = l.points.lastOrNull()
@@ -385,6 +469,12 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
   private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+  /** Shapes: round caps and joins, as PageCanvas draws them. */
+  private val shapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    style = Paint.Style.STROKE
+    strokeCap = Paint.Cap.ROUND
+    strokeJoin = Paint.Join.ROUND
+  }
 
   /** Runs on the render thread (front-buffered) or the UI thread (fallback). */
   private fun paintPending(canvas: Canvas, sx: Float, sy: Float) {
@@ -392,6 +482,13 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     canvas.save()
     canvas.scale(sx, sy)
     for (p in snapshot) {
+      if (p.lineWidth > 0f) {
+        shapePaint.color = p.color
+        shapePaint.alpha = p.alpha
+        shapePaint.strokeWidth = p.lineWidth
+        canvas.drawPath(p.path, shapePaint)
+        continue
+      }
       fillPaint.color = p.color
       fillPaint.alpha = p.alpha
       canvas.drawPath(p.path, fillPaint)
@@ -406,6 +503,12 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
       fillPaint.color = frame.fillColor
       fillPaint.alpha = frame.fillAlpha
       canvas.drawPath(it, fillPaint)
+    }
+    frame.shape?.let {
+      shapePaint.color = frame.fillColor
+      shapePaint.alpha = frame.fillAlpha
+      shapePaint.strokeWidth = frame.shapeWidth
+      canvas.drawPath(it, shapePaint)
     }
     val px = 1f / sx // one view px in page units
     frame.lasso?.let {
@@ -498,9 +601,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   }
 
   companion object {
-    // Palm rejection constants live in InkInput (tech-spec §3).
-    /** Movement below this counts as holding still (heldMs, for shape snapping). */
-    const val HOLD_MOVE_MM = 1.0
+    // Palm rejection constants live in InkInput (tech-spec §3); the live-shape hold in LiveShape.
     /** A finished stroke whose id never reaches committedIds is dropped after this (same as iOS). */
     const val PENDING_FALLBACK_MS = 4000L
     /** How long a finished stroke stays after its id is in committedIds (same as iOS). */
