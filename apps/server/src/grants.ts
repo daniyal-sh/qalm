@@ -1,7 +1,7 @@
 import * as Y from 'yjs';
 import { Library, type Folder, type LibraryEntry } from '@qalm/core';
 import type { Env } from './env';
-import { libDocId, room } from './docs';
+import { libDocId, nbDocId, room } from './docs';
 import { now } from './util';
 
 export interface GrantRow {
@@ -9,7 +9,9 @@ export interface GrantRow {
   client_id: string;
   client_name: string;
   user_id: string;
+  /** Unused since grants cover every AI-enabled notebook (kept so older rows and Workers still read). */
   notebook_ids: string;
+  /** Unused, like notebook_ids. */
   folder_ids: string;
   can_comment: number;
   can_transcribe: number;
@@ -66,15 +68,26 @@ export async function userNotebooks(env: Env, userId: string): Promise<{ folders
   return { folders: lib.folders, notebooks: out };
 }
 
+export interface GrantedNotebook extends NotebookChoice {
+  paused: boolean;
+  /** The student's last edit in the notebook (ms). */
+  at: number;
+}
+
 /**
- * Notebooks a grant covers right now (folders are resolved live, so new notebooks in them are included). An agent sees
- * only those whose AI access is on; mcp.ts checks that live in each notebook's room.
+ * Notebooks a grant covers right now: every live notebook of the grant's user whose AI access is on, now and in the
+ * future. There is no per-agent notebook choice; older grants' `notebook_ids` / `folder_ids` are ignored. The switch is
+ * read live from each notebook's room (the D1 mirror can lag), so turning it off hides the notebook at once.
  */
-export async function grantedNotebooks(env: Env, g: GrantRow): Promise<NotebookChoice[]> {
-  const ids = new Set<string>(JSON.parse(g.notebook_ids) as string[]);
-  const folders = new Set<string>(JSON.parse(g.folder_ids) as string[]);
+export async function grantedNotebooks(env: Env, g: GrantRow): Promise<GrantedNotebook[]> {
   const { notebooks } = await userNotebooks(env, g.user_id);
-  return notebooks.filter((n) => ids.has(n.id) || (n.folderId !== null && folders.has(n.folderId)));
+  const infos = await Promise.all(
+    notebooks.map(async (n) => {
+      const info = await room(env, nbDocId(n.id)).agentInfo(nbDocId(n.id));
+      return { ...n, aiAccess: info.aiAccess, paused: info.paused, at: info.at };
+    }),
+  );
+  return infos.filter((n) => n.aiAccess);
 }
 
 /** Short, stable session name for a notebook (`s=` in Q-ink). */

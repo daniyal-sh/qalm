@@ -53,7 +53,7 @@ describe('delete account', () => {
     n.page.addItem(stroke('s1', 50, 100, 150, 120));
     const pgDoc = `pg:leavenb:${n.pageId}`;
     await until(async () => new Page(await serverDoc(pgDoc)).items().length === 1);
-    const mcpToken = await connectAgent(email, { notebooks: ['leavenb'], comment: true, transcribe: false });
+    const mcpToken = await connectAgent(email, { comment: true, transcribe: false });
     await tool(mcpToken, 'wait');
     const mine = new Uint8Array(200).fill(1);
     const shared = new Uint8Array(300).fill(2);

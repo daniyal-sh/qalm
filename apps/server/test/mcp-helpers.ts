@@ -16,7 +16,7 @@ export function b64url(bytes: Uint8Array): string {
 /** Runs the whole OAuth 2.1 flow (DCR → magic-link sign-in → consent → PKCE code exchange) and returns an MCP access token. */
 export async function connectAgent(
   email: string,
-  pick: { notebooks: string[]; comment: boolean; transcribe: boolean },
+  pick: { comment: boolean; transcribe: boolean },
   clientName = 'Tutor',
   onConsent?: (html: string) => void,
 ): Promise<string> {
@@ -55,7 +55,6 @@ export async function connectAgent(
   const rid = /name="rid" value="([^"]*)"/.exec(html)![1]!;
 
   const form = new URLSearchParams({ handle: handle.replace(/&#(\d+);/g, (_, c) => String.fromCharCode(Number(c))), rid, decision: 'approve' });
-  for (const n of pick.notebooks) form.append('notebook', n);
   if (pick.comment) form.set('comment', '1');
   if (pick.transcribe) form.set('transcribe', '1');
   const approved = await call('/authorize', { method: 'POST', body: form, headers: { Cookie: jar.header() } });

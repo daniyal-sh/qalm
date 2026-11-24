@@ -19,16 +19,16 @@ describe('mcp', () => {
   it('wait / read / transcribe / comment end to end', async () => {
     const t = await signIn('student@example.com');
     const n = await notebook(t, 'calc2nb', 'Calc 2');
-    const other = await notebook(t, 'secretnb', 'Diary');
+    const other = await notebook(t, 'secretnb', 'Diary', { ai: false });
     other.page.addItem(stroke('x1', 50, 100, 150, 120));
-    const token = await connectAgent('student@example.com', { notebooks: ['calc2nb'], comment: true, transcribe: true });
+    const token = await connectAgent('student@example.com', { comment: true, transcribe: true });
 
     const init = await mcp(token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });
     expect(init.result.serverInfo.name).toBe('qalm');
     const list = await mcp(token, 'tools/list');
     expect(list.result.tools.map((x: { name: string }) => x.name).sort()).toEqual(['comment', 'read', 'transcribe', 'wait']);
 
-    // No s: lists only the granted notebook.
+    // No s: lists only the notebooks with AI access on.
     const sessions = textOf(await tool(token, 'wait'));
     const s = sessionOf('calc2nb');
     expect(sessions).toContain(`s=${s} "Calc 2"`);
@@ -83,7 +83,7 @@ describe('mcp', () => {
     expect((await tool(token, 'transcribe', { ref: 'p1', text: 'x' })).isError).toBe(true);
     expect((await tool(token, 'read', { ref: 'p9' })).isError).toBe(true);
     expect((await tool(token, 'read', { ref: 'nonsense' })).isError).toBe(true);
-    // Another notebook is outside the grant.
+    // A notebook with AI access off is out of reach.
     expect((await tool(token, 'read', { ref: 'p1', s: sessionOf('secretnb') })).isError).toBe(true);
 
     // Activity is logged for the student.
@@ -95,7 +95,7 @@ describe('mcp', () => {
   it('wait merges edits into one net diff and rate-limits wakes', async () => {
     const t = await signIn('netdiff@example.com');
     const n = await notebook(t, 'netnb', 'Net');
-    const token = await connectAgent('netdiff@example.com', { notebooks: ['netnb'], comment: false, transcribe: false });
+    const token = await connectAgent('netdiff@example.com', { comment: false, transcribe: false });
     const s = sessionOf('netnb');
     const first = tool(token, 'wait', { s });
     await new Promise((r) => setTimeout(r, 50));
@@ -120,7 +120,7 @@ describe('mcp', () => {
     const t = await signIn('locked@example.com');
     const n = await notebook(t, 'locknb', 'Locked');
     n.page.addItem(stroke('k1', 50, 100, 200, 120));
-    const token = await connectAgent('locked@example.com', { notebooks: ['locknb'], comment: false, transcribe: false }, 'Viewer');
+    const token = await connectAgent('locked@example.com', { comment: false, transcribe: false }, 'Viewer');
     const s = sessionOf('locknb');
     expect(textOf(await tool(token, 'read', { ref: 'p1', s }))).toContain('R1 [1]');
     const tr = await tool(token, 'transcribe', { ref: 'R1', text: 'hi' });
@@ -134,11 +134,12 @@ describe('mcp', () => {
     const grants = (await (await call('/ai/grants', { token: t.accessToken })).json()) as { grants: { id: string; clientName: string }[] };
     const g = grants.grants.find((x) => x.clientName === 'Viewer')!;
 
-    // The student turns comments on in Settings → AI access.
-    const patch = await call(`/ai/grants/${g.id}`, { method: 'PATCH', token: t.accessToken, body: JSON.stringify({ canComment: true, notebookIds: ['locknb', 'not-mine'] }) });
+    // The student turns comments on in Settings → AI access. Notebook lists from older apps are ignored.
+    const patch = await call(`/ai/grants/${g.id}`, { method: 'PATCH', token: t.accessToken, body: JSON.stringify({ canComment: true, notebookIds: ['not-mine'] }) });
     expect(patch.status).toBe(200);
     const pg = ((await patch.json()) as { grant: { canComment: boolean; canTranscribe: boolean; notebookIds: string[] } }).grant;
-    expect(pg).toMatchObject({ canComment: true, canTranscribe: false, notebookIds: ['locknb'] });
+    expect(pg).toMatchObject({ canComment: true, canTranscribe: false, notebookIds: [] });
+    expect(textOf(await tool(token, 'read', { ref: 'p1', s }))).toContain('R1');
     expect((await tool(token, 'comment', { ref: 'R1', text: 'now allowed' })).isError).toBeFalsy();
     const pre = await call('/ai/grants', { method: 'OPTIONS', headers: { Origin: 'null', 'Access-Control-Request-Method': 'PATCH' } });
     expect(pre.status).toBe(204);
@@ -157,7 +158,7 @@ describe('mcp', () => {
     const n = await notebook(t, 'typednb', 'Typed');
     n.page.addItem(stroke('u1', 50, 100, 200, 120));
     n.page.setReading(['u1'], 'my words', 'user');
-    const token = await connectAgent('typed@example.com', { notebooks: ['typednb'], comment: true, transcribe: true });
+    const token = await connectAgent('typed@example.com', { comment: true, transcribe: true });
     await until(async () => {
       const id = `pg:typednb:${n.pageId}`;
       const st = await env.DOC_ROOM.get(env.DOC_ROOM.idFromName(id)).getState(id);
@@ -183,13 +184,15 @@ describe('mcp', () => {
     const off = await notebook(t, 'aioffnb', 'Private', { ai: false });
     n.page.addItem(stroke('a1', 50, 100, 200, 120));
     let html = '';
-    const token = await connectAgent('aiswitch@example.com', { notebooks: ['ainb', 'aioffnb'], comment: true, transcribe: true }, 'Tutor', (h) => (html = h));
-    // The consent page marks notebooks whose AI access is off.
-    expect(html).toContain('Private <span class="m">· AI access off</span>');
-    expect(html).not.toContain('Physics <span class="m">· AI access off');
+    const token = await connectAgent('aiswitch@example.com', { comment: true, transcribe: true }, 'Tutor', (h) => (html = h));
+    // The consent page has no notebook picker: the agent gets the notebooks with AI access on.
+    expect(html).toContain("the notebooks you've turned AI access on for");
+    expect(html).toContain("Right now that's <b>Physics</b>.");
+    expect(html).not.toContain('Private');
+    expect(html).not.toContain('name="notebook"');
     const s = sessionOf('ainb');
 
-    // Granted but switched off: never listed or readable.
+    // Switched off: never listed or readable.
     let list = textOf(await tool(token, 'wait'));
     expect(list).toContain(`s=${s} "Physics"`);
     expect(list).not.toContain('Private');
@@ -242,7 +245,7 @@ describe('mcp', () => {
     const gone = await notebook(t, 'gonenb', 'Gone');
     gone.page.addItem(stroke('g1', 50, 100, 200, 120));
     await until(async () => new Page(await serverDoc(`pg:gonenb:${gone.pageId}`)).items().length === 1);
-    const token = await connectAgent('trash@example.com', { notebooks: ['keepnb', 'trashnb', 'gonenb'], comment: true, transcribe: true });
+    const token = await connectAgent('trash@example.com', { comment: true, transcribe: true });
 
     // Trashed: hidden from agents and the consent page; restoring brings it back.
     await editLibrary(t, (lib) => lib.updateEntry('trashnb', { deletedAt: Date.now() }));
@@ -251,9 +254,8 @@ describe('mcp', () => {
     expect(list).not.toContain('Trashed');
     expect((await tool(token, 'read', { ref: 'outline', s: sessionOf('trashnb') })).isError).toBe(true);
     let html = '';
-    await connectAgent('trash@example.com', { notebooks: ['keepnb'], comment: false, transcribe: false }, 'Other', (h) => (html = h));
-    expect(html).toContain('Keep');
-    expect(html).not.toContain('Trashed');
+    await connectAgent('trash@example.com', { comment: false, transcribe: false }, 'Other', (h) => (html = h));
+    expect(html).toContain("Right now that's 2 notebooks."); // Keep and Gone; not Trashed
     await editLibrary(t, (lib) => lib.updateEntry('trashnb', { deletedAt: null }));
     expect(textOf(await tool(token, 'wait'))).toContain('"Trashed"');
 
@@ -277,6 +279,48 @@ describe('mcp', () => {
     await editLibrary(t, (lib) => lib.removeEntry('keepnb'));
     expect(textOf(await tool(token, 'wait'))).not.toContain('Keep');
     for (const x of [keep, trash, gone]) {
+      x.nbc.close();
+      x.pgc.close();
+    }
+  });
+  it('an approved agent sees exactly the notebooks with AI access on, including new ones; old scoped grants too', async () => {
+    const t = await signIn('allai@example.com');
+    const a = await notebook(t, 'allanb', 'Algebra');
+    const b = await notebook(t, 'allbnb', 'Biology');
+    const off = await notebook(t, 'allcnb', 'Journal', { ai: false });
+    const token = await connectAgent('allai@example.com', { comment: true, transcribe: false });
+    // A grant from before this change, scoped to one notebook and a folder (the columns stay, but are ignored).
+    await env.DB.prepare(`UPDATE grants SET notebook_ids = '["allanb"]', folder_ids = '["some-folder"]' WHERE user_id = ?1`).bind(t.userId).run();
+
+    let list = textOf(await tool(token, 'wait'));
+    expect(list).toContain('"Algebra"');
+    expect(list).toContain('"Biology"'); // outside the old scope, but AI access is on
+    expect(list).not.toContain('Journal');
+    expect(textOf(await tool(token, 'read', { ref: 'outline', s: sessionOf('allbnb') }))).not.toContain('AI access is off');
+    const hidden = await tool(token, 'read', { ref: 'outline', s: sessionOf('allcnb') });
+    expect(hidden.isError).toBe(true);
+    expect(textOf(hidden)).toContain('AI access is off');
+
+    // A notebook made after approval is covered as soon as its AI access is on.
+    const later = await notebook(t, 'alldnb', 'Later');
+    expect(textOf(await tool(token, 'wait'))).toContain('"Later"');
+
+    // Turning AI access on for the private notebook shares it; off hides Biology again at once.
+    off.nb.setMeta({ aiAccess: true });
+    await serverAi('allcnb', true);
+    await until(async () => (await aiRow('allcnb')) === 1);
+    expect(textOf(await tool(token, 'wait'))).toContain('"Journal"');
+    b.nb.setMeta({ aiAccess: false });
+    await serverAi('allbnb', false);
+    const r = await tool(token, 'read', { ref: 'outline', s: sessionOf('allbnb') });
+    expect(r.isError).toBe(true);
+    list = textOf(await tool(token, 'wait'));
+    expect(list).not.toContain('Biology');
+
+    // The grants API no longer carries a notebook choice.
+    const grants = (await (await call('/ai/grants', { token: t.accessToken })).json()) as { grants: { notebookIds: string[]; folderIds: string[] }[] };
+    expect(grants.grants[0]).toMatchObject({ notebookIds: [], folderIds: [] });
+    for (const x of [a, b, off, later]) {
       x.nbc.close();
       x.pgc.close();
     }

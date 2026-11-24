@@ -4,7 +4,7 @@ import { handleAccount } from './account';
 import { handleAuth, requireUser, TooManyRequests } from './auth';
 import { handleAuthorize, messagePage } from './consent';
 import { canAccess, deleteNotebook, nbDocId, parseDocId, room } from './docs';
-import { type GrantRow, userNotebooks } from './grants';
+import { type GrantRow } from './grants';
 import { HttpError, error, json, now, origin, randomToken, readJson, sha256Hex } from './util';
 import { storageFull, storageUsage } from './storage';
 
@@ -176,8 +176,9 @@ function grantJson(g: GrantRow) {
     id: g.id,
     clientId: g.client_id,
     clientName: g.client_name,
-    notebookIds: JSON.parse(g.notebook_ids) as string[],
-    folderIds: JSON.parse(g.folder_ids) as string[],
+    // Deprecated: a grant covers every notebook with AI access on. Kept empty so older apps still parse it.
+    notebookIds: [] as string[],
+    folderIds: [] as string[],
     canComment: !!g.can_comment,
     canTranscribe: !!g.can_transcribe,
     createdAt: g.created_at,
@@ -188,7 +189,7 @@ function grantJson(g: GrantRow) {
 
 /**
  * JSON API for the app's AI access screen (Bearer):
- * GET /ai/grants · PATCH /ai/grants/{id} {canComment?, canTranscribe?, notebookIds?, folderIds?} · DELETE /ai/grants/{id} · GET /ai/requests · POST /ai/requests/{id}/deny · GET /ai/activity?limit= · GET /ai/presence?nb=
+ * GET /ai/grants · PATCH /ai/grants/{id} {canComment?, canTranscribe?} (notebookIds/folderIds from older apps are ignored) · DELETE /ai/grants/{id} · GET /ai/requests · POST /ai/requests/{id}/deny · GET /ai/activity?limit= · GET /ai/presence?nb=
  */
 async function aiApi(req: Request, env: Env, path: string): Promise<Response | null> {
   const userId = await requireUser(req, env);
@@ -203,23 +204,10 @@ async function aiApi(req: Request, env: Env, path: string): Promise<Response | n
   if (gm && req.method === 'PATCH') {
     const g = await env.DB.prepare('SELECT * FROM grants WHERE id = ?1 AND user_id = ?2 AND revoked_at IS NULL').bind(gm[1], userId).first<GrantRow>();
     if (!g) throw new HttpError(404, 'Not found');
-    const body = await readJson<{ canComment?: unknown; canTranscribe?: unknown; notebookIds?: unknown; folderIds?: unknown }>(req);
-    const ids = (v: unknown, cur: string): string => {
-      if (v === undefined) return cur;
-      if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) throw new HttpError(400, 'Expected a list of ids');
-      return JSON.stringify([...new Set(v as string[])]);
-    };
+    const body = await readJson<{ canComment?: unknown; canTranscribe?: unknown }>(req);
     const flag = (v: unknown, cur: number): number => (v === undefined ? cur : v ? 1 : 0);
-    let notebookIds = ids(body.notebookIds, g.notebook_ids);
-    const folderIds = ids(body.folderIds, g.folder_ids);
-    if (body.notebookIds !== undefined) {
-      // Only notebooks the user owns can be granted.
-      const { notebooks } = await userNotebooks(env, userId);
-      const own = new Set(notebooks.map((n) => n.id));
-      notebookIds = JSON.stringify((JSON.parse(notebookIds) as string[]).filter((id) => own.has(id)));
-    }
-    await env.DB.prepare('UPDATE grants SET can_comment = ?2, can_transcribe = ?3, notebook_ids = ?4, folder_ids = ?5 WHERE id = ?1')
-      .bind(g.id, flag(body.canComment, g.can_comment), flag(body.canTranscribe, g.can_transcribe), notebookIds, folderIds)
+    await env.DB.prepare('UPDATE grants SET can_comment = ?2, can_transcribe = ?3 WHERE id = ?1')
+      .bind(g.id, flag(body.canComment, g.can_comment), flag(body.canTranscribe, g.can_transcribe))
       .run();
     const next = await env.DB.prepare('SELECT * FROM grants WHERE id = ?1').bind(g.id).first<GrantRow>();
     return json({ grant: grantJson(next!) });
