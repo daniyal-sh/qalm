@@ -208,9 +208,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
 
   private func applyInputConfig() {
     inkGesture.isEnabled = tool != .none
-    var types: [NSNumber] = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
-    if !drawWithPen { types.append(NSNumber(value: UITouch.TouchType.direct.rawValue)) }
-    inkGesture.allowedTouchTypes = types
+    // Fingers reach the recognizer in "pen only" too, so a palm can be swallowed; the others are ignored and scroll.
+    inkGesture.allowedTouchTypes = [UITouch.TouchType.pencil, .direct].map { NSNumber(value: $0.rawValue) }
   }
 
   // MARK: Layout
@@ -262,10 +261,20 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
         continue
       }
 
-      // Finger (only delivered when drawWith == 'any').
+      // Finger.
       if let reason = palmReason(touch) {
         reject(reason)
         recognizer.claim()  // swallow the palm so it doesn't scroll the page
+        continue
+      }
+      if drawWithPen {
+        // Pen only: fingers scroll and zoom, but not while the pen writes (it has already claimed the sequence).
+        if let a = active, a.isPencil {
+          reject("pen-active")
+        } else {
+          reject("pen-only")
+          recognizer.ignoreTouch(touch, for: event)
+        }
         continue
       }
       if let a = active {
@@ -643,6 +652,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   // MARK: Pencil double-tap / squeeze
 
   private func emitPenButton(_ kind: String) {
+    // While the Pencil writes, a squeeze or double-tap doesn't switch tools (as the barrel button on Android and web).
+    if let a = active, a.isPencil { return }
     // Every overlay on screen receives the interaction; fire once.
     let now = ProcessInfo.processInfo.systemUptime
     if now - QalmInkView.lastPenButtonTime < 0.3 { return }

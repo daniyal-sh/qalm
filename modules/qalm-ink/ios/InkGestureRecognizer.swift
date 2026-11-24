@@ -4,9 +4,8 @@ import UIKit.UIGestureRecognizerSubclass
 /// Feeds raw touches to `QalmInkView` and decides when the overlay "claims" a touch sequence.
 ///
 /// Claiming (state = .began) makes UIKit fail ancestor gestures that would conflict (the page list's
-/// scroll pan, RNGH pinch), so a stroke never scrolls the page. Touches the recognizer is not allowed
-/// to see (fingers when drawWith == 'pen', via `allowedTouchTypes`) never reach it, so they keep
-/// scrolling and zooming the parent.
+/// scroll pan, RNGH pinch), so a stroke never scrolls the page. Touches it ignores (fingers when
+/// drawWith == 'pen', unless they look like a palm) keep scrolling and zooming the parent.
 final class InkGestureRecognizer: UIGestureRecognizer {
   weak var inkView: QalmInkView?
   private(set) var tracked = Set<UITouch>()
@@ -25,6 +24,13 @@ final class InkGestureRecognizer: UIGestureRecognizer {
     case .began, .changed: state = .cancelled
     default: break
     }
+  }
+
+  /// Stop receiving this touch (it scrolls or zooms the parent) without failing the sequence, so a pencil can still
+  /// land and draw.
+  func ignoreTouch(_ touch: UITouch, for event: UIEvent) {
+    tracked.remove(touch)
+    ignore(touch, for: event)
   }
 
   // Ancestor gestures that already started (a scroll in flight) must not stop a pencil stroke.
