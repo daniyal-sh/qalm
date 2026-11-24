@@ -185,10 +185,11 @@ Set `EXPO_PUBLIC_QALM_SERVER_URL` at build time to point a build at your server.
 The server and the website are Cloudflare Workers (Durable Objects, D1, R2 and KV). To run your own, create those
 resources on your account, put their ids in `apps/server/wrangler.jsonc`, set the `JWT_SECRET` and `RESEND_API_KEY`
 secrets, migrate and deploy, then build the clients with your server's URL. The step-by-step guide is in
-[handover.md](handover.md#7-how-to-run).
+[docs/development.md](docs/development.md#9-self-hosting-on-cloudflare).
 
 ### Docs
 
+- [docs/development.md](docs/development.md): the development guide: run, test, build, self-host, known gaps
 - [docs/README.md](docs/README.md): the index
 - [docs/tech-spec.md](docs/tech-spec.md): architecture and the contracts between packages
 - [docs/qink-live.md](docs/qink-live.md): the live format agents read, and the MCP tools
