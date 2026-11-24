@@ -235,7 +235,8 @@ packQalm(...) / unpackQalm(bytes) -> { index: Y.Doc; pages: Map<pageId, Y.Doc>; 
 box the format bar touches. Boxes without the flag stay plain text, so an old note with `*` or `#` never changes. The flag
 is an ordinary item field, so it syncs through the page's Yjs doc, undo and `.qalm` like any other. The first format bar
 press on an old box escapes its existing Markdown characters (`escapeMarkdown`, the selection remapped), so `price *5*`
-and `# x` keep reading as typed and only the new formatting applies. A box with right-to-left text (Arabic, Hebrew) draws
+and `# x` keep reading as typed and only the new formatting applies; an indented line's first space or tab becomes an
+entity (`&#32;`, `&#9;`), so it stays text (not a code block) and keeps its indentation. A box with right-to-left text (Arabic, Hebrew) draws
 as plain text everywhere (`rendersMarkdown`): the layout places words left to right.
 
 **Syntax** (`markdown/parse.ts`, markdown-it 15 `commonmark` + strikethrough): bold, italic, strikethrough, headings,
@@ -255,8 +256,15 @@ in agents' crops (`markdownSvg`, rendered by resvg with the same fonts), on ever
 box is its layout height, so frames and hit boxes fit. Text none of these fonts has (Cyrillic, CJK, emoji, Devanagari, …)
 is a **fallback run** in its style: on the page the app measures and draws it with a Skia Paragraph, as plain boxes are
 drawn (system fonts behind it on iOS and Android; `setFallbackTextMeasure`); PDF export draws `?` and agents' crops
-leave it to resvg, as for plain boxes. CJK wraps between characters; emoji sequences and accents are never split. Kerning
-and ligatures are off in the crops and the PDF, as the layout measures plain advances. Layouts are cached (LRU, 4000) by
+leave it to resvg, as for plain boxes. The Worker has no fallback fonts, so there such runs are estimated (0.6 em, CJK and
+emoji 1 em) and may wrap differently from the page. CJK wraps between characters; emoji sequences and accents are never
+split. Grapheme clusters are bounded (8 combining marks per character, extra "zalgo" marks are dropped; 32 code points per
+cluster), and long words are split by a running width, so layout is linear in the text. Zero-width characters take no
+room (and aren't drawn in a PDF); a tab is four spaces; leading spaces show at the start of a paragraph or after a line
+break. Kerning and ligatures are off in the crops (resvg honours them only as `style`) and the PDF, as the layout
+measures plain advances; crops draw regular text with Figtree Regular, the font the layout measures. The page installs
+its fallback measure once per font set (`setFallbackTextMeasure(fn, key)`: every page canvas loads its own copy of the
+same fonts). Layouts are cached (LRU: 4000 entries or ~16 M characters of ops and paths, `LAYOUT_CACHE`) by
 `LAYOUT_VERSION`, the text-metrics epoch, size, width and text.
 
 **Maths** (`markdown/math.ts`): MathJax 3 (TeX in, SVG out, no DOM: `liteAdaptor`, packages base, ams, noundefined,
@@ -267,11 +275,16 @@ characters of path).
   is no `newcommand` package (`\def`, `\newcommand`, `\renewcommand` are undefined), and after each formula the AMS
   `\DeclareMathOperator` table and the labels are reset.
 - **Limits** (`MATH_LIMITS`), because MathJax is synchronous and boxes and comments come from other devices and agents:
-  a formula is at most 1000 TeX characters and 200 KB of path; a box or comment renders at most 30 formulas and 5000 TeX
-  characters (`mathAllowance`, `allowedMath`); MathJax's `maxMacros` is 500 and `maxBuffer` 4 KB. Past a limit the TeX
-  source shows. The Worker gives each step of an agent request (measuring regions, drawing the crop) a budget of 10 000
-  new TeX characters (`withMathBudget`; its clock doesn't move during synchronous work, so it's counted in characters);
-  layouts cut short by a budget aren't cached.
+  a formula is at most 1000 TeX characters, 200 KB of path and 50 em wide or tall; a box or comment renders at most 30
+  formulas, 5000 TeX characters and 1 MB of path (`mathAllowance` with `fits`, `allowedMath`); MathJax's `maxMacros` is
+  500 and `maxBuffer` 4 KB. Past a limit the TeX source shows. The Worker gives each step of an agent request (measuring
+  regions, drawing the crop, encoding a thread) a budget of 10 000 new TeX characters (`withMathBudget`; its clock doesn't
+  move during synchronous work, so it's counted in characters); layouts cut short by a budget aren't cached.
+- **Time slice** (app): `setMathTimeSlice(50)` (`src/lib/maths.ts`). Within one JS task new maths runs for at most
+  ~50 ms (the first formula of a task always runs, so filling in always progresses); the rest shows its source, and
+  when the task ends `onMathDeferred` listeners re-render (PageCanvas redraws and re-bakes its Markdown boxes, comments
+  re-render), a slice at a time. A page of heavy boxes or a 100-reply thread never blocks for long. PDF export uses
+  `layoutMarkdownSettled`, which yields between slices until every formula is in, so the PDF is complete.
 
 **Editing.** The box shows its raw Markdown while it's being typed in, and renders when it loses focus. A format bar
 (bold, italic, strikethrough, heading, bullet list, numbered list, quote, code, link, maths) sits under the toolbar while
@@ -280,7 +293,9 @@ line prefix, as the same undo step as the typing. It never takes the focus: on w
 cancelled, and on iPad and Android it's outside the page's scroll view (whose taps would dismiss the keyboard).
 
 **Comments** render the same parse tree with React Native views (`ui/Markdown.tsx`; maths as react-native-svg paths); the
-panel's summaries, margin cards and accessibility labels use `markdownToPlain`. Agents still get and send raw text.
+panel's summaries, margin cards and accessibility labels use `markdownToPlain`, which shows maths in a readable plain form
+(`texToPlain`: `\int_0^1 x^2\,dx` → `∫₀¹ x² dx`, `\frac{a}{b}` → `a/b`), never raw TeX commands. Agents still get and
+send raw text.
 
 **Why not Enriched Markdown** (Software Mansion): its renderer draws native text views (RaTeX for maths on iOS and
 Android, KaTeX on web). Text boxes are drawn by one Skia renderer, into PDFs and into the server's crops, none of which a

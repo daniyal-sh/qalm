@@ -263,7 +263,11 @@ email-only sign-in, and `grants.notebook_ids` / `folder_ids` since grants cover 
     format bar staying clear of the keyboard need a check. MathJax adds ~0.8 MB gzipped to the Worker (now ~1.9 MB) and
     to the app bundle. Lists don't continue on Enter (type `- ` or use the bar). Maths is capped (`MATH_LIMITS`) after a
     review found a 3.8 KB `\def` comment could OOM the Worker. Fallback runs (Cyrillic, CJK, emoji) and the right-to-left
-    plain fallback are only checked on web: on native, emoji and CJK come from system fonts and need a device check.
+    plain fallback are only checked on web: on native, emoji and CJK come from system fonts and need a device check. On
+    web and desktop they show as missing-glyph boxes in plain and Markdown boxes alike (CanvasKit has only the bundled
+    fonts). A second review added: linear layout of long words, a 1 MB maths path cap per box, size-bounded caches, a 50 ms
+    maths time slice in the app (PDF export waits for every formula), indentation kept in converted old boxes, and
+    Figtree Regular in crops. The time slice's fill-in is unit-tested and seen on web; not timed on Hermes.
   - Fractions like ⅔ have no glyph on the page; PDF export uses Symbol, so symbol-heavy lines may wrap differently.
   - "Pen and finger" two-finger pan and pinch are verified with synthetic touch on Electron only; Android and iPad need
     a device check (iOS changes are unbuilt).

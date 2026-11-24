@@ -66,3 +66,26 @@ describe('formatting a box from before Markdown', () => {
     expect(applyFormatTo(md, sel(md, 'each'), 'bold', false).text).toBe('price *5* **each**');
   });
 });
+
+describe('indented lines in a box from before Markdown', () => {
+  const blocks = (s: string) => parseMarkdown(escapeMarkdown(s).text);
+
+  it('4+ spaces or a tab at the start never become a code block', () => {
+    for (const s of ['    four spaces', '\tA tab', 'para\n\n    after a blank line', '        eight']) {
+      expect(blocks(s).every((b) => b.t !== 'code')).toBe(true);
+    }
+  });
+
+  it('keeps the indentation as typed', () => {
+    expect(markdownToPlain(escapeMarkdown('    indented').text)).toBe('    indented');
+    expect(markdownToPlain(escapeMarkdown('top\n  two\n   three').text)).toBe('top\n  two\n   three');
+    expect(markdownToPlain(escapeMarkdown('\tTabbed').text)).toBe('\tTabbed');
+  });
+
+  it('whitespace-only lines stay blank, and selections still map', () => {
+    const old = 'a\n   \n    b';
+    const e = escapeMarkdown(old);
+    expect(e.text).toBe('a\n   \n&#32;   b');
+    expect(e.text.slice(e.at(old.indexOf('b')), e.at(old.indexOf('b')) + 1)).toBe('b');
+  });
+});
