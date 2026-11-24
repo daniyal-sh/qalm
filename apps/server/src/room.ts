@@ -6,7 +6,7 @@ import * as decoding from 'lib0/decoding';
 import { AI_LIVE, AI_LIVE_TTL_MS, AI_PAUSE, AI_PAUSED, AI_PLAY, AI_PLAYING, AI_RESUME, AI_STOP, LectureDoc, Notebook, Page, inkInBox, migratePage, summarizeThreads, type LectureCrop, type LectureMeta, type ThreadSummary, type TranscriptSegment } from '@qalm/core';
 import { num, type Env } from './env';
 import { parseDocId, nbDocId, pgDocId, lecDocId, room, type DocRef } from './docs';
-import { LectureCrops, type LectureInfo } from './lecture';
+import { LectureCrops, lectureCfg, recordLectureAssets, type LectureInfo } from './lecture';
 import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit, type AgentWho, type PageEdit, type Presence } from './agent';
 
 const MSG_SYNC = 0;
@@ -254,7 +254,20 @@ export class DocRoom extends DurableObject<Env> {
       room(this.env, nbDocId(ref.notebookId))
         .lectureChanged(nbDocId(ref.notebookId), ref.sessionId, info)
         .catch((e: unknown) => console.error('lectureChanged failed', e));
+      this.recordAssets(lec).catch((e: unknown) => console.error('recordLectureAssets failed', e));
     }
+  }
+
+  /** Session room: the assets its doc references go into `lecture_assets` (only the new ones). */
+  private async recordAssets(lec: LectureDoc): Promise<void> {
+    if (!this.docId) return;
+    const known = new Set(this.kvGet<string[]>('assetRefs') ?? []);
+    const fresh = lec.assetShas().filter((s) => s && !known.has(s));
+    if (!fresh.length) return;
+    const owner = await this.ownerId();
+    if (!owner) return;
+    await recordLectureAssets(this.env, this.docId, owner, fresh);
+    this.kvPut('assetRefs', [...new Set([...(this.kvGet<string[]>('assetRefs') ?? []), ...fresh])]);
   }
 
   /** Keeps `notebooks.title` / `ai_access` in D1 in step with the index doc. */
@@ -514,8 +527,8 @@ export class DocRoom extends DurableObject<Env> {
     this.setDocId(docId);
     if (threads?.length) this.putThreads(threads);
     this.agents().onPageChanged(pageId, at, comment);
-    // A session recording here gets its crop once the pen rests (the agent wake rules).
-    if (this.lectureCrops().live().length) this.scheduleLecture(at + 1000);
+    // A session recording here gets its crop once the pen rests (the agent wake rules): look again then.
+    if (this.lectureCrops().live().length) this.scheduleLecture(at + lectureCfg(this.env).idleMs);
   }
 
   // ---- lecture mode (docs/lecture-mode.md) ----
@@ -524,11 +537,18 @@ export class DocRoom extends DurableObject<Env> {
   async lectureChanged(docId: string, sessionId: string, info: LectureInfo): Promise<void> {
     this.setDocId(docId);
     const r = this.lectureCrops().update(sessionId, info);
+    if (r.ignored) return; // deleted: a device re-syncing its copy changes nothing here
     if (r.grew) this.agents().onLectureChanged();
     if (r.flush) {
       const next = await this.lectureCrops().tick(sessionId);
       if (next !== null) this.scheduleLecture(next);
-    } else if (info.state === 'recording') this.scheduleLecture(Date.now() + 1000);
+    } else if (info.state !== 'stopped') this.scheduleLecture(Date.now() + lectureCfg(this.env).idleMs); // crops, expiry
+  }
+
+  /** Notebook room: every session it has heard of (for "Delete forever"). */
+  lectureIds(docId: string): string[] {
+    this.setDocId(docId);
+    return Object.keys(this.kvGet<Record<string, unknown>>('lectures') ?? {});
   }
 
   /** A session was deleted (DELETE /lectures/…). */
@@ -544,10 +564,10 @@ export class DocRoom extends DurableObject<Env> {
     return { meta: lec.meta(), transcript: lec.transcript(), crops: lec.crops() };
   }
 
-  /** Session room: transcript segments in arrival order from `from` (live MCP lines). */
-  lectureTranscript(docId: string, from: number): TranscriptSegment[] {
+  /** Session room: transcript segments in arrival order from `from`, at most `max` (live MCP lines). */
+  lectureTranscript(docId: string, from: number, max?: number): { segs: TranscriptSegment[]; next: number } {
     this.setDocId(docId);
-    return new LectureDoc(this.doc).transcriptFrom(from);
+    return new LectureDoc(this.doc).transcriptFrom(from, max);
   }
 
   /** Session room: every asset it holds (audio, crop PNGs), for deletion. */
@@ -560,7 +580,9 @@ export class DocRoom extends DurableObject<Env> {
   addLectureCrop(docId: string, crop: LectureCrop): void {
     this.setDocId(docId);
     if (this.ref?.kind !== 'lec') throw new Error('Not a lecture room');
-    new LectureDoc(this.doc).addCrop(crop);
+    const lec = new LectureDoc(this.doc);
+    lec.addCrop(crop);
+    this.recordAssets(lec).catch((e: unknown) => console.error('recordLectureAssets failed', e));
   }
 
   /** Notebook room: writes thread summaries from a page room into the index doc's thread index (see Notebook.putThreads). */

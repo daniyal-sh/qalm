@@ -105,7 +105,7 @@ export async function deleteAccount(env: Env, user: UserRow): Promise<void> {
   } while (cursor);
 
   // 4. D1 rows, the user row last.
-  const byUser = ['user_assets', 'doc_sizes', 'transcribe_usage', 'grants', 'auth_requests', 'activity', 'sessions', 'sync_tickets', 'notebooks'];
+  const byUser = ['user_assets', 'doc_sizes', 'transcribe_usage', 'lecture_assets', 'deleted_lectures', 'grants', 'auth_requests', 'activity', 'sessions', 'sync_tickets', 'notebooks'];
   await env.DB.batch([
     ...byUser.map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE ${t === 'notebooks' ? 'owner_id' : 'user_id'} = ?1`).bind(userId)),
     ...(user.email

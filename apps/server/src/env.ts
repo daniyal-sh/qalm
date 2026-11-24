@@ -40,6 +40,8 @@ export interface Env {
   TRANSCRIBE_MINUTES_PER_MONTH?: string;
   /** Local end-to-end tests only: '1' answers transcription with a canned transcript (never set in deployments). */
   WHISPER_FAKE?: string;
+  /** Tests only: how long a live lecture session may report nothing before it is expired (default 15 min / 6 h paused). */
+  LECTURE_SILENT_MS?: string;
 }
 
 /** What completeAuthorization() stores; reaches the MCP handler as ctx.props. */

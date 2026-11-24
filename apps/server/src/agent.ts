@@ -19,6 +19,7 @@ import {
   parseLectureRef,
   resolveLecture,
   transcriptLine,
+  fmtTExact,
   type BBox,
   type LectureCrop,
   type LectureMeta,
@@ -81,6 +82,8 @@ export const AI_OFF = 'AI access is off for this notebook. The student can turn 
 export const PAUSED = "The student hasn't turned on AI for this notebook right now. Keep calling wait(s): it resumes when they press Play in qalm.";
 /** An agent counts as following for this long after its last call. */
 export const PRESENCE_MS = 60_000;
+/** Live transcript lines per lecture in one wait update; a longer catch-up points at read("L…") for the rest. */
+export const LIVE_LINES_MAX = 30;
 
 /** The calling agent: OAuth client id, display name and what its grant allows. */
 export interface AgentWho { clientId: string; name: string; canComment: boolean; canTranscribe: boolean }
@@ -282,7 +285,7 @@ export class AgentHub {
     if (!this.lectureLive()) return null;
     const labels = this.lectureLabels();
     const live = Object.entries(this.lectures())
-      .filter(([, l]) => l.state !== 'stopped')
+      .filter(([, l]) => l.state !== 'stopped' && !l.expired)
       .sort((a, b) => b[1].startedAt - a[1].startedAt)[0];
     const label = live && labels.byId[live[0]];
     if (!live || !label) return null;
@@ -295,7 +298,11 @@ export class AgentHub {
     return Object.entries(this.lectures()).some(([sid, l]) => l.count > (st.lect?.[sid] ?? 0));
   }
 
-  /** New transcript segments per session since this agent's state, as Q-ink lines (and the counts to store). */
+  /**
+   * New transcript segments per session since this agent's state, as Q-ink lines (and the counts to store). At most
+   * `LIVE_LINES_MAX` lines per session per update: a long catch-up (e.g. after Play) ends with a `more:` pointer to
+   * `read("L…")` from the first line left out, and the agent's position moves past all of them.
+   */
   private async transcriptNews(st: AgentState): Promise<{ lines: string[]; lect: Record<string, number> }> {
     const lect = { ...st.lect };
     const labels = this.lectureLabels();
@@ -305,9 +312,14 @@ export class AgentHub {
       if (l.count <= from) continue;
       const label = labels.byId[sid];
       const docId = lecDocId(this.notebookId, sid);
-      const segs = await room(this.env, docId).lectureTranscript(docId, from);
-      if (label) for (const seg of segs) lines.push(transcriptLine(label, seg));
-      lect[sid] = from + segs.length;
+      const { segs, next } = await room(this.env, docId).lectureTranscript(docId, from, LIVE_LINES_MAX + 1);
+      const shown = segs.slice(0, LIVE_LINES_MAX);
+      if (label) for (const seg of shown) lines.push(transcriptLine(label, seg));
+      const rest = segs[LIVE_LINES_MAX];
+      if (rest) {
+        if (label) lines.push(`more: read("${label}@${fmtTExact(rest.t0)}")`);
+        lect[sid] = Math.max(next, l.count);
+      } else lect[sid] = next;
     }
     return { lines, lect };
   }
@@ -320,6 +332,8 @@ export class AgentHub {
     const docId = lecDocId(this.notebookId, sid);
     const d = await room(this.env, docId).lectureData(docId);
     this.requireLectureLive();
+    // A session that went silent while live (crashed app, closed tab) reads as stopped.
+    if (this.lectures()[sid]?.expired) d.meta = { ...d.meta, state: 'stopped' };
     const parts = encodeLectureRead(label, d.meta, d.transcript, d.crops as LectureCrop[], from);
     const text = parts.flatMap((p) => ('text' in p ? [p.text] : [])).join('\n');
     return { text, svg: null, changed: false, parts };
@@ -334,7 +348,7 @@ export class AgentHub {
       .flatMap(([sid, l]) => {
         const label = labels.byId[sid];
         if (!label) return [];
-        const meta: LectureMeta = { id: sid, notebookId: this.notebookId, startedAt: l.startedAt, durationMs: l.durationMs, state: l.state, lastT: l.lastT, transcriber: 'none', ...(l.title ? { title: l.title } : {}) };
+        const meta: LectureMeta = { id: sid, notebookId: this.notebookId, startedAt: l.startedAt, durationMs: l.durationMs, state: l.expired ? 'stopped' : l.state, lastT: l.lastT, transcriber: 'none', ...(l.title ? { title: l.title } : {}) };
         return [lectureLine(label, meta)];
       });
   }
@@ -408,19 +422,23 @@ export class AgentHub {
     }
 
     const pages = await this.loadPages([...changedIds, ...asks.map((a) => a.pageId).filter((id) => live.has(id))]);
+    // Transcript lines are fetched here, before the synchronous read-encode-write of regions and threads below: an
+    // await (a call to another room) inside that section would let a concurrent call allocate R/C labels that the
+    // kvPut below then overwrites.
+    const news = this.lectureLive() ? await this.transcriptNews(st) : { lines: [], lect: st.lect ?? {} };
+    // Every await is behind us: re-check access, sharing and the lecture gate, then that nobody delivered meanwhile.
     if (!this.aiAccess()) throw new Error(AI_OFF);
-    if (!this.isLive()) return { retryAt: Infinity };
-    // Re-read after the await: another call may have delivered meanwhile.
+    // Not live any more (Pause, AI off, a device's heartbeat lapsed) after the awaits: nothing goes out, lecture lines
+    // included (lectureLive() is isLive()); nothing is saved, so it all goes with the next update after Play.
+    if (!this.isLive() || (news.lines.length && !this.lectureLive())) return { retryAt: Infinity };
     const cur = this.state(clientId);
     if (cur.rev !== st.rev || cur.askCount !== st.askCount) return { retryAt: 0 };
+    // From here to the kvPuts: no await.
     const regions = this.regions();
     const threads = this.threads();
     const prev: Record<string, InkSeen | undefined> = {};
     for (const id of Object.keys(pages)) prev[id] = this.r.kvGet<InkSeen>(inkKey(clientId, id));
     const u = encodeQinkUpdate(nb, pages, regions, prev, { session, rev: st.rev + 1, client: clientId, asks, threads, seen: st.seen });
-    const news = this.lectureLive() ? await this.transcriptNews(st) : { lines: [], lect: st.lect ?? {} };
-    // Lecture lines only go out while lectureLive() holds after the await, too (nothing is saved, so they wait).
-    if (news.lines.length && !this.lectureLive()) return { retryAt: Infinity };
     if (news.lines.length) u.text = `${u.text}\n${news.lines.join('\n')}`;
     this.r.kvPut('regions', regions);
     this.r.kvPut('threads', threads);

@@ -1,5 +1,6 @@
 import type { Env } from './env';
 import { now } from './util';
+import { deleteLecture, notebookLectureIds } from './lecture';
 
 const ID = '[A-Za-z0-9_-]{1,64}';
 const NB = new RegExp(`^nb:(${ID})$`);
@@ -70,13 +71,20 @@ export async function deleteNotebook(env: Env, userId: string, notebookId: strin
   if (!row.deleted_at) await env.DB.prepare('UPDATE notebooks SET deleted_at = ?2 WHERE id = ?1').bind(notebookId, now()).run();
   const pg = `pg:${notebookId}:`;
   const lec = `lec:${notebookId}:`;
-  // Lecture rooms first (their ids come from doc_sizes and the notebook room), before their rows go.
-  const lecs = (await env.DB.prepare('SELECT doc_id FROM doc_sizes WHERE substr(doc_id, 1, ?2) = ?1').bind(lec, lec.length).all<{ doc_id: string }>()).results;
-  for (const { doc_id } of lecs) {
+  // Lecture sessions first, deleted like one at a time (tombstoned, room purged, audio and crops freed unless another
+  // session of the user still uses them), before their rows go. Their ids: the notebook room's list, doc_sizes and
+  // lecture_assets.
+  let fromRoom: string[] = [];
+  try {
+    fromRoom = await room(env, nbDocId(notebookId)).lectureIds(nbDocId(notebookId));
+  } catch (e) {
+    console.error('lecture list failed', e);
+  }
+  for (const sid of await notebookLectureIds(env, notebookId, fromRoom)) {
     try {
-      await room(env, doc_id).purge(doc_id);
+      await deleteLecture(env, userId, notebookId, sid, { notebookRoom: false });
     } catch (e) {
-      console.error('lecture purge failed', e);
+      console.error('lecture delete failed', e);
     }
   }
   await env.DB.batch(

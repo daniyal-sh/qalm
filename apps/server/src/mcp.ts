@@ -231,15 +231,26 @@ async function edited(p: Promise<{ ok: boolean; text: string }>): Promise<string
 async function result(env: Env, g: GrantRow, tool: string, targetLabel: string, r: AgentResult): Promise<ToolResult> {
   if (r.error) throw new ToolError(r.text);
   if (r.parts) {
-    // A lecture read: text and the crops' stored PNGs, interleaved by time.
+    // A lecture read: text and the crops' stored PNGs, interleaved by time. Only assets the notebook's owner (the
+    // grant's user) holds are fetched: a sha in a client-written session doc is not a way to read anyone else's.
     const content: Content[] = [];
     let area = 0;
+    const wanted = [...new Set(r.parts.flatMap((p) => ('image' in p && /^[0-9a-f]{64}$/.test(p.image) ? [p.image] : [])))];
+    const owned = new Set(
+      wanted.length
+        ? (
+            await env.DB.prepare(`SELECT sha256 FROM user_assets WHERE user_id = ?1 AND sha256 IN (${wanted.map((_, i) => `?${i + 2}`).join(',')})`)
+              .bind(g.user_id, ...wanted)
+              .all<{ sha256: string }>()
+          ).results.map((x) => x.sha256)
+        : [],
+    );
     for (const p of r.parts) {
       if ('text' in p) {
         content.push({ type: 'text', text: p.text });
         continue;
       }
-      const obj = p.image ? await env.ASSETS.get(p.image) : null;
+      const obj = owned.has(p.image) ? await env.ASSETS.get(p.image) : null;
       if (!obj) {
         content.push({ type: 'text', text: '(image missing)' });
         continue;

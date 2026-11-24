@@ -25,6 +25,7 @@ export default defineConfig(async () => {
             EMAIL_PROVIDER: 'console',
             TRANSCRIBE_PER_MINUTE: '3',
             TRANSCRIBE_MINUTES_PER_MONTH: '1',
+            LECTURE_SILENT_MS: '10000',
           },
         },
       }),

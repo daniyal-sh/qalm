@@ -1,7 +1,7 @@
 import type { Env } from './env';
 import { num } from './env';
 import { handleAccount } from './account';
-import { handleLectures } from './lecture';
+import { handleLectures, lectureDeleted } from './lecture';
 import { handleAuth, requireUser, TooManyRequests } from './auth';
 import { handleAuthorize, messagePage } from './consent';
 import { canAccess, deleteNotebook, nbDocId, parseDocId, room } from './docs';
@@ -68,6 +68,8 @@ async function route(req: Request, env: Env, url: URL): Promise<Response | null>
     const doc = parseDocId(docId ?? '');
     if (!doc) throw new HttpError(400, 'Invalid docId');
     if (!(await canAccess(env, userId, doc))) throw new HttpError(403, 'Forbidden');
+    // A deleted lecture session stays deleted: a device that still has it (or a queued transcript) can't recreate it.
+    if (doc.kind === 'lec' && (await lectureDeleted(env, doc.id))) throw new HttpError(410, 'This lecture was deleted');
     const ticket = randomToken();
     const expiresAt = now() + TICKET_TTL_MS;
     await env.DB.prepare('INSERT INTO sync_tickets (ticket_hash, user_id, doc_id, expires_at) VALUES (?1, ?2, ?3, ?4)')
