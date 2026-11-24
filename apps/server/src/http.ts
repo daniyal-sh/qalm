@@ -242,7 +242,7 @@ async function aiApi(req: Request, env: Env, path: string): Promise<Response | n
     await env.DB.prepare(`UPDATE auth_requests SET status = 'denied' WHERE id = ?1 AND user_id = ?2 AND status = 'pending'`).bind(rm[1], userId).run();
     return json({ ok: true });
   }
-  // The editor's presence pill: which agents are following this notebook right now, and whether sharing is paused.
+  // The editor's Play / Pause AI pill: which agents are following this notebook right now, and whether it is live.
   if (path === '/ai/presence' && req.method === 'GET') {
     const nb = new URL(req.url).searchParams.get('nb') ?? '';
     const doc = parseDocId(nbDocId(nb));

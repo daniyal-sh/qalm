@@ -1,6 +1,6 @@
 # qalm v1 technical spec (rev 3)
 
-Read with `decisions.md` (scope), `qink-live.md` (AI format) and **`brand.md` (qalm by Apollo: colours, type, mark)**.
+Read with `decisions.md` (scope), `qink-live.md` (AI format), `lecture-mode.md` (recording sessions) and **`brand.md` (qalm by Apollo: colours, type, mark)**.
 Layouts and flows come from [`design/mockups/editor.html`](design/mockups/editor.html), [`screens-library.html`](design/mockups/screens-library.html) and [`screens-ai.html`](design/mockups/screens-ai.html).
 Their colours and fonts are superseded by `brand.md`.
 This file is the **contract between packages**. If you must change a contract, change it here too.
@@ -36,7 +36,7 @@ on screen (plus or minus 2) are loaded on the device. Durable Objects hold one d
 
 ```
 nb:{notebookId}            index doc
-  meta:   Y.Map  { id, title, cover, paper, paperColor, size:{w,h}, orientation, aiAccess, aiPaused?, threadsIndexed?, createdAt, updatedAt }
+  meta:   Y.Map  { id, title, cover, paper, paperColor, size:{w,h}, orientation, aiAccess, threadsIndexed?, createdAt, updatedAt }
   pages:  Y.Array<Y.Map>   { id, size:{w,h}, paper, paperColor, background: {kind:'paper'} | {kind:'pdf', assetId, pageIndex}, bookmarked? }
   assets: Y.Map<assetId, {id, sha256, mime, name, bytes, pageCount?}>
   asks:   Y.Array<{id, pageId, text, at, sel?: {itemIds, bbox}, commentId?}>   sel: an Ask about a selection; commentId: its thread
@@ -49,6 +49,9 @@ pg:{notebookId}:{pageId}   page doc
   comments: Y.Map<commentId, Y.Map>
 
 lib:{userId}               library doc: folders + notebook entries {id,title,cover,folderId,updatedAt,aiAccess,favorite,deletedAt}
+  lectures: Y.Map<sessionId, LectureSummary>   lecture sessions (lecture-mode.md §5)
+
+lec:{notebookId}:{sessionId}   lecture session doc: meta, timeline (deflated JSONL chunks), audio, transcript, crops
   swatches: Y.Map<'pen'|'highlighter', Y.Array<string>>   saved colours, in order; a missing key = the brand palette
 ```
 
@@ -138,6 +141,9 @@ class Page {                         // wraps one page doc
   items(): Item[]; addItem(item: Item): void; updateItem(id, patch): void; removeItems(ids: string[]): void
   addItems(items: Item[]): void; updateItems(patches: Iterable<[id, patch]>): void   // one transaction (one undo step) each; same result as one call per item
   reorder(ids: string[], to: 'front' | 'back'): void   // z-order; keeps their order among themselves
+  replaceItems(reps: { id; with: Item[] }[]): void     // one transaction: new items take the old one's z-slot; readings of it read
+                                                        // them (stale), threads on it follow them; adds and removes like addItem/removeItems
+  applyErase(plan: ErasePlan): void                     // a partial-erase pass (replaceItems + removeItems), one transaction
   readings(): Reading[]
   setReading(ids, text, src: 'agent'|'user', by?): string | null   // null: no such strokes, or an agent over the student's reading
   editReading(id, text): void       // the student's edit: becomes theirs and fresh; '' removes it
@@ -210,7 +216,11 @@ strokeOutline(s: StrokeItem): [number, number][]; strokeSvgPath(s: StrokeItem): 
 recognizeShape(points): ShapeItem | null                                // no hold gate: the overlays time the hold; see below
 snapShape(points: InkPoint[], heldMs: number): ShapeItem | null          // recognizeShape, only if heldMs >= SNAP_HOLD_MS (400)
 adjustShape(shape, from, to): pts                                        // dragging after the snap; see below
-hitTestErase(items: Item[], path: {x:number;y:number}[], radius: number): string[]
+hitTestErase(items: Item[], path: {x:number;y:number}[], radius: number): string[]   // box culled first: cheap on dense pages
+splitStroke(stroke, path, radius, makeId?): StrokeItem[] | null    // partial erase of one stroke (§7, Erasing); null = missed
+planPartialErase(items, path, radius, makeId?): ErasePlan          // { split: { id, pieces }[]; remove: shape ids }
+scribbleShape(points): ScribbleShape; isScribble(points): boolean  // the scribble shape test (§7, Erasing)
+scribbleTargets(items, points, width): string[]; detectScribble(items, points, width): string[] | null
 lassoSelect(items: Item[], polygon: {x:number;y:number}[]): string[]   // most of the ink inside, or a box's centre
 // Selection (geometry/transform.ts). Sim = { s, r, ox, oy, dx, dy }: p' = o + s·R(r)·(p − o) + d
 transformItem(item, sim): Item; transformPatch(item, sim): Partial<Item>   // widths and font sizes scale; text/images turn (rot)
@@ -384,12 +394,16 @@ drawn ids.
 interface PageCanvasProps { info: PageInfo; items: Item[]; selection?: string[]; anchors?: { id: string /*comment id*/; bbox: BBox; active: boolean }[]; pdfImage?: string /*uri*/; width: number /*px*/; onDrawn?(ids: string[]): void /*item ids, once Skia has them*/;
   live?: { ids: string[]; transform: Sim } /* a selection being dragged: drawn transformed, paths not rebuilt */ }
 // InkOverlay (native view QalmInkView; web: src/InkOverlay.web.tsx)
-type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'none';
+type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'laser' | 'none';
 interface InkOverlayProps {
   pageSize: { w: number; h: number };          // page units; the overlay's laid-out size maps linearly onto the page
   tool: InkTool; color: string; width: number;
   penStyle?: 'fountain' | 'ball' | 'brush'; smoothing?: 0 | 1 | 2 | 3;   // pen only; defaults 'fountain' / 0
   lassoMode?: 'free' | 'rect';                 // lasso: a loop, or a rectangle from the first point to the last
+  eraserMode?: 'stroke' | 'partial';            // partial: a faint trail of the eraser's last 250 ms (§7, Erasing)
+  laserMode?: 'trail' | 'dot';                  // laser: a fading trail, or a dot under the pen (§7, Laser pointer)
+  ruler?: { cx: number; cy: number; angle: number; length: number; thickness: number } | null;
+                                                // window px / dp / pt: strokes starting near an edge follow it (§7, Ruler)
   input: { drawWith: 'pen' | 'any'; hand: 'left' | 'right'; palm: 'relaxed' | 'standard' | 'strict' };
   committedIds: string[];                       // stroke ids already drawn by PageCanvas (from its onDrawn)
   onStrokeEnd(e: { nativeEvent: { id: string; tool: 'pen'|'highlighter'; color: string; width: number; points: InkPoint[]; heldMs: number; style; smoothing } }): void;
@@ -466,7 +480,7 @@ from the region images with its own vision. That keeps the app about 20 MB light
   upload waits in the queue (a 413 stays queued).
 - **App API** (Bearer, CORS `*` for the web/Electron build): `GET /ai/grants`, `PATCH /ai/grants/{id} {canComment?, canTranscribe?}`,
   `DELETE /ai/grants/{id}`, `GET /ai/requests`, `POST /ai/requests/{id}/deny`, `GET /ai/activity?limit=`, `GET /ai/presence?nb={notebookId}` (owner only:
-  `{aiAccess, paused, agents: [{name, waiting, lastAt, canComment, canTranscribe}]}`, the agents with a pending `wait` or a call in the last
+  `{aiAccess, live, paused (= !live, for older apps), agents: [{name, waiting, lastAt, canComment, canTranscribe}]}`, the agents with a pending `wait` or a call in the last
   60 s; empty while AI access is off; the editor polls it every 8 s), and `DELETE /notebooks/{id}` (owner only,
   "Delete forever": sets `notebooks.deleted_at`, refuses sync tickets from then on, and purges the notebook's `nb:`/`pg:` room storage, best effort).
   Moving to the trash is only `deletedAt` in the library doc, so restoring from the trash needs no server call.
@@ -516,9 +530,15 @@ from the region images with its own vision. That keeps the app about 20 MB light
   which keeps `lastCommentAt`). Only the changed pages are loaded.
 - **Threads:** the notebook room stores `QinkThreads` (labels `C1`, `C2`, …) and, in each agent's state, `QinkSeen`. `comment {ref}` creates the
   comment in the page room (on the region's strokes still on the page, or the ink in a box, with the box as fallback) and labels it; `comment {thread, resolve?}` replies there (author: the grant's client name). Agents still never touch ink.
-- **Presence and pause:** every agent call records `presence` (client id → name, grant switches, last call) in the notebook room; pending waits
-  are counted in memory. `meta.aiPaused` ("Pause sharing") is read live like `aiAccess`: while it's on, `wait` delivers nothing (times out as
-  `#q s=… paused`) and the other tools fail; turning it off wakes pending waits.
+- **Presence:** every agent call records `presence` (client id → name, grant switches, last call) in the notebook room; pending waits
+  are counted in memory.
+- **Play / Pause AI (liveness):** agents get a notebook only while one of the owner's devices plays it (`docs/qink-live.md` §4). Text frames
+  on the `nb:` sync socket: `ai:play`, `ai:live` every 15 s (only extends a live socket), `ai:resume:<epoch>` after a reconnect, `ai:pause`,
+  `ai:stop`. `DocRoom` keeps `liveUntil` (last accepted frame + 40 s) in that socket's attachment (survives hibernation, never synced) and
+  `liveUntil()` is the latest over open sockets; the pause epoch is in the room's `kv` (`aiPauseEpoch`). Every MCP path goes through
+  `AgentHub.isLive()` / `requireLive()` (AI access on, `meta.aiPaused` not set, a live socket); a change wakes pending waits, and a pending
+  wait also re-checks when the last heartbeat would lapse. `applyAgentEdit` asks the notebook room (`agentLiveError`) right before writing.
+  `meta.aiPaused` (deprecated) is still honoured for apps from before Play / Pause; the current app clears it on Play.
 
 ## 5. App (`apps/app`, Expo, New Architecture, expo-router)
 
@@ -526,8 +546,9 @@ from the region images with its own vision. That keeps the app about 20 MB light
   - Library
   - New notebook sheet
   - Editor: a virtualized vertical list of pages, each a `PageCanvas` with an `InkOverlay`, plus the floating toolbar, comments panel, Ask button, pinch zoom, and undo/redo.
-    Live agent: a presence pill ("Claude is following along", "… is thinking…" after an Ask until an agent entry arrives or 90 s;
-    tap for what it can do, Pause sharing, Stop), open threads as cards in the margin beside the page when the gutter is ≥ 200 px
+    Live agent: the Play / Pause AI control in the header (only with AI access on and signed in; starts "AI paused"; "AI live",
+    "AI live · Claude" with a following agent, "… is thinking…" after an Ask until an agent entry arrives or 90 s; tap to play or
+    pause; `useAiLive` / `src/editor/aiLive.ts`, stopped on background, close, AI off and outages over 40 s), open threads as cards in the margin beside the page when the gutter is ≥ 200 px
     (pins on the page otherwise, plus a toast when an agent writes where its card isn't in view), and an unread badge on Comments (per device,
     `seen:{notebookId}` in kv: a thread is read once it's opened, or its margin card or panel card has been on screen for 1.5 s).
     The comments panel lists every thread in the notebook (§2, thread index)
@@ -539,8 +560,24 @@ from the region images with its own vision. That keeps the app about 20 MB light
     Full screen button. Desktop uses `BrowserWindow.setFullScreen` (F11 is caught in main's `before-input-event`, since
     there's no menu bar), browsers the Fullscreen API, iPad and Android hide the system bars (`expo-status-bar`,
     `expo-navigation-bar` immersive). The header, toolbar and side panels give way to a floating pill (pen, highlighter,
-    eraser, lasso, colour, undo/redo, exit) that can be dragged to any edge and is remembered (`focusPill` pref). Esc
-    clears a selection first, then leaves fullscreen; leaving restores the panels.
+    eraser, lasso, laser, ruler, colour, undo/redo, exit) that can be dragged to any edge and is remembered (`focusPill`
+    pref). Where even the shrunk pill (0.8×) can't fit along its edge (a portrait phone), the lasso, laser and ruler fold into a
+    "More tools" button (`pillCompact`). Esc clears a selection first, then leaves fullscreen; leaving restores the panels.
+  - Presentation view: F5 (web / desktop), the laser's "Present" option or More → Present. Fullscreen with no chrome:
+    no header, toolbar, pill, page numbers and menus, margin cards, comment pins, selection or ruler. The page is fitted
+    whole and centred (`fitZoom`, which may go below the 0.75× minimum; pinch is off), the laser is the tool, and a
+    small bar at the bottom has previous / next, "n / m", the laser's trail / dot and Stop. Keys: → ↓ Space Enter PgDn
+    next, ← ↑ Backspace PgUp previous, Home / End, K switches trail / dot, Esc or F5 stops (`present.logic.ts`); Space
+    or Enter on a focused bar button only presses it. F5 never reloads the page, even in a text field (where it does
+    nothing). While presenting, the pen button doesn't switch to the eraser and Ctrl+wheel / trackpad pinch don't zoom;
+    the page shown is tracked by its id, so pages added or moved elsewhere don't change it, and if it is deleted
+    elsewhere the nearest page that exists is shown (none left: it stops). Leaving
+    fullscreen any other way stops it too; stopping restores the tool, the zoom and the page.
+  - Desktop keys (web and Electron; not while typing): P pen, H highlighter, E eraser (again: whole stroke / partial),
+    L lasso, T text, K laser (again: trail / dot), R ruler on / off, F5 present, F11 or Ctrl+Cmd+F fullscreen, Esc
+    (selection, then fullscreen or presenting), Ctrl/Cmd + Z / Shift+Z / Y undo and redo, Ctrl/Cmd + C / X / V / D / A,
+    Delete, PgUp / PgDn / Home / End and Ctrl+G for pages. The toolbar shows the laser and the ruler after the text
+    tool and Insert image; on narrow windows the bar scrolls sideways with edge chevrons.
   - Settings: Account, Pen and palm rejection, and AI access (connected agents, pending requests, activity log)
   - Sign-in
 - **Sync:** the client uses the `y-websocket` provider (with tickets) for each loaded doc, with IndexedDB persistence on web and file persistence on native.
@@ -595,6 +632,112 @@ in-app clipboard that works across pages and notebooks, copying image assets int
 front / sends to back, comments, asks and deletes; Ctrl/Cmd + C / X / V / D / A and Delete work on desktop. A thread
 started from a selection stores its item ids (`anchorIds`), so its pin, margin card and Q-ink box ref follow the ink; once
 that ink is all deleted, the thread shows only in the panel ("Ink removed").
+
+### Erasing (eraser modes, scribble to erase)
+- **Eraser modes** (the eraser's toolbar options, kv `tools.eraserMode`, default **Whole stroke**; E pressed again while
+  the eraser is on switches): *Whole stroke* removes every stroke or shape the eraser touches (`hitTestErase`).
+  *Partial* rubs out only where it passes (`planPartialErase`): each touched stroke's centreline is cut where it comes
+  within the eraser radius plus half the stroke width, so the pieces' round ends just touch the eraser and the gap is as
+  wide as the eraser. Cuts are found by sampling near the eraser and bisection (one interpolated point per cut); every
+  other point is the stroke's own, so pieces keep pressure, tilt and time, and the tool, colour, width, style, smoothing
+  and `createdAt`. Pieces under ~0.5 units are dropped.
+  - **Nothing is written while the eraser is down.** An `EraseSession` (core `geometry/erase.ts`) keeps what the page
+    would look like: each touched stroke's pieces so far, touched shapes gone. The page draws that (PageCanvas, on
+    every platform) and the next segment is hit-tested against it.
+  - **The pen-up commits it once** (the overlay's last `onErase` has `final: true`; else 400 ms after the last
+    segment, or when the page goes away): one transaction, one undo step: each touched stroke deleted, its pieces
+    added in its z-order slot as ordinary new strokes with `splitFrom` naming the stroke as drawn (copies drop it).
+    Undo is the plain delete/add undo. Older builds and servers see ordinary strokes (no deploy order). An app killed
+    mid-gesture has written nothing. A 50-move rub along a 1000-point stroke grows the doc by ~12 KB (one write of the
+    ~500 points left), against ~907 KB when every move re-created the pieces.
+  - **Two devices at once:** a move of the stroke elsewhere that lands after the erase is lost (the stroke is gone);
+    undoing the erase brings the stroke back as it was. A delete elsewhere stays a delete, but the other device's
+    pieces remain. **Accepted limit:** two devices partially erasing the *same* stroke at the same moment each keep
+    their own pieces, so ink can show twice (and an erased spot can show the other side's ink). Rare for one person's
+    devices; nothing is lost. **Highlighters split too. Shapes are erased whole** (they are
+  geometric, so a piece of a rectangle isn't a rectangle); text boxes and images are never erased. The radius is the
+  eraser size (4 / 10 / 22 units). Each overlay `onErase` segment is one `applyErase` transaction; the app merges a
+  gesture's segments into one undo entry (`CrossPageUndo.merging('erase')`), so **one undo restores the strokes whole**.
+  While erasing in Partial mode the overlay draws a faint trail of the eraser's last 250 ms (`ERASE_TRAIL_MS`) on web,
+  Android and iOS. Cost: the box cull in `hitTestErase` first, then only hit strokes are split (a pass over a
+  3000-stroke page is a few ms).
+- **Agents and readings:** a split is an erase plus new ink. In Q-ink a stroke whose new path is a shorter one inside
+  its old box counts as erased (its old shape, faint red) and fresh (what's left), and the pieces are fresh, so the
+  region is reported as `+pieces -1 (was R…)`. A reading of a split stroke reads its pieces too and goes stale; a
+  thread anchored to it follows the new pieces as well. Lecture mode and anything else that
+  follows the page's items sees the same add/remove events as any edit.
+- **Scribble to erase** (GoodNotes 6 style; Settings → Pen, `scribbleErase`, on by default): when a pen stroke ends
+  (not a snapped shape), `detectScribble` runs. Both must hold, else the stroke is ink:
+  1. **It is a scribble** (`scribbleShape`, on the stroke resampled every 0.4 mm): ≥ **4 sharp reversals** (a turn of
+     ≥ 130° within 1.2 mm of path either side); legs (between reversals) with a median chord of **2.5–120 mm** and
+     **straightness ≥ 0.8**; same-side reversals close together: for 3 in 4 of them, their distance is **≤ 0.4 × the leg
+     length** (the legs lie side by side; "m", "w", "MMM", "NNN" spread theirs out); average speed **≥ 60 mm/s** and
+     at most **3 s** long.
+  2. **It covers ink** (`scribbleTargets`): strokes and shapes with **≥ 60% of their points** inside the scribble's convex
+     hull (grown by 1 mm plus half the pen width) that the **middles of ≥ 3 legs cross** (a leg is the path between
+     two reversals, less **1.2 mm** at each end where it turns; marks under **4 mm** across need one). Two rules for
+     **outlines**: snapped closed shapes, and closed strokes (ends within 20% of their size) that are **≥ 8 mm**
+     across on average, or box-like (**≥ 3 corners** of 60°+ and filling **≥ 85%** of their own box). A small round
+     closed stroke (o, 0, 8) is a letter. An outline whose box, grown by **0.4 × its shorter side (1.5–3 mm)**, holds
+     the whole scribble is never a target (a checkbox ticked with a zig-zag that overshoots it); and when **≥ 60% of
+     the scribble's turns lie within 1.5 mm** of an outline whose grown box holds ≥ 80% of them, the scribble is
+     shading and **deletes nothing**, not even ink written inside (a "2" in a shaded box), unless the ink inside spans
+     **≥ 60% of the outline one way and ≥ 40% the other** (a boxed answer being scribbled out). Text and images are
+     never deleted.
+  A scribble over empty paper (or shading) covers nothing and stays ink. Otherwise the covered ink is removed in one
+  transaction (one undo brings it back), the scribble is never added (the overlay drops it through `committedIds`, as
+  a hand-off), and the deleted ink fades out over 320 ms (`EraseFade`; at once with reduced motion). Thresholds are in
+  page mm (1 unit = 1/72 in), so the same scribble works at any zoom. Tests: real-looking zig-zags (horizontal,
+  vertical scratch-out, diagonal, small, uneven) and a corpus of ~150 handwriting strokes that must not trigger (m, mmm,
+  w, www, MMM, NNN, ZZZ, eee, lll, sine, 8, spiral, a slow spring, a sparse sawtooth, a double underline, a tremor;
+  2.5–8 mm at 25–90 mm/s, plus tall fast coils at 120–260 mm/s), and shading inside a 30 × 15 mm box and a 10 mm circle
+  (hand-drawn and snapped; 0.6 / 1 / 1.5 mm apart at 80 / 150 / 200 mm/s; turning at the outline or overshooting it by
+  1 mm; diagonal) that must keep the outline, 6–8 mm checkboxes ticked 2 mm past their sides, and a "2" inside a
+  shaded box, in `packages/core/test/scribble.test.ts`; scribble-outs of a word in a hand-drawn box (1.5 / 2 / 3 mm
+  margins) and of small closed letters (o, 8, "2o") in `scribbleProbes.test.ts`.
+- **Limits:** a vertical scratch-out with legs further apart than ~0.4 × their length (e.g. 6 mm legs moving on 1.5 mm
+  each) is kept as ink; scribble back and forth along the words instead. Circular scribbles ("@@@") aren't detected.
+
+### Ruler (editor UI only)
+- **What:** a toggle (toolbar, pill, R) shows a translucent straightedge over the pages: mm, 5 mm and numbered cm
+  ticks on both long edges at the current page's scale (page mm at this zoom; mm ticks are left out below 3 px per mm),
+  and its angle (0–179°). It belongs to the editor, not the page: never synced, saved, exported or sent to agents.
+  Default 720 × 72 px (`RULER`), centred, no wider than the view less 48 px; its centre stays in the view.
+- **Moving it** (`ruler.logic.ts`): one finger or the mouse on its body drags it; two fingers turn it about their
+  midpoint and move it with them (a second finger anywhere counts once one is on the ruler); the round handle at its
+  right end turns it with the mouse; × hides it. Angles snap to multiples of 45° within **4°** (`RULER.snapDeg`). A
+  palm (the overlay's palm rules) doesn't move it. In "Pen and finger" a finger on the ruler moves it instead of
+  drawing. The pose goes to the overlays (window coordinates) when a move holds still for **80 ms**
+  (`RULER_SETTLE_MS`: a finger holding the ruler while the pen draws along it) and when it ends, so dragging doesn't
+  re-render pages every frame; on web an overlay also reads the live pose at pen-down (`getRuler`), so a stroke follows
+  the ruler where it is even mid-move.
+- **Drawing along it** (`rulerEdgeAt`, `rulerLine`, `projectOnLine`; ports in `RulerSnap.kt` / `RulerSnap.swift`): a
+  pen or highlighter stroke that **starts within 24 px** (`RULER.snapPx`, `RULER_SNAP_PX`; dp / pt on native) outside a
+  long edge, or over the ruler's half next to it, and along its length (plus 24 px at each end) follows that edge:
+  every point, predicted ones too, is projected onto the edge line pushed out by half the pen width, keeping pressure,
+  tilt and time. Such a stroke never snaps to a shape, and is never taken for a scribble (`ruler` on `onStrokeEnd`:
+  going back and forth along the ruler would look like one). On web a pen landing on the ruler is handed to the overlay
+  underneath (`forwardToInk`: a synthetic pointerdown, then the overlay captures the pointer). Zoom-proof: the line is
+  mapped into each page's units when the stroke starts.
+- **Native:** the overlays snap. The pose is in React Native's `measureInWindow` coordinates, so Android measures its
+  own origin with RN's own `RootViewUtil.getViewportOffset` (its place in the window, less the status bar only when
+  the app isn't edge-to-edge; Expo 58 is) and iOS uses UIWindow coordinates (`convert(_:to: nil)`), which is what RN
+  reports there. Both still need a check on a device. A native overlay gets the pose when it settles (80 ms), not at
+  pen-down mid-move as on web. The ruler view itself is React Native, so on iPad and Android a pen landing
+  on the ruler's body moves it (only web forwards it); strokes starting outside the edge snap everywhere.
+
+### Laser pointer
+- A tool (toolbar, pill, K) whose options are **Trail** (default) and **Dot** (`tools.laserMode`). It draws on the ink
+  overlay only and never emits a stroke, so nothing is saved, synced or undoable. It never erases either: the pen's
+  barrel button, the eraser end and the right mouse button (which erase that stroke with the other tools) draw the
+  laser too.
+- **Trail:** a red line, a 3 px core in brand `bad` (#b91c1c) over a 10 px glow in its dark tint (#f87171) at 35 %,
+  each segment fading with its age and gone after **1 s** (`LASER_FADE_MS`), also after the pen lifts. **Dot:** a 4 px
+  core in a 9 px glow under the pen, and under a hovering pen or mouse (the mouse cursor is hidden). Sizes are screen
+  px at any zoom. The trail is drawn in 8 fade steps (`laserRuns` in `laser.ts`, ported to Kotlin and Swift): each
+  run of one press within one step is a single path, drawn on its own layer after clearing what it covers, so no joint
+  is painted twice (no beads). Web: canvas, requestAnimationFrame while fading; Android: the front-buffered layer
+  redrawn with `postOnAnimation`; iOS: a `LaserView` drawn with a CADisplayLink.
 
 ### Shape snapping (live: `recognizeShape`, `adjustShape`)
 GoodNotes-style, gated by the `snapShapes` setting (the app passes `recognizeShape` to the overlay only when it's on):

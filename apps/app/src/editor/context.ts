@@ -1,10 +1,12 @@
 import { createUndoManager, type Comment, type Item, type Notebook, type Page, type PenStyle, type Reading, type TextItem } from '@qalm/core';
+import type { InkRuler } from 'qalm-ink';
 import * as React from 'react';
 import type * as Y from 'yjs';
 
 import type { InputPrefs } from '../theme/ThemeProvider';
 import type { FormatKind } from './format.logic';
 import type { CrossPageUndo } from './undoStack';
+import type { EraserMode } from './items';
 import type { ToolId } from './view';
 
 export interface ToolState {
@@ -15,10 +17,14 @@ export interface ToolState {
   hlColor: string;
   hlWidth: number;
   eraserRadius: number;
+  /** Rub out whole strokes (the default) or only where the eraser passes. Remembered with the other tool settings. */
+  eraserMode: EraserMode;
   /** Hold the pen still at the end of a stroke to snap it to a shape. */
   snapShapes: boolean;
   /** Lasso: draw a loop around things, or drag a rectangle over them. Tapping selects either way. */
   lassoMode: 'free' | 'rect';
+  /** Laser pointer: a fading trail, or a dot that follows the pen. */
+  laserMode: 'trail' | 'dot';
 }
 
 export interface Selection {
@@ -53,6 +59,10 @@ export interface EditorCtx {
   setTool(t: ToolId): void;
   onPenButton(): void;
   input: InputPrefs;
+  /** The on-screen ruler in window coordinates while it's shown (editor UI, never in the page), else null. */
+  ruler: InkRuler | null;
+  /** The ruler right now, also mid-move (web overlays read it at pen-down). */
+  getRuler(): InkRuler | null;
   /** An overlay saw a real pen (auto-picks "draw with"). */
   onPenSeen(): void;
   undo: CrossPageUndo;

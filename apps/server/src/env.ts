@@ -31,6 +31,8 @@ export interface Env {
   WAKE_IDLE_MS?: string;
   WAKE_MIN_INTERVAL_MS?: string;
   WAIT_TIMEOUT_MS?: string;
+  /** How long one Play heartbeat keeps a notebook live (ms). Default AI_LIVE_TTL_MS (40000). Tests shorten it. */
+  AI_LIVE_TTL_MS?: string;
 }
 
 /** What completeAuthorization() stores; reaches the MCP handler as ctx.props. */

@@ -34,7 +34,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private static let eraserCursorColor = UIColor(red: 0x8b / 255.0, green: 0x8b / 255.0, blue: 0x95 / 255.0, alpha: 1) // faint
 
   // MARK: Props
-  fileprivate enum Tool: String { case pen, highlighter, eraser, lasso, none }
+  fileprivate enum Tool: String { case pen, highlighter, eraser, lasso, laser, none }
   private var pageW = 0.0
   private var pageH = 0.0
   private var tool: Tool = .none
@@ -44,11 +44,14 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private var penStyle = "fountain"
   private var smoothing = 0
   private var lassoRect = false
+  private var eraserPartial = false  // partial erase: show the eraser's recent trail
   private var drawWithPen = true
   private var rightHanded = true
   private var palmThresholdMm = 20.0
   private var committed = Set<String>()
   private var shapeSnap = false  // live shapes on: report holds (onShapeHold)
+  private var ruler: RulerSnap.Pose?  // the on-screen ruler (window points): strokes starting near it follow its edge
+  private var laserDot = false  // laser: a dot under the pen instead of a fading trail
 
   // MARK: State
   fileprivate struct Pt {
@@ -82,6 +85,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     var snapBase: [SIMD2<Double>] = []
     var snapCur: [SIMD2<Double>] = []
     var snapFrom = SIMD2<Double>(0, 0)
+    /// Along the ruler: the line (page units) every point is projected onto.
+    var line: (SIMD2<Double>, SIMD2<Double>)?
     init(touch: UITouch, isPencil: Bool, tool: Tool, colorString: String, color: UIColor, width: Double,
          style: String, smoothing: Int, location: CGPoint) {
       self.touch = touch
@@ -123,6 +128,9 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private let liveLayer = CAShapeLayer()
   private let lassoLayer = CAShapeLayer()
   private let cursorLayer = CAShapeLayer()  // hover preview and eraser cursor
+  private let trailLayer = CAShapeLayer()   // partial erase: where the eraser just went
+  private let laserView = LaserView(frame: .zero)  // the laser's trail or dot (never saved)
+  private static let eraseTrailMs = 250.0   // InkOverlay.types ERASE_TRAIL_MS
 
   private let inkGesture = InkGestureRecognizer(target: nil, action: nil)
   private var hoverGesture: UIHoverGestureRecognizer?
@@ -136,7 +144,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
 
     strokesLayer.masksToBounds = true
     layer.addSublayer(strokesLayer)
-    for l in [liveLayer, lassoLayer, cursorLayer] {
+    for l in [liveLayer, lassoLayer, cursorLayer, trailLayer] {
       l.fillRule = .nonZero
       l.actions = ["path": NSNull(), "position": NSNull(), "bounds": NSNull(), "hidden": NSNull(),
                    "fillColor": NSNull(), "strokeColor": NSNull(), "opacity": NSNull()]
@@ -148,8 +156,14 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     lassoLayer.lineDashPattern = [6, 4]
     lassoLayer.lineJoin = .round
     layer.addSublayer(lassoLayer)
+    trailLayer.fillColor = nil
+    trailLayer.strokeColor = QalmInkView.eraserCursorColor.withAlphaComponent(0.16).cgColor
+    trailLayer.lineCap = .round
+    trailLayer.lineJoin = .round
+    layer.addSublayer(trailLayer)
     cursorLayer.isHidden = true
     layer.addSublayer(cursorLayer)
+    addSubview(laserView)
 
     inkGesture.inkView = self
     inkGesture.delegate = self
@@ -183,6 +197,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     tool = next
     applyInputConfig()
     cursorLayer.isHidden = true
+    if next != .laser { laserView.clear() }
   }
 
   func setColor(_ value: String) {
@@ -206,6 +221,10 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     lassoRect = mode == "rect"
   }
 
+  func setEraserMode(_ mode: String) {
+    eraserPartial = mode == "partial"
+  }
+
   func setInput(drawWith: String, hand: String, palm: String) {
     drawWithPen = drawWith != "any"
     rightHanded = hand != "left"
@@ -219,6 +238,20 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
 
   func setShapeSnap(_ on: Bool) {
     shapeSnap = on
+  }
+
+  func setRuler(_ r: [String: Any]?) {
+    guard let r = r, let cx = InkNum.double(r["cx"]), let cy = InkNum.double(r["cy"]), let angle = InkNum.double(r["angle"]),
+          let length = InkNum.double(r["length"]), let thickness = InkNum.double(r["thickness"]), length > 0, thickness > 0 else {
+      ruler = nil
+      return
+    }
+    ruler = RulerSnap.Pose(cx: cx, cy: cy, angle: angle, length: length, thickness: thickness)
+  }
+
+  func setLaserMode(_ mode: String) {
+    laserDot = mode == "dot"
+    laserView.clear()
   }
 
   func setCommittedIds(_ ids: [String]) {
@@ -249,12 +282,13 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     super.layoutSubviews()
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    for l in [strokesLayer, liveLayer, lassoLayer, cursorLayer] {
+    for l in [strokesLayer, liveLayer, lassoLayer, cursorLayer, trailLayer] {
       l.frame = bounds
     }
+    laserView.frame = bounds
     let scale = window?.screen.scale ?? traitCollection.displayScale
     if scale > 0 {
-      for l in [strokesLayer, liveLayer, lassoLayer, cursorLayer] { l.contentsScale = scale }
+      for l in [strokesLayer, liveLayer, lassoLayer, cursorLayer, trailLayer] { l.contentsScale = scale }
     }
     CATransaction.commit()
     rebuildAllPaths()
@@ -491,6 +525,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private func begin(_ touch: UITouch, event: UIEvent, isPencil: Bool) {
     let a = Active(touch: touch, isPencil: isPencil, tool: tool, colorString: colorString, color: color,
                    width: strokeWidth, style: penStyle, smoothing: smoothing, location: touch.location(in: self))
+    if tool == .pen || tool == .highlighter { a.line = rulerLine(from: touch.location(in: self), offset: strokeWidth / 2) }
     active = a
     cursorLayer.isHidden = true
     configureLiveLayer(a)
@@ -502,6 +537,12 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     let samples = event.coalescedTouches(for: touch) ?? [touch]
     for s in samples {
       let pt = makePoint(s, a)
+      if a.tool == .laser {
+        let p = CGPoint(x: CGFloat(pt.x) * sx, y: CGFloat(pt.y) * sy)
+        if laserDot { laserView.dot = p } else { laserView.add(p, start: a.points.isEmpty) }
+        a.points.append(pt)
+        continue
+      }
       if let kind = a.snapKind {
         // Adjusting: the stroke stays as drawn; the shape follows the pen.
         a.snapCur = LiveShape.adjust(kind: kind, pts: a.snapBase, from: a.snapFrom, to: SIMD2(pt.x, pt.y))
@@ -528,7 +569,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private func armHold(_ a: Active) {
     holdWork?.cancel()
     holdWork = nil
-    guard shapeSnap, a.tool == .pen, a.snapKind == nil else { return }
+    // A stroke along the ruler is a straight line already: it never snaps to a shape.
+    guard shapeSnap, a.tool == .pen, a.snapKind == nil, a.line == nil else { return }
     let work = DispatchWorkItem { [weak self, weak a] in
       guard let self = self, let a = a else { return }
       self.holdElapsed(a)
@@ -607,8 +649,23 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     let tilt = isPencil ? Double(t.altitudeAngle) : Double.pi / 2
     let az = isPencil ? Double(t.azimuthAngle(in: self)) : 0
     let ms = max(0, (t.timestamp - a.start) * 1000)
-    return Pt(x: QalmInkView.f32(Double(loc.x) * kx), y: QalmInkView.f32(Double(loc.y) * ky),
+    var xy = SIMD2(Double(loc.x) * kx, Double(loc.y) * ky)
+    if let l = a.line { xy = RulerSnap.project(xy, l.0, l.1) }
+    return Pt(x: QalmInkView.f32(xy.x), y: QalmInkView.f32(xy.y),
               p: QalmInkView.f32(p), tilt: QalmInkView.f32(tilt), az: QalmInkView.f32(az), t: QalmInkView.f32(ms))
+  }
+
+  /// The ruler line (page units, pushed out by `offset`) a stroke starting at `p` (view points) follows, or nil.
+  /// The pose is in window points, as React Native's measureInWindow reports them.
+  private func rulerLine(from p: CGPoint, offset: Double) -> (SIMD2<Double>, SIMD2<Double>)? {
+    guard let r = ruler, window != nil, sx > 0, sy > 0 else { return nil }
+    let w = convert(p, to: nil)
+    guard let edge = RulerSnap.edgeAt(r, SIMD2(Double(w.x), Double(w.y))) else { return nil }
+    let toPage = { (q: SIMD2<Double>) -> SIMD2<Double> in
+      let v = self.convert(CGPoint(x: q.x, y: q.y), from: nil)
+      return SIMD2(Double(v.x / self.sx), Double(v.y / self.sy))
+    }
+    return RulerSnap.line(edge, toPage: toPage, offset: offset)
   }
 
   private func configureLiveLayer(_ a: Active) {
@@ -675,11 +732,13 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
       }
       lassoLayer.path = path
     case .eraser:
+      trailLayer.path = eraserPartial ? eraseTrail(pts) : nil
+      trailLayer.lineWidth = CGFloat(a.width) * sx
       if let last = pts.last {
         showCursor(at: CGPoint(x: CGFloat(last.x) * sx, y: CGFloat(last.y) * sy), tool: .eraser, width: a.width, color: a.color)
       }
-    case .none:
-      break
+    case .laser, .none:
+      break  // the laser draws itself (LaserView)
     }
   }
 
@@ -732,6 +791,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
         "heldMs": held,
         "style": a.style,
         "smoothing": a.smoothing,
+        "ruler": a.line != nil,
       ]
       if let s = snapped {
         event["shape"] = ["kind": s.kind, "pts": s.pts.map { [$0.x, $0.y] }] as [String: Any]
@@ -740,6 +800,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     case .eraser:
       emitErase(a, isFinal: true)
       cursorLayer.isHidden = true
+      trailLayer.path = nil
     case .lasso:
       let polygon: [[String: Any]] = a.points.map { ["x": $0.x, "y": $0.y] }
       CATransaction.begin()
@@ -747,6 +808,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
       lassoLayer.path = nil
       CATransaction.commit()
       onLasso(["polygon": polygon])
+    case .laser:
+      laserView.dot = nil  // the trail fades on its own; nothing is emitted
     case .none:
       clearLive()
     }
@@ -759,6 +822,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     active = nil
     clearLive()
     cursorLayer.isHidden = true
+    laserView.dot = nil
     reject(reason)
   }
 
@@ -767,18 +831,31 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     CATransaction.setDisableActions(true)
     liveLayer.path = nil
     lassoLayer.path = nil
+    trailLayer.path = nil
     CATransaction.commit()
+  }
+
+  /// Partial erase: the eraser's path over its last `eraseTrailMs` (view points).
+  private func eraseTrail(_ pts: [Pt]) -> CGPath? {
+    guard let now = pts.last?.t else { return nil }
+    let trail = pts.filter { $0.t >= now - QalmInkView.eraseTrailMs }
+    guard trail.count > 1, let first = trail.first else { return nil }
+    let path = CGMutablePath()
+    path.move(to: CGPoint(x: CGFloat(first.x) * sx, y: CGFloat(first.y) * sy))
+    for p in trail.dropFirst() { path.addLine(to: CGPoint(x: CGFloat(p.x) * sx, y: CGFloat(p.y) * sy)) }
+    return path
   }
 
   private func emitErase(_ a: Active, isFinal: Bool) {
     let n = a.points.count
     if n == 0 { return }
-    if n <= a.erasedUpTo { return }
+    // The last segment always goes (the app bakes a partial erase on it), even with no new points.
+    if n <= a.erasedUpTo && !isFinal { return }
     // Overlap by one point so consecutive segments join.
-    let from = max(0, a.erasedUpTo - 1)
+    let from = max(0, min(a.erasedUpTo, n) - 1)
     let path: [[String: Any]] = a.points[from..<n].map { ["x": $0.x, "y": $0.y] }
     a.erasedUpTo = n
-    onErase(["path": path])
+    onErase(isFinal ? ["path": path, "final": true] : ["path": path])
   }
 
   /// How long the pen stayed within `heldRadius` page units of where it lifted.
@@ -806,6 +883,10 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
         surelyPencil = isPencilHover
       }
       if isPencilHover { notePen(at: loc, time: ProcessInfo.processInfo.systemUptime, surelyPencil: surelyPencil) }
+      if tool == .laser {
+        if active == nil && laserDot { laserView.dot = loc }
+        return
+      }
       guard active == nil, tool == .pen || tool == .highlighter || tool == .eraser else {
         if active == nil { cursorLayer.isHidden = true }
         return
@@ -813,6 +894,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
       showCursor(at: loc, tool: tool, width: strokeWidth, color: color)
     default:
       if active == nil || active?.tool != .eraser { cursorLayer.isHidden = true }
+      if active == nil { laserView.dot = nil }
     }
   }
 

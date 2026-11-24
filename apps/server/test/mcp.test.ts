@@ -186,7 +186,7 @@ describe('mcp', () => {
     let html = '';
     const token = await connectAgent('aiswitch@example.com', { comment: true, transcribe: true }, 'Tutor', (h) => (html = h));
     // The consent page has no notebook picker: the agent gets the notebooks with AI access on.
-    expect(html).toContain("the notebooks you've turned AI access on for");
+    expect(html).toContain("It can read notebooks you've turned AI access on for, only while you've pressed Play in qalm.");
     expect(html).toContain("Right now that's <b>Physics</b>.");
     expect(html).not.toContain('Private');
     expect(html).not.toContain('name="notebook"');
@@ -309,7 +309,10 @@ describe('mcp', () => {
     off.nb.setMeta({ aiAccess: true });
     await serverAi('allcnb', true);
     await until(async () => (await aiRow('allcnb')) === 1);
-    expect(textOf(await tool(token, 'wait'))).toContain('"Journal"');
+    // Listed at once, without its title until the student presses Play in it.
+    expect(textOf(await tool(token, 'wait'))).toContain(`s=${sessionOf('allcnb')} paused`);
+    off.nbc.play();
+    await until(async () => textOf(await tool(token, 'wait')).includes('"Journal" live'));
     b.nb.setMeta({ aiAccess: false });
     await serverAi('allbnb', false);
     const r = await tool(token, 'read', { ref: 'outline', s: sessionOf('allbnb') });

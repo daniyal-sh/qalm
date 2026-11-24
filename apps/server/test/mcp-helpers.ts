@@ -116,8 +116,12 @@ export async function serverAi(id: string, on: boolean): Promise<void> {
 export const aiRow = async (id: string) =>
   (await env.DB.prepare('SELECT ai_access FROM notebooks WHERE id = ?1').bind(id).first<{ ai_access: number }>())?.ai_access;
 
-/** A synced notebook with one page, in the library, with AI access on unless `ai: false`. Returns live clients for its index and first page. */
-export async function notebook(t: Tokens, id: string, title: string, opts: { ai?: boolean; entry?: Partial<LibraryEntry> } = {}) {
+/**
+ * A synced notebook with one page, in the library, with AI access on unless `ai: false`, and playing AI sharing
+ * (the index client sends heartbeats) unless `live: false` or AI access is off. Returns live clients for its index
+ * and first page.
+ */
+export async function notebook(t: Tokens, id: string, title: string, opts: { ai?: boolean; live?: boolean; entry?: Partial<LibraryEntry> } = {}) {
   const ai = opts.ai ?? true;
   const init = createNotebookDoc({ id, title, cover: '#4338ca', paper: 'ruled', paperColor: 'white', size: { w: 595, h: 842 } });
   new Notebook(init).setMeta({ aiAccess: ai });
@@ -129,6 +133,7 @@ export async function notebook(t: Tokens, id: string, title: string, opts: { ai?
     lib.putEntry({ id, title, cover: '#4338ca', folderId: null, updatedAt: Date.now(), aiAccess: ai, favorite: false, deletedAt: null, ...opts.entry }),
   );
   await serverAi(id, ai);
+  if (ai && opts.live !== false) nbc.play();
   return { nb, nbc, pageId, pgc, page: new Page(pgc.doc) };
 }
 

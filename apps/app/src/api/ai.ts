@@ -96,9 +96,14 @@ export function aiScope(entries: readonly { aiAccess: boolean; deletedAt: number
   return `${n} notebook${n === 1 ? '' : 's'} with AI access on`;
 }
 
-/** Agents following a notebook right now (GET /ai/presence): a pending wait, or a call in the last minute. */
+/**
+ * Agents following a notebook right now (GET /ai/presence): a pending wait, or a call in the last minute; and whether
+ * one of the owner's devices is playing AI sharing for it (Play / Pause AI).
+ */
 export interface Presence {
   aiAccess: boolean;
+  live: boolean;
+  /** `!live` (for apps from before Play / Pause). */
   paused: boolean;
   agents: { name: string; waiting: boolean; lastAt: number; canComment: boolean; canTranscribe: boolean }[];
 }

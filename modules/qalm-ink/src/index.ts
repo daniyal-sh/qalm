@@ -3,9 +3,12 @@ export { renderThumbnail, type ThumbnailInput } from './thumbnail';
 export { useMathFill } from './markdownText';
 export type { PageCanvasProps, CommentAnchor } from './PageCanvas';
 export { InkOverlay } from './InkOverlay';
-export { PALM_MAJOR_MM, PEN_LOCKOUT_MS, SHAPE_HOLD_MM, SHAPE_HOLD_MS } from './InkOverlay.types';
+export { LASER_CORE, LASER_FADE_MS, LASER_GLOW, PALM_MAJOR_MM, PEN_LOCKOUT_MS, RULER_SNAP_PX, SHAPE_HOLD_MM, SHAPE_HOLD_MS } from './InkOverlay.types';
+export { forwardToInk } from './forwardToInk';
+export { MM_PER_CSS_PX, palmVerdict, pointerContact, type PenSeen } from './palm';
 export type {
   InkTool,
+  InkRuler,
   InkPenStyle,
   InkSmoothing,
   InkPoint,

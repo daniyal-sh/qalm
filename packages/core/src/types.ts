@@ -33,6 +33,11 @@ export interface StrokeItem {
   /** Stored per stroke so a stroke never changes look when the defaults change. */
   style?: PenStyle;
   smoothing?: Smoothing;
+  /**
+   * A piece the partial eraser split off: the id of the stroke it came from, as drawn (the longest piece keeps that
+   * id). Lets a timeline follow a piece back to when its ink was written.
+   */
+  splitFrom?: string;
 }
 /** How a text box's text is drawn: `md` renders it as Markdown. Missing = plain text (every box from before Markdown). */
 export type TextFormat = 'md';
@@ -111,7 +116,10 @@ export interface NotebookMeta {
   size: Size;
   orientation: Orientation;
   aiAccess: boolean;
-  /** "Pause sharing": agents keep their access but get no updates and can't call tools until resumed. */
+  /**
+   * @deprecated "Pause sharing" from apps before Play / Pause AI (core aiLive.ts). Still honoured while those apps are
+   * installed: true keeps the notebook paused for agents. The current app only clears it (on Play).
+   */
   aiPaused?: boolean;
   /** Every page's comment threads are in the notebook's thread index (set once, by the first full pass). */
   threadsIndexed?: boolean;

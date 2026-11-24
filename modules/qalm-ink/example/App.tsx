@@ -10,12 +10,13 @@ import type { InkInputSettings, InkTool } from '../src/InkOverlay.types';
 const A4 = { w: 595, h: 842 };
 const PAGE: PageInfo = { id: 'p1', size: A4, paper: 'ruled', paperColor: 'white', background: { kind: 'paper' } };
 const INPUT: InkInputSettings = { drawWith: 'any', hand: 'right', palm: 'standard' };
-const TOOLS: InkTool[] = ['pen', 'highlighter', 'eraser', 'lasso', 'none'];
+const TOOLS: InkTool[] = ['pen', 'highlighter', 'eraser', 'lasso', 'laser', 'none'];
 const BRUSH: Record<InkTool, { color: string; width: number }> = {
   pen: { color: '#27272a', width: 1.8 },
   highlighter: { color: '#fde68a', width: 12 },
   eraser: { color: '#27272a', width: 8 },
   lasso: { color: '#4338ca', width: 1 },
+  laser: { color: '#b91c1c', width: 4 },
   none: { color: '#27272a', width: 1 },
 };
 

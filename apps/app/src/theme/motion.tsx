@@ -3,7 +3,7 @@
  * platform's reduce-motion setting: things appear and disappear at once instead.
  */
 import * as React from 'react';
-import { AccessibilityInfo, Animated, Easing, Platform, type StyleProp, type ViewStyle } from 'react-native';
+import { AccessibilityInfo, Animated, Easing, Platform, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { motion } from './tokens';
 
@@ -101,6 +101,7 @@ export function Appear({
   duration = motion.base,
   scale,
   pointerEvents,
+  ready = true,
 }: {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
@@ -109,20 +110,29 @@ export function Appear({
   duration?: number;
   scale?: boolean;
   pointerEvents?: 'box-none' | 'none' | 'box-only' | 'auto';
+  /** The entrance waits for this (e.g. until the content has measured itself and can be placed). */
+  ready?: boolean;
 }) {
   const reduce = useReducedMotion();
   const v = React.useRef(new Animated.Value(reduce ? 1 : 0)).current;
   React.useEffect(() => {
+    if (!ready) return;
     if (reduce) return v.setValue(1);
     Animated.timing(v, { toValue: 1, duration, easing: easeOut, useNativeDriver: NATIVE_DRIVER }).start();
-  }, [v, reduce, duration]);
+  }, [v, reduce, duration, ready]);
   const d = distance ?? motion.rise;
-  const transform: object[] = [];
+  // The style's own transforms (e.g. the focus pill's shrink on a phone) and opacity (the pill stays hidden until it
+  // has measured itself) stay; the entrance is added to them.
+  const flat = StyleSheet.flatten(style);
+  const own = (flat?.transform ?? []) as object[];
+  const ownOpacity = typeof flat?.opacity === 'number' ? flat.opacity : undefined;
+  const opacity = ownOpacity === undefined ? v : Animated.multiply(v, ownOpacity);
+  const transform: object[] = [...own];
   if (from === 'bottom' || from === 'top') transform.push({ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [from === 'top' ? -d : d, 0] }) });
   if (from === 'left' || from === 'right') transform.push({ translateX: v.interpolate({ inputRange: [0, 1], outputRange: [from === 'left' ? -d : d, 0] }) });
   if (scale) transform.push({ scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) });
   return (
-    <Animated.View pointerEvents={pointerEvents} style={[style, { opacity: v, transform } as unknown as Animated.WithAnimatedValue<ViewStyle>]}>
+    <Animated.View pointerEvents={pointerEvents} style={[style, { opacity, transform } as unknown as Animated.WithAnimatedValue<ViewStyle>]}>
       {children}
     </Animated.View>
   );

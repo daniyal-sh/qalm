@@ -51,6 +51,10 @@ public class QalmInkModule: Module {
         view.setLassoMode(mode ?? "free")
       }
 
+      Prop("eraserMode") { (view: QalmInkView, mode: String?) in
+        view.setEraserMode(mode ?? "stroke")
+      }
+
       Prop("input") { (view: QalmInkView, input: [String: Any]) in
         view.setInput(
           drawWith: input["drawWith"] as? String ?? "pen",
@@ -66,6 +70,15 @@ public class QalmInkModule: Module {
       // Live shapes on (the app passed `recognizeShape`): the view reports holds with onShapeHold.
       Prop("shapeSnap") { (view: QalmInkView, on: Bool?) in
         view.setShapeSnap(on ?? false)
+      }
+
+      // The on-screen ruler in window points ({ cx, cy, angle, length, thickness }) or null.
+      Prop("ruler") { (view: QalmInkView, ruler: [String: Any]?) in
+        view.setRuler(ruler)
+      }
+
+      Prop("laserMode") { (view: QalmInkView, mode: String?) in
+        view.setLaserMode(mode ?? "trail")
       }
 
       // The answer to onShapeHold: { kind, pts: [[x, y], …] } or null (not a shape).

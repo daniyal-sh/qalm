@@ -19,11 +19,18 @@ function segDist(a: P, b: P, c: P, d: P): number {
   return Math.min(distToSegment(a, c, d), distToSegment(b, c, d), distToSegment(c, a, b), distToSegment(d, a, b));
 }
 
-function polylineDist(line: P[], path: P[]): number {
-  let m = Infinity;
-  const segs = (pl: P[]): [P, P][] => (pl.length === 1 ? [[pl[0]!, pl[0]!]] : pl.slice(1).map((p, i) => [pl[i]!, p]));
-  for (const [a, b] of segs(line)) for (const [c, d] of segs(path)) m = Math.min(m, segDist(a, b, c, d));
-  return m;
+const segsOf = (pl: P[]): [P, P][] => (pl.length === 1 ? [[pl[0]!, pl[0]!]] : pl.slice(1).map((p, i) => [pl[i]!, p]));
+
+/** Whether polyline `line` comes within `r` of the path's segments (stops at the first hit). */
+function polylineWithin(line: P[], path: [P, P][], r: number): boolean {
+  for (const [a, b] of segsOf(line)) {
+    const sx0 = Math.min(a[0], b[0]) - r, sx1 = Math.max(a[0], b[0]) + r, sy0 = Math.min(a[1], b[1]) - r, sy1 = Math.max(a[1], b[1]) + r;
+    for (const [c, d] of path) {
+      if (Math.max(c[0], d[0]) < sx0 || Math.min(c[0], d[0]) > sx1 || Math.max(c[1], d[1]) < sy0 || Math.min(c[1], d[1]) > sy1) continue;
+      if (segDist(a, b, c, d) <= r) return true;
+    }
+  }
+  return false;
 }
 
 /** Ink polylines of an item (strokes and shapes); null for text and images. */
@@ -41,14 +48,18 @@ export function hitTestErase(items: Item[], path: XY[], radius: number): string[
   for (const [x, y] of pl) {
     px0 = Math.min(px0, x); py0 = Math.min(py0, y); px1 = Math.max(px1, x); py1 = Math.max(py1, y);
   }
+  const segs = segsOf(pl);
   const out: string[] = [];
   for (const item of items) {
+    if (item.type !== 'stroke' && item.type !== 'shape') continue;
+    // The box first: building every stroke's polyline was most of the cost on a dense page.
+    const r0 = radius + item.width / 2;
+    const [x0, y0, x1, y1] = itemBBox(item);
+    if (x0 - r0 > px1 || x1 + r0 < px0 || y0 - r0 > py1 || y1 + r0 < py0) continue;
     const ink = inkLines(item);
     if (!ink || !ink.lines.some((l) => l.length)) continue;
     const r = radius + ink.halfWidth;
-    const [x0, y0, x1, y1] = itemBBox(item);
-    if (x0 - r > px1 || x1 + r < px0 || y0 - r > py1 || y1 + r < py0) continue;
-    if (ink.lines.some((l) => l.length && polylineDist(l, pl) <= r)) out.push(item.id);
+    if (ink.lines.some((l) => l.length && polylineWithin(l, segs, r))) out.push(item.id);
   }
   return out;
 }

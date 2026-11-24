@@ -140,7 +140,7 @@ function consentPage(d: ConsentDescription, handle: string, rid: string, email: 
     : 'No notebook has AI access on yet. Turn it on in a notebook to share it.';
   return `${logos(d.clientName)}
 <h1>${e(d.clientName)} wants to read your notes</h1>
-<p class="sub">It can read the notebooks you've turned AI access on for, now and later. ${scope} Turning AI access off in a notebook hides it again.</p>
+<p class="sub">It can read notebooks you've turned AI access on for, only while you've pressed Play in qalm. ${scope} Pause, closing the notebook or turning AI access off stops it.</p>
 ${email ? `<p class="who">Signed in as ${e(email)}</p>` : ''}
 ${d.redirectIsLoopback ? '<div class="warn">This sends access to an app on your computer. Continue only if you just started connecting from it.</div>' : ''}
 <form method="post" action="/authorize" id="f">

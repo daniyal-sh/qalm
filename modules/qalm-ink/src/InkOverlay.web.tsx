@@ -1,4 +1,4 @@
-import { inkPaint } from '@qalm/core';
+import { inkPaint, projectOnLine, rulerEdgeAt, rulerLine } from '@qalm/core';
 import * as React from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -9,9 +9,15 @@ import {
   type InkPoint,
   type InkSmoothing,
   type ShapePreview,
+  ERASE_TRAIL_MS,
+  LASER_CORE,
+  LASER_FADE_MS,
+  LASER_GLOW,
+  RULER_SNAP_PX,
   SHAPE_HOLD_MM,
   SHAPE_HOLD_MS,
 } from './InkOverlay.types';
+import { laserRuns, type LaserPt } from './laser';
 import { traceOutline } from './outlinePath';
 import { MM_PER_CSS_PX as MM_PER_PX, palmVerdict, pointerContact, secondFingerRetracts, touchContact } from './palm';
 import { fingerGesture, type FingerOwner } from './twoFingerPan';
@@ -20,6 +26,7 @@ const PULSE_MS = 260;
 /** The halo starts this wide (CSS px) beyond the line. */
 const PULSE_PX = 7;
 const LASSO_COLOR = '#4338ca'; // brand accent
+const ERASE_TRAIL_COLOR = '#8b8b95'; // brand faint
 /** A finished stroke whose id never reaches committedIds (e.g. snapped to a shape) is dropped after this. */
 const PENDING_FALLBACK_MS = 4000;
 /**
@@ -29,7 +36,13 @@ const PENDING_FALLBACK_MS = 4000;
  */
 const HANDOFF_FRAMES = 2;
 
-type Kind = 'ink' | 'erase' | 'lasso';
+type Kind = 'ink' | 'erase' | 'lasso' | 'laser';
+
+/** Laser widths in CSS px (they don't scale with zoom): the glow and the core of the trail, the dot's glow and core radii. */
+const LASER_GLOW_PX = 10;
+const LASER_CORE_PX = 3;
+const LASER_DOT_GLOW_PX = 9;
+const LASER_DOT_PX = 4;
 
 const NO_PEN = { x: 0, y: 0, t: -Infinity };
 
@@ -55,6 +68,8 @@ interface Live {
   /** Snapped while held: the shape under the pen, adjusted as the pen drags (`from` is where the pen was then). */
   snap: { base: ShapePreview; cur: ShapePreview; from: [number, number]; at: number } | null;
   erasedUpTo: number;
+  /** Along the ruler: every point is projected onto this line (page units). Set when the stroke starts near its edge. */
+  line: { a: [number, number]; b: [number, number] } | null;
   /** Client px of the last sample, and how far the contact has travelled (mm): a second finger's verdict. */
   lastX: number;
   lastY: number;
@@ -120,6 +135,11 @@ export function InkOverlay(props: InkOverlayProps) {
     penPointers: new Set<number>(),
     buttonDown: false,
     penReported: false,
+    /** The laser: its fading trail, and the dot (page units) under the pen or a hovering pointer in dot mode. */
+    laser: [] as LaserPt[],
+    laserDot: null as { x: number; y: number } | null,
+    laserRaf: 0,
+    laserCanvas: null as HTMLCanvasElement | null,
     draw: () => {},
   });
 
@@ -217,10 +237,83 @@ export function InkOverlay(props: InkOverlayProps) {
         ctx.setLineDash([]);
       }
 
+      // Partial erase: a faint trail of where the eraser just went, while the page catches up.
+      if (live?.kind === 'erase' && propsRef.current.eraserMode === 'partial' && live.points.length > 1) {
+        const now = live.points[live.points.length - 1]!.t;
+        const trail = live.points.filter((p) => p.t >= now - ERASE_TRAIL_MS);
+        if (trail.length > 1) {
+          ctx.beginPath();
+          trail.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+          ctx.lineWidth = propsRef.current.width;
+          ctx.strokeStyle = ERASE_TRAIL_COLOR;
+          ctx.globalAlpha = 0.16;
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      }
+
+      // Laser: a glowing red trail fading over LASER_FADE_MS (brand `bad`), or a dot. Never saved.
+      const P = propsRef.current;
+      if (s.laser.length > 1 || s.laserDot) {
+        const now = performance.now();
+        const px = dpr / k; // one CSS px in page units
+        if (s.laser.length > 1) {
+          // Each layer is drawn on its own canvas, then laid on the overlay: within a layer, each run of the trail in
+          // one fade band is one path (no joints painted twice), and a band first clears what it covers, so where two
+          // bands meet the newer one shows, not both (no beads at the joints).
+          const lc = (s.laserCanvas ??= document.createElement('canvas'));
+          if (lc.width !== w || lc.height !== h) {
+            lc.width = w;
+            lc.height = h;
+          }
+          const l = lc.getContext('2d')!;
+          const runs = laserRuns(s.laser, now);
+          for (const [colour, lw, a] of [
+            [LASER_GLOW, LASER_GLOW_PX, 0.35],
+            [LASER_CORE, LASER_CORE_PX, 1],
+          ] as const) {
+            l.setTransform(1, 0, 0, 1, 0, 0);
+            l.clearRect(0, 0, w, h);
+            l.setTransform(k, 0, 0, (cssH * dpr) / pageSize.h, 0, 0);
+            l.lineCap = 'round';
+            l.lineJoin = 'round';
+            l.lineWidth = lw * px;
+            l.strokeStyle = colour;
+            for (const run of runs) {
+              const path = new Path2D();
+              run.pts.forEach((q, i) => (i ? path.lineTo(q.x, q.y) : path.moveTo(q.x, q.y)));
+              l.globalCompositeOperation = 'destination-out';
+              l.globalAlpha = 1;
+              l.stroke(path);
+              l.globalCompositeOperation = 'source-over';
+              l.globalAlpha = a * run.alpha;
+              l.stroke(path);
+            }
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.globalAlpha = 1;
+            ctx.drawImage(lc, 0, 0);
+            ctx.setTransform(k, 0, 0, (cssH * dpr) / pageSize.h, 0, 0);
+          }
+        }
+        if (s.laserDot && P.tool === 'laser') {
+          ctx.globalAlpha = 0.35;
+          ctx.fillStyle = LASER_GLOW;
+          ctx.beginPath();
+          ctx.arc(s.laserDot.x, s.laserDot.y, LASER_DOT_GLOW_PX * px, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = LASER_CORE;
+          ctx.beginPath();
+          ctx.arc(s.laserDot.x, s.laserDot.y, LASER_DOT_PX * px, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+
       // Brush preview: hover, or the eraser under the pen.
       const cursor = live?.kind === 'erase' ? live.points[live.points.length - 1] : live ? null : s.hover;
       const tool = live?.kind === 'erase' ? 'eraser' : propsRef.current.tool;
-      if (cursor && tool !== 'none' && tool !== 'lasso') {
+      if (cursor && tool !== 'none' && tool !== 'lasso' && tool !== 'laser') {
         const r = Math.max(propsRef.current.width / 2, 1 / k);
         ctx.beginPath();
         ctx.arc(cursor.x, cursor.y, r, 0, Math.PI * 2);
@@ -232,6 +325,21 @@ export function InkOverlay(props: InkOverlayProps) {
       }
     };
     s.draw = draw;
+
+    /** Fades the laser trail: redraws every frame until it is gone (canvas.dataset.laser counts its points, for tests). */
+    const tickLaser = () => {
+      s.laserRaf = 0;
+      const now = performance.now();
+      let i = 0;
+      while (i < s.laser.length && now - s.laser[i]!.t >= LASER_FADE_MS) i++;
+      if (i) s.laser.splice(0, i);
+      canvas.dataset.laser = String(s.laser.length);
+      draw();
+      if (s.laser.length) s.laserRaf = requestAnimationFrame(tickLaser);
+    };
+    const runLaser = () => {
+      if (!s.laserRaf) s.laserRaf = requestAnimationFrame(tickLaser);
+    };
 
     const toPoint = (ev: PointerEvent, live: Live): InkPoint => {
       const { pageSize } = propsRef.current;
@@ -249,9 +357,12 @@ export function InkOverlay(props: InkOverlayProps) {
           az = Math.atan2(ty, tx);
         }
       }
+      let x = ((ev.clientX - live.rect.left) * pageSize.w) / live.rect.width;
+      let y = ((ev.clientY - live.rect.top) * pageSize.h) / live.rect.height;
+      if (live.line) [x, y] = projectOnLine([x, y], live.line.a, live.line.b);
       return {
-        x: ((ev.clientX - live.rect.left) * pageSize.w) / live.rect.width,
-        y: ((ev.clientY - live.rect.top) * pageSize.h) / live.rect.height,
+        x,
+        y,
         p: Math.min(1, p),
         tilt,
         az,
@@ -292,7 +403,7 @@ export function InkOverlay(props: InkOverlayProps) {
       if (live.points.length - from < (final ? 1 : 2)) return;
       const path = live.points.slice(from).map(({ x, y }) => ({ x, y }));
       live.erasedUpTo = live.points.length;
-      propsRef.current.onErase({ nativeEvent: { path } });
+      propsRef.current.onErase({ nativeEvent: final ? { path, final: true } : { path } });
     };
 
     /** Snaps the stroke to a shape if it looks like one (the pen has held still since `holdIdx`). */
@@ -313,7 +424,8 @@ export function InkOverlay(props: InkOverlayProps) {
     const armHold = (live: Live) => {
       if (live.holdTimer) clearTimeout(live.holdTimer);
       live.holdTimer = null;
-      if (live.kind !== 'ink' || live.tool !== 'pen' || live.snap || !propsRef.current.recognizeShape) return;
+      // A stroke along the ruler is a straight line already: it never snaps to a shape.
+      if (live.kind !== 'ink' || live.tool !== 'pen' || live.snap || live.line || !propsRef.current.recognizeShape) return;
       live.holdTimer = setTimeout(() => trySnap(live), SHAPE_HOLD_MS);
     };
 
@@ -328,6 +440,15 @@ export function InkOverlay(props: InkOverlayProps) {
       live.lastX = ev.clientX;
       live.lastY = ev.clientY;
       const pt = toPoint(ev, live);
+      if (live.kind === 'laser') {
+        if (propsRef.current.laserMode === 'dot') s.laserDot = { x: pt.x, y: pt.y };
+        else {
+          s.laser.push({ x: pt.x, y: pt.y, t: performance.now(), start: live.points.length === 0 });
+          runLaser();
+        }
+        live.points.push(pt);
+        return;
+      }
       if (live.snap) {
         // Adjusting: the stroke stays as it was drawn; the shape follows the pen.
         const adjust = propsRef.current.adjustShape;
@@ -350,10 +471,19 @@ export function InkOverlay(props: InkOverlayProps) {
 
     const start = (ev: PointerEvent, isPen: boolean) => {
       const P = propsRef.current;
-      const eraserOverride = erasesWhileHeld(ev);
+      // The barrel button, the eraser end and the right mouse button erase that stroke, except with the laser: pointing
+      // must never change the page.
+      const eraserOverride = P.tool !== 'laser' && erasesWhileHeld(ev);
       const tool = eraserOverride ? 'eraser' : P.tool;
       if (tool === 'none') return;
-      const kind: Kind = tool === 'eraser' ? 'erase' : tool === 'lasso' ? 'lasso' : 'ink';
+      const kind: Kind = tool === 'eraser' ? 'erase' : tool === 'lasso' ? 'lasso' : tool === 'laser' ? 'laser' : 'ink';
+      const rect = canvas.getBoundingClientRect();
+      // Near a ruler edge: the stroke follows that edge (projected onto it, half the pen's width outside it).
+      const ruler = P.getRuler ? P.getRuler() : P.ruler;
+      const edge = kind === 'ink' && ruler ? rulerEdgeAt(ruler, [ev.clientX, ev.clientY], RULER_SNAP_PX) : null;
+      const line = edge
+        ? rulerLine(edge, ([x, y]) => [((x - rect.left) * P.pageSize.w) / rect.width, ((y - rect.top) * P.pageSize.h) / rect.height], P.width / 2)
+        : null;
       const live: Live = {
         pointerId: ev.pointerId,
         kind,
@@ -363,7 +493,7 @@ export function InkOverlay(props: InkOverlayProps) {
         width: P.width,
         style: P.penStyle ?? 'fountain',
         smoothing: P.smoothing ?? 0,
-        rect: canvas.getBoundingClientRect(),
+        rect,
         t0: ev.timeStamp,
         points: [],
         predicted: [],
@@ -373,20 +503,28 @@ export function InkOverlay(props: InkOverlayProps) {
         holdIdx: 0,
         holdTimer: null,
         snap: null,
+        line,
         erasedUpTo: 0,
         lastX: ev.clientX,
         lastY: ev.clientY,
         travelMm: 0,
       };
       s.live = live;
+      if (line) canvas.dataset.ruler = '1'; // for tests: this stroke follows the ruler
+      else delete canvas.dataset.ruler;
       addPoint(live, ev);
-      canvas.setPointerCapture(ev.pointerId);
+      try {
+        canvas.setPointerCapture(ev.pointerId);
+      } catch {
+        // A pointer handed over from the ruler (forwarded) may already be gone.
+      }
       draw();
     };
 
     const retract = () => {
       stopHold(s.live);
       s.live = null;
+      s.laserDot = null;
       draw();
     };
 
@@ -398,7 +536,10 @@ export function InkOverlay(props: InkOverlayProps) {
       if (ev) addPoint(live, ev);
       stopHold(live);
       const P = propsRef.current;
-      if (live.kind === 'erase') {
+      if (live.kind === 'laser') {
+        // Nothing to save: the trail fades on its own; the dot goes (it comes back on hover).
+        if (ev?.pointerType !== 'mouse' && ev?.pointerType !== 'pen') s.laserDot = null;
+      } else if (live.kind === 'erase') {
         emitErase(live, true);
       } else if (live.kind === 'lasso') {
         if (live.points.length >= 1) P.onLasso({ nativeEvent: { polygon: live.points.map(({ x, y }) => ({ x, y })) } });
@@ -431,6 +572,7 @@ export function InkOverlay(props: InkOverlayProps) {
             style: live.style,
             smoothing: live.smoothing,
             ...(shape ? { shape: { kind: shape.kind, pts: shape.pts } } : null),
+            ...(live.line ? { ruler: true } : null),
           },
         });
       }
@@ -494,6 +636,7 @@ export function InkOverlay(props: InkOverlayProps) {
           reject('palm-size');
           return;
         }
+        // A pointer handed over from the ruler (a synthetic pointerdown) has no coalesced events on its first moves either way.
         const coalesced = ev.getCoalescedEvents?.() ?? [];
         for (const c of coalesced.length ? coalesced : [ev]) addPoint(live, c);
         live.predicted = live.kind === 'ink' && !live.snap ? (ev.getPredictedEvents?.() ?? []).map((p) => toPoint(p, live)) : [];
@@ -508,6 +651,7 @@ export function InkOverlay(props: InkOverlayProps) {
           x: ((ev.clientX - rect.left) * pageSize.w) / rect.width,
           y: ((ev.clientY - rect.top) * pageSize.h) / rect.height,
         };
+        s.laserDot = propsRef.current.tool === 'laser' && propsRef.current.laserMode === 'dot' ? s.hover : null;
         draw();
       }
     };
@@ -532,8 +676,9 @@ export function InkOverlay(props: InkOverlayProps) {
 
     const onLeave = (ev: PointerEvent) => {
       if (ev.pointerType === 'pen') canvas.style.touchAction = touchActionFor(propsRef.current);
-      if (s.hover) {
+      if (s.hover || s.laserDot) {
         s.hover = null;
+        if (!s.live) s.laserDot = null;
         draw();
       }
     };
@@ -567,6 +712,7 @@ export function InkOverlay(props: InkOverlayProps) {
     canvas.addEventListener('pointerover', onOver);
     canvas.addEventListener('touchstart', onTouchStart, { passive: false });
     canvas.addEventListener('contextmenu', onContextMenu);
+    canvas.dataset.qalmInk = '1'; // the ruler hands pens over to the overlay under it (forwardToInk)
     const ro = new ResizeObserver(draw);
     ro.observe(canvas);
     draw();
@@ -580,14 +726,20 @@ export function InkOverlay(props: InkOverlayProps) {
       canvas.removeEventListener('touchstart', onTouchStart);
       canvas.removeEventListener('contextmenu', onContextMenu);
       ro.disconnect();
+      if (s.laserRaf) cancelAnimationFrame(s.laserRaf);
       fingerGesture.release(owner);
       releaseFingers();
       s.draw = () => {};
     };
   }, []);
 
-  // Redraw the hover preview when the brush changes.
-  React.useEffect(() => state.current.draw(), [props.tool, props.width, props.color, props.pageSize.w, props.pageSize.h]);
+  // Redraw the hover preview when the brush changes. Leaving the laser (or switching its mode) drops its trail and dot.
+  React.useEffect(() => {
+    const s = state.current;
+    if (props.tool !== 'laser' || props.laserMode === 'dot') s.laser = [];
+    if (props.tool !== 'laser' || props.laserMode !== 'dot') s.laserDot = null;
+    s.draw();
+  }, [props.tool, props.width, props.color, props.pageSize.w, props.pageSize.h, props.laserMode]);
 
   return (
     <View style={[StyleSheet.absoluteFill, props.style]} pointerEvents={props.tool === 'none' ? 'none' : 'auto'}>
@@ -598,7 +750,8 @@ export function InkOverlay(props: InkOverlayProps) {
           height: '100%',
           display: 'block',
           touchAction: touchActionFor(props),
-          cursor: props.tool === 'none' ? 'default' : 'crosshair',
+          // The laser dot replaces the mouse cursor.
+          cursor: props.tool === 'none' ? 'default' : props.tool === 'laser' && props.laserMode === 'dot' ? 'none' : 'crosshair',
         }}
       />
     </View>

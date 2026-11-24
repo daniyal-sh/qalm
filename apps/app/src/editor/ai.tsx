@@ -1,47 +1,102 @@
-/** Live agent presence in the editor: the "following along" pill and its popover, and comment cards in the page margin. */
-import { markdownToPlain, type Comment, type Notebook } from '@qalm/core';
+/** Live AI in the editor: the Play / Pause AI control with who is following, and comment cards in the page margin. */
+import { markdownToPlain, type Comment } from '@qalm/core';
 import * as React from 'react';
-import { Animated, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, AppState, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { getPresence, presenceCan, presenceNames, type Presence } from '../api/ai';
 import type { TokenManager } from '../auth/tokens';
-import { Appear } from '../theme/motion';
+import type { SyncProvider } from '../sync/provider';
 import { useTheme } from '../theme/ThemeProvider';
-import { radius, shadow2 } from '../theme/tokens';
-import { confirm } from '../ui/confirm';
-import { Avatar, Button } from '../ui/controls';
+import { radius } from '../theme/tokens';
+import { Avatar } from '../ui/controls';
+import { Icon } from '../ui/Icon';
 import { Text } from '../ui/Text';
+import { AiLive } from './aiLive';
 
 const POLL_MS = 8000;
 const NATIVE_DRIVER = Platform.OS !== 'web';
 
-/** Polls GET /ai/presence while the editor is open, signed in, and AI access is on. */
-export function usePresence(tm: TokenManager | null, notebookId: string, enabled: boolean): Presence['agents'] {
-  const [agents, setAgents] = React.useState<Presence['agents']>([]);
+/**
+ * Polls GET /ai/presence while the editor is open, signed in, and AI access is on: who is following, and whether
+ * any device is playing. `bump` changes on Play / Pause: re-poll soon, and don't show a stale "live" meanwhile.
+ */
+export function usePresence(tm: TokenManager | null, notebookId: string, enabled: boolean, bump = 0): { agents: Presence['agents']; live: boolean } {
+  const [p, setP] = React.useState<{ agents: Presence['agents']; live: boolean }>(NONE);
   React.useEffect(() => {
     if (!tm || !enabled) {
-      setAgents([]);
+      setP(NONE);
       return;
     }
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
       try {
-        const p = await getPresence(tm, notebookId);
-        if (alive) setAgents(p.aiAccess ? p.agents : []);
+        const r = await getPresence(tm, notebookId);
+        if (alive) setP(r.aiAccess ? { agents: r.agents, live: r.live === true } : NONE);
       } catch {
         // Offline, or the session expired: don't keep claiming an agent is following along.
-        if (alive) setAgents((a) => (a.length ? [] : a));
+        if (alive) setP((x) => (x.agents.length || x.live ? NONE : x));
       }
       if (alive) timer = setTimeout(tick, POLL_MS);
     };
-    void tick();
+    if (bump) {
+      setP((x) => ({ ...x, live: false }));
+      timer = setTimeout(tick, 700);
+    } else void tick();
     return () => {
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [tm, notebookId, enabled]);
-  return agents;
+  }, [tm, notebookId, enabled, bump]);
+  return p;
+}
+
+const NONE = { agents: [] as Presence['agents'], live: false };
+
+/**
+ * Play / Pause AI on this device for the open notebook (see aiLive.ts). Starts paused; leaving the app (another app
+ * in front, the tab hidden, the window minimized; unless held, see `holdWhileBackgrounded`), closing the notebook, AI
+ * access going off or signing out stops it.
+ */
+export function useAiLive(
+  provider: SyncProvider | null,
+  enabled: boolean,
+): {
+  playing: boolean;
+  /** A Pause pressed offline that hasn't reached the server yet. */
+  pausePending: boolean;
+  play(): void;
+  /** False when it couldn't go out yet: queued until the socket is back. */
+  pause(): boolean;
+  /** Keep sharing while the app is in the background (e.g. a running Lecture recording); returns the release. */
+  holdWhileBackgrounded(reason: string): () => void;
+} {
+  const [ctl, setCtl] = React.useState<AiLive | null>(null);
+  const [, force] = React.useReducer((x: number) => x + 1, 0);
+  React.useEffect(() => {
+    if (!provider || !enabled) return;
+    const c = new AiLive(provider);
+    const off = c.onChange(force);
+    setCtl(c);
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'background') c.background();
+      else if (st === 'active') c.foreground();
+    });
+    return () => {
+      sub.remove();
+      off();
+      c.destroy();
+      setCtl(null);
+    };
+  }, [provider, enabled]);
+  // `force` re-renders on every change, so `playing` here is always current.
+  return {
+    playing: !!ctl?.playing,
+    pausePending: !!ctl?.pausePending,
+    play: () => ctl?.play(),
+    pause: () => ctl?.pause() ?? false,
+    holdWhileBackgrounded: (reason) => ctl?.holdWhileBackgrounded(reason) ?? (() => undefined),
+  };
 }
 
 /**
@@ -94,90 +149,55 @@ function Dot({ color, on }: { color: string; on: boolean }) {
 }
 
 /**
- * "Claude is following along" (assistant blue, with a dot), "… is thinking…" after an Ask, or "Sharing paused".
- * Tapping it opens what the agent can do, Pause/Resume sharing and Stop.
+ * The header's Play / Pause AI control (only shown while AI access is on). Paused (neutral): "AI paused", tap to
+ * play. Live (assistant blue, the only time it's blue): "AI live", "AI live · Claude" with a connected agent, or
+ * "Claude is thinking…" after an Ask; tap to pause on every device.
  */
-export function PresencePill({
+export function AiControl({
   agents,
-  notebook,
-  paused,
+  live,
+  here,
   thinking,
   compact,
+  onPlay,
+  onPause,
 }: {
   agents: Presence['agents'];
-  notebook: Notebook;
-  paused: boolean;
+  /** Shared with agents right now (this device or another one is playing). */
+  live: boolean;
+  /** This device is the one playing. */
+  here: boolean;
   thinking: boolean;
   compact: boolean;
+  onPlay(): void;
+  onPause(): void;
 }) {
   const { c } = useTheme();
-  const [anchor, setAnchor] = React.useState<{ x: number; y: number } | null>(null);
-  const ref = React.useRef<React.ComponentRef<typeof Pressable>>(null);
-  if (!agents.length && !paused) return null;
-  const names = presenceNames(agents.map((a) => a.name)) || 'Your agent';
-  const label = paused ? 'Sharing paused' : thinking ? `${names} is thinking…` : compact ? names : `${names} is following along`;
-  const fg = paused ? c.warn : c.assistant;
-  const open = () => ref.current?.measureInWindow((x, y, _w, h) => setAnchor({ x, y: y + h + 6 }));
+  const names = presenceNames(agents.map((a) => a.name));
+  const label = !live ? 'AI paused' : thinking && names ? `${names} is thinking…` : names && !compact ? `AI live · ${names}` : 'AI live';
+  const fg = live ? c.assistant : c.ink2;
+  const what = !live
+    ? 'Agents can’t read this notebook. Play to share it while it’s open here.'
+    : `${here ? '' : 'Playing on another device. '}${names ? `${names} can ${presenceCan(agents).toLowerCase()}.` : 'No agent connected yet.'} Never changes your ink.`;
   return (
-    <>
-      <Pressable
-        ref={ref}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        onPress={open}
-        style={(s) => [
-          styles.pill,
-          { backgroundColor: paused ? c.warnSoft : c.assistantSoft, borderColor: paused ? c.line : c.assistantLine },
-          ((s as { hovered?: boolean }).hovered || s.pressed) && { borderColor: fg },
-        ]}
-      >
-        <Dot color={fg} on={thinking && !paused} />
-        <Text variant="meta" numberOfLines={1} style={{ color: fg, fontWeight: '600', maxWidth: compact ? 120 : 260, flexShrink: 1 }}>
-          {label}
-        </Text>
-      </Pressable>
-      <Modal visible={!!anchor} transparent animationType="none" onRequestClose={() => setAnchor(null)} supportedOrientations={['portrait', 'landscape']}>
-        <Pressable accessibilityLabel="Close" style={StyleSheet.absoluteFill} onPress={() => setAnchor(null)} />
-        <Appear from="top" distance={4} scale duration={120} style={[styles.pop, shadow2, { left: Math.max(8, (anchor?.x ?? 0) - 40), top: anchor?.y ?? 0, backgroundColor: c.surface, borderColor: c.line }]}>
-          <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-            <Avatar name={agents[0]?.name ?? 'AI'} kind="agent" size={32} />
-            <View style={{ flex: 1 }}>
-              <Text variant="label">{paused ? 'Sharing is paused' : `${names} is following along`}</Text>
-              <Text variant="meta" tone="muted">
-                {agents.length ? `Can ${presenceCan(agents).toLowerCase()}. Never changes your ink.` : 'No agent is following right now.'}
-              </Text>
-            </View>
-          </View>
-          <Text variant="meta" tone="muted">
-            {paused
-              ? 'Agents keep their access but get no updates and can’t read this notebook until you resume.'
-              : 'Updates go out when you pause writing, tap Ask or comment.'}
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
-            <Button
-              label="Stop"
-              size="sm"
-              variant="ghost"
-              icon="x-circle"
-              onPress={() => {
-                setAnchor(null);
-                confirm('Stop AI access?', 'Agents can’t see this notebook until you turn it back on.', 'Stop', () => notebook.setMeta({ aiAccess: false, aiPaused: false }));
-              }}
-            />
-            <Button
-              label={paused ? 'Resume sharing' : 'Pause sharing'}
-              size="sm"
-              variant="assistant"
-              icon={paused ? 'play' : 'pause'}
-              onPress={() => {
-                setAnchor(null);
-                notebook.setMeta({ aiPaused: !paused });
-              }}
-            />
-          </View>
-        </Appear>
-      </Modal>
-    </>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${label}. ${live ? 'Pause AI' : 'Play AI'}`}
+      accessibilityHint={what}
+      onPress={live ? onPause : onPlay}
+      {...((Platform.OS === 'web' ? { title: `${live ? 'Pause AI' : 'Play AI'}: ${what}` } : {}) as object)}
+      style={(s) => [
+        styles.pill,
+        { backgroundColor: live ? c.assistantSoft : c.surface2, borderColor: live ? c.assistantLine : c.line },
+        ((s as { hovered?: boolean }).hovered || s.pressed) && { borderColor: fg },
+      ]}
+    >
+      <Icon name={live ? 'pause' : 'play'} size={12} color={fg} />
+      {live ? <Dot color={fg} on={thinking} /> : null}
+      <Text variant="meta" numberOfLines={1} style={{ color: fg, fontWeight: '600', maxWidth: compact ? 120 : 260, flexShrink: 1 }}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -258,6 +278,5 @@ const styles = StyleSheet.create({
   // Shrinks (its label ellipsizes) instead of pushing past the title column onto Undo / Redo on a phone.
   pill: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 26, paddingHorizontal: 10, borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth, flexShrink: 1, minWidth: 0 },
   dot: { width: 7, height: 7, borderRadius: 4 },
-  pop: { position: 'absolute', width: 320, maxWidth: '96%', padding: 14, gap: 10, borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth },
   card: { borderRadius: radius.control, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7, gap: 2, overflow: 'hidden' },
 });

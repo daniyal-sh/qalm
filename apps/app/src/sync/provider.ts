@@ -85,6 +85,7 @@ export class SyncProvider {
   private heartbeat: ReturnType<typeof setTimeout> | null = null;
   private networkDown = false;
   private listeners = new Set<(s: SyncStatus) => void>();
+  private textListeners = new Set<(msg: string) => void>();
   private syncedWaiters: (() => void)[] = [];
   private readonly createSocket: SocketFactory;
   private readonly unwatch: (() => void) | null;
@@ -114,6 +115,26 @@ export class SyncProvider {
     return () => {
       this.listeners.delete(cb);
     };
+  }
+
+  /** Text frames from the server other than `pong` (e.g. `ai:paused`, core aiLive.ts). */
+  onText(cb: (msg: string) => void): () => void {
+    this.textListeners.add(cb);
+    return () => {
+      this.textListeners.delete(cb);
+    };
+  }
+
+  /** Sends a text frame on the open socket (e.g. the `ai:live` heartbeat). False when not connected. */
+  sendText(msg: string): boolean {
+    const s = this.socket;
+    if (!s || s.readyState !== OPEN) return false;
+    try {
+      s.send(msg);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Resolves when the first sync with the server completed (immediately if already synced). */
@@ -180,6 +201,7 @@ export class SyncProvider {
     this.awareness.off('update', this.onAwarenessUpdate);
     this.awareness.destroy();
     this.listeners.clear();
+    this.textListeners.clear();
   }
 
   private async open(): Promise<void> {
@@ -286,7 +308,10 @@ export class SyncProvider {
 
   private onMessage(socket: SocketLike, data: unknown): void {
     if (this.socket === socket) this.armHeartbeat(); // anything counts as a sign of life
-    if (typeof data === 'string') return; // pong
+    if (typeof data === 'string') {
+      if (data !== PONG && this.socket === socket) for (const l of [...this.textListeners]) l(data);
+      return;
+    }
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
     const dec = decoding.createDecoder(bytes);
     const enc = encoding.createEncoder();
