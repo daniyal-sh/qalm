@@ -23,14 +23,17 @@ export const FOOTER_LINKS = [
 /** Pages for sitemap.xml. */
 export const SITEMAP = ['/', '/privacy', '/terms', '/data-rights', '/contact'];
 
-export const SHARED_CSS = fs.readFileSync(new URL('./shared.css', import.meta.url), 'utf8').trim();
+/** Reads a source file with LF line endings, so the output is the same on a Windows (CRLF) checkout. */
+export const readText = (url) => fs.readFileSync(url, 'utf8').replace(/\r\n/g, '\n');
+
+export const SHARED_CSS = readText(new URL('./shared.css', import.meta.url)).trim();
 
 /** The honest note under the download buttons. */
 export const BUILD_NOTE =
   '<b>Early builds, not yet signed.</b> On Windows, SmartScreen may warn you: choose <b>More info</b>, then <b>Run anyway</b>. ' +
   'On Android, allow installs from your browser when it asks.';
 
-const MARK_SRC = fs.readFileSync(new URL('../../../assets/brand/qalm-mark.svg', import.meta.url), 'utf8').replace(/<!--.*?-->\s*/s, '');
+const MARK_SRC = readText(new URL('../../../assets/brand/qalm-mark.svg', import.meta.url)).replace(/<!--.*?-->\s*/s, '');
 
 /** The mark, coloured by the theme tokens. `id` keeps its mask unique on a page that shows it twice. */
 export function mark(id) {

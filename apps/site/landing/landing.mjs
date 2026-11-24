@@ -140,6 +140,6 @@ export function renderLanding() {
     FOOTER: footer(),
   });
 
-  const template = fs.readFileSync(new URL('./template.html', import.meta.url), 'utf8');
+  const template = fs.readFileSync(new URL('./template.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   return { html: fill(template, v), end: h.end };
 }
