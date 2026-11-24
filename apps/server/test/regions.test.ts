@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { Page, threadBox, transformPatch } from '@qalm/core';
+import { Page, mathReady, threadBox, transformPatch } from '@qalm/core';
 import { signIn, stroke, until } from './helpers';
 import { connectAgent, inkOf, notebook, serverDoc, textOf, tool } from './mcp-helpers';
 import { sessionOf } from '../src/grants';
@@ -84,9 +84,12 @@ describe('regions end to end', () => {
     const s = sessionOf('mdnb');
     n.page.addItem({ id: 'tb', type: 'text', x: 50, y: 100, w: 240, text: '**Area** is $\\int_0^1 x^2\\,dx$\n- `done`', fontSize: 16, color: '#27272a', format: 'md' });
     await until(async () => !!new Page(await serverDoc(`pg:mdnb:${n.pageId}`)).item('tb'));
-    // The crop is rendered by resvg with the Markdown fonts (bold, mono, maths); it comes back as an image.
+    // The crop is rendered by resvg with the Markdown fonts (bold, mono, maths); it comes back as an image. MathJax is
+    // loaded on demand, for the page with maths, before regions are measured and the crop drawn (no placeholder).
+    expect(mathReady()).toBe(false);
     const crop = await tool(token, 'read', { ref: 'p1@50,140,500,150', s });
     expect(hasImage(crop)).toBe(true);
+    expect(mathReady()).toBe(true);
     // An agent's Markdown comment is stored as written, and read back raw.
     expect(textOf(await tool(token, 'comment', { ref: 'p1', text: 'Use **u-substitution**: $u = x^2$' }))).toBe('Commented on p1 as thread C1');
     await until(() => n.page.comments().length === 1);

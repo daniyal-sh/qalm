@@ -83,8 +83,9 @@ function pathOf(d: string): SkPath | null {
 }
 
 /**
- * Re-renders when maths the app's time slice deferred can be filled in (`onMathDeferred`): the number to include in
- * what Markdown drawing memoises on. `enabled`: only pages with Markdown boxes listen.
+ * Re-renders when maths the app's time slice deferred, or maths waiting on MathJax (loaded on demand), can be filled in
+ * (`onMathDeferred`): the number to include in what Markdown drawing memoises on, and what measures Markdown boxes.
+ * `enabled`: only pages with Markdown boxes listen.
  */
 export function useMathFill(enabled: boolean): number {
   const [epoch, setEpoch] = React.useState(mathDeferredEpoch);
@@ -152,8 +153,12 @@ export function drawMarkdownText(c: SkCanvas, item: TextItem, faces: MdTypefaces
       const p = fallbackParagraph(op.text, op.font, op.size, item.color, fallbackFonts);
       p.paint(c, op.x, op.y - (p.getLineMetrics()[0]?.baseline ?? op.size));
       disposeLater(p as unknown as { dispose?: () => void });
-    } else if (op.k === 'text') c.drawText(op.text, op.x, op.y, paint, fontOf(faces[op.font], op.size));
-    else if (op.k === 'rect') {
+    } else if (op.k === 'text') {
+      // `alpha`: maths' placeholder (raw TeX, muted) until MathJax has loaded.
+      if (op.alpha !== undefined) paint.setAlphaf(op.alpha);
+      c.drawText(op.text, op.x, op.y, paint, fontOf(faces[op.font], op.size));
+      if (op.alpha !== undefined) paint.setColor(color);
+    } else if (op.k === 'rect') {
       paint.setAlphaf(op.alpha);
       c.drawRect(Skia.XYWHRect(op.x, op.y, op.w, op.h), paint);
       paint.setColor(color);

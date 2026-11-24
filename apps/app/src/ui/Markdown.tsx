@@ -29,6 +29,9 @@ function MathSvg({ box, size, color }: { box: MathBox; size: number; color: stri
   );
 }
 
+/** Opacity of maths' raw TeX while MathJax loads (core loads it on demand; text boxes show the same placeholder). */
+const PENDING_OPACITY = 0.55;
+
 function inlineStyle(m: MdInline & { t: 'text' | 'math' }, colors: { link: string; code: string }): TextStyle {
   const s: { -readonly [K in keyof TextStyle]: TextStyle[K] } = {};
   const { b, i, s: strike, code, href } = m.m;
@@ -56,8 +59,9 @@ function Inlines({ c: items, size, color }: { c: readonly MdInline[]; size: numb
         if (x.t === 'math') {
           const box = allowed.has(x) ? texToPath(x.tex, false) : null;
           if (box) return <MathSvg key={k} box={box} size={size} color={color} />;
+          // MathJax not loaded yet: the raw TeX, muted. A TeX error, past the limits or deferred: the source as code.
           return (
-            <Text key={k} style={inlineStyle({ ...x, m: { ...x.m, code: true } }, colors)}>
+            <Text key={k} style={box === undefined ? [inlineStyle(x, colors), styles.pending] : inlineStyle({ ...x, m: { ...x.m, code: true } }, colors)}>
               {`$${x.tex}$`}
             </Text>
           );
@@ -127,6 +131,12 @@ function Blocks({ blocks, size, color, depth = 0 }: { blocks: readonly MdBlock[]
             );
           case 'math': {
             const box = allowed.has(b) ? texToPath(b.tex, true) : null;
+            if (box === undefined)
+              return (
+                <View key={k} style={styles.mathBlock}>
+                  <Text style={[styles.pending, { fontFamily: font.mono, fontSize: 13, lineHeight: 19, color }]}>{`$$${b.tex}$$`}</Text>
+                </View>
+              );
             return box ? (
               <View key={k} style={styles.mathBlock} accessibilityLabel={b.tex}>
                 <MathSvg box={box} size={size} color={color} />
@@ -152,7 +162,8 @@ function Blocks({ blocks, size, color, depth = 0 }: { blocks: readonly MdBlock[]
 export function Markdown({ text, color }: { text: string; color?: string }) {
   const { c } = useTheme();
   const blocks = React.useMemo(() => parseMarkdown(text), [text]);
-  // Maths the time slice deferred (a long thread renders in one task) fills in on later renders.
+  // Maths the time slice deferred (a long thread renders in one task), or waiting on MathJax (loaded on demand), fills
+  // in on later renders.
   const [fill, setFill] = React.useState(mathDeferredEpoch);
   React.useEffect(() => onMathDeferred(() => setFill(mathDeferredEpoch())), []);
   const allowed = React.useMemo(() => allowedMath(blocks), [blocks, fill]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -171,5 +182,6 @@ const styles = StyleSheet.create({
   marker: { minWidth: 16, textAlign: 'right' },
   code: { borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8 },
   mathBlock: { alignItems: 'center', paddingVertical: 4 },
+  pending: { fontFamily: font.mono, opacity: PENDING_OPACITY },
   hr: { height: StyleSheet.hairlineWidth, marginVertical: 4 },
 });

@@ -8,6 +8,7 @@ import {
   encodeQinkRead,
   encodeQinkThread,
   cleanAsk,
+  loadMathFor,
   migratePage,
   resolveTarget,
   resolveThread,
@@ -194,6 +195,9 @@ export class AgentHub {
         out[id] = new Page(doc);
       }),
     );
+    // Markdown boxes with maths need MathJax (loaded on demand) before anything measures or draws them: their heights
+    // shape regions, and crops must never show maths' placeholder. Pages without maths don't load it.
+    await loadMathFor(Object.values(out).flatMap((p) => p.items()));
     return out;
   }
 

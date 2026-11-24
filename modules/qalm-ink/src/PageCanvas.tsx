@@ -667,7 +667,8 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
       box = box ? [Math.min(box[0], b[0]), Math.min(box[1], b[1]), Math.max(box[2], b[2]), Math.max(box[3], b[3])] : b;
     }
     return box;
-  }, [items, selection]);
+    // `fill`: a Markdown box's height changes when its maths fills in (MathJax loaded, or a deferred slice).
+  }, [items, selection, fill]);
 
   // Dense pages: a baked base image plus the newest items as vectors (bake.ts). Highlights are baked under the ink.
   const highlights = React.useMemo(
