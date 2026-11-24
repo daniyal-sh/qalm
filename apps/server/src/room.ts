@@ -3,9 +3,10 @@ import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import { AI_LIVE, AI_LIVE_TTL_MS, AI_PAUSE, AI_PAUSED, AI_PLAY, AI_PLAYING, AI_RESUME, AI_STOP, Notebook, Page, inkInBox, migratePage, summarizeThreads, type ThreadSummary } from '@qalm/core';
+import { AI_LIVE, AI_LIVE_TTL_MS, AI_PAUSE, AI_PAUSED, AI_PLAY, AI_PLAYING, AI_RESUME, AI_STOP, LectureDoc, Notebook, Page, inkInBox, migratePage, summarizeThreads, type LectureCrop, type LectureMeta, type ThreadSummary, type TranscriptSegment } from '@qalm/core';
 import { num, type Env } from './env';
-import { parseDocId, nbDocId, pgDocId, room, type DocRef } from './docs';
+import { parseDocId, nbDocId, pgDocId, lecDocId, room, type DocRef } from './docs';
+import { LectureCrops, type LectureInfo } from './lecture';
 import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit, type AgentWho, type PageEdit, type Presence } from './agent';
 
 const MSG_SYNC = 0;
@@ -50,6 +51,9 @@ export class DocRoom extends DurableObject<Env> {
   private docId: string | null = null;
   private ref: DocRef | null = null;
   private hub: AgentHub | null = null;
+  private crops: LectureCrops | null = null;
+  /** When the notebook room should next look for lecture crops (alarms are shared with the size report). */
+  private lectureDue: number | null = null;
   private syncedMeta = '';
   /** A client's transaction touched this page's comments (set just before the update event reports it). */
   private commentTouched = false;
@@ -141,6 +145,21 @@ export class DocRoom extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     this.sizeAlarm = false;
     await this.reportSize();
+    if (this.ref?.kind === 'nb') {
+      this.lectureDue = null;
+      const next = await this.lectureCrops().tick();
+      if (next !== null) this.scheduleLecture(next);
+    }
+  }
+
+  /** Asks for an alarm at `at` for lecture crops (an earlier pending alarm is kept). */
+  private scheduleLecture(at: number): void {
+    if (this.lectureDue !== null && this.lectureDue <= at) return;
+    this.lectureDue = at;
+    this.ctx.storage
+      .getAlarm()
+      .then((cur) => (cur === null || cur > at ? this.ctx.storage.setAlarm(at) : undefined))
+      .catch((e: unknown) => console.error('setAlarm failed', e));
   }
 
   /** The user whose cap this doc counts against: the library's user, or the notebook's owner. */
@@ -200,6 +219,11 @@ export class DocRoom extends DurableObject<Env> {
     if (this.kvGet<string>('docId') !== docId) this.kvPut('docId', docId);
   }
 
+  private lectureCrops(): LectureCrops {
+    if (this.ref?.kind !== 'nb') throw new Error('Lecture crops live in notebook rooms');
+    return (this.crops ??= new LectureCrops(this, this.env, this.ref.notebookId));
+  }
+
   private agents(): AgentHub {
     if (this.ref?.kind !== 'nb') throw new Error('Agent calls go to notebook rooms');
     return (this.hub ??= new AgentHub(this, this.env, this.ref.notebookId));
@@ -222,6 +246,14 @@ export class DocRoom extends DurableObject<Env> {
     } else if (ref.kind === 'nb') {
       this.agents().onIndexChanged();
       this.syncNotebookRow(ref.notebookId);
+    } else if (ref.kind === 'lec') {
+      // The notebook room keeps each session's state: crops while it records, transcript lines for agents.
+      const lec = new LectureDoc(this.doc);
+      const m = lec.meta();
+      const info: LectureInfo = { state: m.state, startedAt: m.startedAt, durationMs: m.durationMs, lastT: m.lastT, count: lec.transcriptCount(), ...(m.title ? { title: m.title } : {}) };
+      room(this.env, nbDocId(ref.notebookId))
+        .lectureChanged(nbDocId(ref.notebookId), ref.sessionId, info)
+        .catch((e: unknown) => console.error('lectureChanged failed', e));
     }
   }
 
@@ -435,6 +467,13 @@ export class DocRoom extends DurableObject<Env> {
         await room(this.env, id).purge(id);
       }),
     );
+    // Its lecture sessions too.
+    await Promise.all(
+      Object.keys(this.kvGet<Record<string, unknown>>('lectures') ?? {}).map(async (sid) => {
+        const id = lecDocId(notebookId, sid);
+        await room(this.env, id).purge(id);
+      }),
+    );
     await this.purge(docId);
   }
 
@@ -457,6 +496,8 @@ export class DocRoom extends DurableObject<Env> {
     this.sizeAlarm = false;
     await this.env.DB.prepare('DELETE FROM doc_sizes WHERE doc_id = ?1').bind(docId).run();
     this.hub = null;
+    this.crops = null;
+    this.lectureDue = null;
     this.doc.destroy();
     this.doc = new Y.Doc({ gc: true });
     this.listen();
@@ -473,6 +514,53 @@ export class DocRoom extends DurableObject<Env> {
     this.setDocId(docId);
     if (threads?.length) this.putThreads(threads);
     this.agents().onPageChanged(pageId, at, comment);
+    // A session recording here gets its crop once the pen rests (the agent wake rules).
+    if (this.lectureCrops().live().length) this.scheduleLecture(at + 1000);
+  }
+
+  // ---- lecture mode (docs/lecture-mode.md) ----
+
+  /** Session room → notebook room, on each client update of the session doc. */
+  async lectureChanged(docId: string, sessionId: string, info: LectureInfo): Promise<void> {
+    this.setDocId(docId);
+    const r = this.lectureCrops().update(sessionId, info);
+    if (r.grew) this.agents().onLectureChanged();
+    if (r.flush) {
+      const next = await this.lectureCrops().tick(sessionId);
+      if (next !== null) this.scheduleLecture(next);
+    } else if (info.state === 'recording') this.scheduleLecture(Date.now() + 1000);
+  }
+
+  /** A session was deleted (DELETE /lectures/…). */
+  lectureRemoved(docId: string, sessionId: string): void {
+    this.setDocId(docId);
+    this.lectureCrops().remove(sessionId);
+  }
+
+  /** Session room: meta, transcript and crops (MCP read). */
+  lectureData(docId: string): { meta: LectureMeta; transcript: TranscriptSegment[]; crops: LectureCrop[] } {
+    this.setDocId(docId);
+    const lec = new LectureDoc(this.doc);
+    return { meta: lec.meta(), transcript: lec.transcript(), crops: lec.crops() };
+  }
+
+  /** Session room: transcript segments in arrival order from `from` (live MCP lines). */
+  lectureTranscript(docId: string, from: number): TranscriptSegment[] {
+    this.setDocId(docId);
+    return new LectureDoc(this.doc).transcriptFrom(from);
+  }
+
+  /** Session room: every asset it holds (audio, crop PNGs), for deletion. */
+  lectureAssets(docId: string): string[] {
+    this.setDocId(docId);
+    return new LectureDoc(this.doc).assetShas();
+  }
+
+  /** Session room: the notebook room's crop (server origin: not reported back as a client update). */
+  addLectureCrop(docId: string, crop: LectureCrop): void {
+    this.setDocId(docId);
+    if (this.ref?.kind !== 'lec') throw new Error('Not a lecture room');
+    new LectureDoc(this.doc).addCrop(crop);
   }
 
   /** Notebook room: writes thread summaries from a page room into the index doc's thread index (see Notebook.putThreads). */
@@ -503,10 +591,14 @@ export class DocRoom extends DurableObject<Env> {
     }
   }
 
-  /** For the session list: the live AI access switch (unknown → off), whether it is playing, and the last client update. */
-  agentInfo(docId: string): { aiAccess: boolean; live: boolean; at: number } {
+  /**
+   * For the session list: the live AI access switch (unknown → off), whether it is playing, the last client update,
+   * and a recording lecture (`lecture L2 recording 12:40`, only while live; else null).
+   */
+  agentInfo(docId: string): { aiAccess: boolean; live: boolean; at: number; lecture: string | null } {
     this.setDocId(docId);
-    return { aiAccess: this.agents().aiAccess(), live: this.agents().isLive(), at: this.agents().lastClientUpdateAt() };
+    const a = this.agents();
+    return { aiAccess: a.aiAccess(), live: a.isLive(), at: a.lastClientUpdateAt(), lecture: a.liveLecture() };
   }
 
   /** For the editor's presence pill (GET /ai/presence). */

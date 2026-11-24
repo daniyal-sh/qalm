@@ -33,6 +33,11 @@ export interface Env {
   WAIT_TIMEOUT_MS?: string;
   /** How long one Play heartbeat keeps a notebook live (ms). Default AI_LIVE_TTL_MS (40000). Tests shorten it. */
   AI_LIVE_TTL_MS?: string;
+  /** Workers AI (lecture cloud transcription, Whisper). Missing: POST /lectures/transcribe answers 503. */
+  AI?: Ai;
+  /** Cloud transcription limits per user: requests per minute (default 6) and audio minutes per month (default 600). */
+  TRANSCRIBE_PER_MINUTE?: string;
+  TRANSCRIBE_MINUTES_PER_MONTH?: string;
 }
 
 /** What completeAuthorization() stores; reaches the MCP handler as ctx.props. */

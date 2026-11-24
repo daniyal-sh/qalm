@@ -13,7 +13,17 @@ import {
   resolveThread,
   renderRegionsSvg,
   threadLabel,
+  encodeLectureRead,
+  emptyLectures,
+  lectureLine,
+  parseLectureRef,
+  resolveLecture,
+  transcriptLine,
   type BBox,
+  type LectureCrop,
+  type LectureMeta,
+  type LectureReadPart,
+  type QinkLectures,
   type InkSeen,
   type QinkImage,
   type QinkRegions,
@@ -22,12 +32,20 @@ import {
   type QinkThreads,
 } from '@qalm/core';
 import type { Env } from './env';
-import { nbDocId, pgDocId, room } from './docs';
+import { lecDocId, nbDocId, pgDocId, room } from './docs';
+import type { LectureInfo } from './lecture';
 import type { DocRoom } from './room';
 
 export interface AgentConfig { idleMs: number; minIntervalMs: number; timeoutMs: number }
 /** Q-ink text plus, when regions need one, the image as SVG (the worker turns it into PNG). */
-export interface AgentResult { text: string; svg: string | null; changed: boolean; error?: boolean }
+export interface AgentResult {
+  text: string;
+  svg: string | null;
+  changed: boolean;
+  error?: boolean;
+  /** A lecture read: text and crop images (asset sha256) interleaved by time. Replaces text/svg in the MCP result. */
+  parts?: LectureReadPart[];
+}
 export type AgentEdit =
   /** `ref`: a region `R7` or a box `p3@120,300,260,80`. */
   | { op: 'transcribe'; ref: string; text: string }
@@ -51,6 +69,8 @@ interface AgentState {
   askCount: number;
   /** Thread entries already seen (missing in states saved before threads existed). */
   seen?: QinkSeen;
+  /** Transcript segments already sent, per lecture session (live lines, docs/lecture-mode.md §7). */
+  lect?: Record<string, number>;
 }
 
 const agentKey = (clientId: string) => `agent:${clientId}`;
@@ -214,7 +234,86 @@ export class AgentHub {
     const st = this.r.kvGet<AgentState>(agentKey(clientId));
     if (st) return st;
     // A new agent starts now: earlier asks are not replayed, and the first wake is not rate-limited.
-    return { rev: 0, deliveredAt: Date.now(), lastWakeAt: 0, askCount: this.nb().asks().length };
+    return {
+      rev: 0,
+      deliveredAt: Date.now(),
+      lastWakeAt: 0,
+      askCount: this.nb().asks().length,
+      // No replay of a lecture's transcript so far: lines start from now.
+      lect: Object.fromEntries(Object.entries(this.lectures()).map(([sid, l]) => [sid, l.count])),
+    };
+  }
+
+  // ---- lectures (docs/lecture-mode.md §7) ----
+
+  private lectures(): Record<string, LectureInfo> {
+    return this.r.kvGet<Record<string, LectureInfo>>('lectures') ?? {};
+  }
+
+  private lectureLabels(): QinkLectures {
+    return this.r.kvGet<QinkLectures>('lectureLabels') ?? emptyLectures();
+  }
+
+  /** A session's transcript grew: transcript lines wake waits too (with the rate limit, not the pen-idle rule). */
+  onLectureChanged(): void {
+    this.wakeAll();
+  }
+
+  /** `lecture L2 recording 12:40` for the session list, or null when nothing records. */
+  liveLecture(): string | null {
+    const labels = this.lectureLabels();
+    const live = Object.entries(this.lectures())
+      .filter(([, l]) => l.state !== 'stopped')
+      .sort((a, b) => b[1].startedAt - a[1].startedAt)[0];
+    const label = live && labels.byId[live[0]];
+    if (!live || !label) return null;
+    const mm = Math.floor(live[1].durationMs / 60_000), ss = Math.floor((live[1].durationMs % 60_000) / 1000);
+    return `lecture ${label} ${live[1].state} ${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  }
+
+  private hasTranscriptNews(st: AgentState): boolean {
+    return Object.entries(this.lectures()).some(([sid, l]) => l.count > (st.lect?.[sid] ?? 0));
+  }
+
+  /** New transcript segments per session since this agent's state, as Q-ink lines (and the counts to store). */
+  private async transcriptNews(st: AgentState): Promise<{ lines: string[]; lect: Record<string, number> }> {
+    const lect = { ...st.lect };
+    const labels = this.lectureLabels();
+    const lines: string[] = [];
+    for (const [sid, l] of Object.entries(this.lectures())) {
+      const from = lect[sid] ?? 0;
+      if (l.count <= from) continue;
+      const label = labels.byId[sid];
+      const docId = lecDocId(this.notebookId, sid);
+      const segs = await room(this.env, docId).lectureTranscript(docId, from);
+      if (label) for (const seg of segs) lines.push(transcriptLine(label, seg));
+      lect[sid] = from + segs.length;
+    }
+    return { lines, lect };
+  }
+
+  /** `read("L2")` / `read("L2@10:00")`: transcript and crops interleaved by time. */
+  private async readLecture(label: string, from: number): Promise<AgentResult> {
+    const sid = resolveLecture(this.lectureLabels(), label);
+    if (!sid || !this.lectures()[sid]) throw new Error(`No lecture ${label}; read("outline") lists them`);
+    const docId = lecDocId(this.notebookId, sid);
+    const d = await room(this.env, docId).lectureData(docId);
+    const parts = encodeLectureRead(label, d.meta, d.transcript, d.crops as LectureCrop[], from);
+    const text = parts.flatMap((p) => ('text' in p ? [p.text] : [])).join('\n');
+    return { text, svg: null, changed: false, parts };
+  }
+
+  /** Outline lines for the notebook's sessions (`L2 2026-11-24 47:10 stopped`). */
+  private lectureOutline(): string[] {
+    const labels = this.lectureLabels();
+    return Object.entries(this.lectures())
+      .sort((a, b) => a[1].startedAt - b[1].startedAt)
+      .flatMap(([sid, l]) => {
+        const label = labels.byId[sid];
+        if (!label) return [];
+        const meta: LectureMeta = { id: sid, notebookId: this.notebookId, startedAt: l.startedAt, durationMs: l.durationMs, state: l.state, lastT: l.lastT, transcriber: 'none', ...(l.title ? { title: l.title } : {}) };
+        return [lectureLine(label, meta)];
+      });
   }
 
   /**
@@ -277,9 +376,11 @@ export class AgentHub {
     const t0 = Date.now();
     // A new ask, comment or reply goes out at once; ink waits for a pause (and the rate limit).
     const urgent = asks.length > 0 || (this.r.kvGet<number>('lastCommentAt') ?? 0) > st.deliveredAt;
+    const talk = this.hasTranscriptNews(st);
     if (!urgent) {
-      if (!changedIds.length) return { retryAt: Infinity };
-      const ready = Math.max(this.lastClientUpdateAt() + cfg.idleMs, st.lastWakeAt + cfg.minIntervalMs);
+      if (!changedIds.length && !talk) return { retryAt: Infinity };
+      // Ink waits for the pen to rest; transcript lines alone only for the rate limit (the teacher keeps talking).
+      const ready = changedIds.length ? Math.max(this.lastClientUpdateAt() + cfg.idleMs, st.lastWakeAt + cfg.minIntervalMs) : st.lastWakeAt + cfg.minIntervalMs;
       if (t0 < ready) return { retryAt: ready };
     }
 
@@ -294,12 +395,14 @@ export class AgentHub {
     const prev: Record<string, InkSeen | undefined> = {};
     for (const id of Object.keys(pages)) prev[id] = this.r.kvGet<InkSeen>(inkKey(clientId, id));
     const u = encodeQinkUpdate(nb, pages, regions, prev, { session, rev: st.rev + 1, client: clientId, asks, threads, seen: st.seen });
+    const news = await this.transcriptNews(st);
+    if (news.lines.length) u.text = `${u.text}\n${news.lines.join('\n')}`;
     this.r.kvPut('regions', regions);
     this.r.kvPut('threads', threads);
     for (const [id, ink] of Object.entries(u.ink)) this.r.kvPut(inkKey(clientId, id), ink);
     // States saved before regions carry a line snapshot: drop it (pages without ink seen get a first look).
     const { snapshot: _old, ...rest } = st as AgentState & { snapshot?: unknown };
-    const next: AgentState = { ...rest, seen: u.seen, deliveredAt: t0, askCount: allAsks.length };
+    const next: AgentState = { ...rest, seen: u.seen, deliveredAt: t0, askCount: allAsks.length, lect: news.lect };
     // Nothing the agent can see changed (e.g. only a comment was added): absorb it and keep waiting.
     if (!asks.length && !u.text.includes('\n')) {
       this.r.kvPut(agentKey(clientId), next);
@@ -317,6 +420,8 @@ export class AgentHub {
     this.requireLive();
     const nb = this.nb();
     const r0 = ref.trim();
+    const lecture = parseLectureRef(r0);
+    if (lecture) return this.readLecture(lecture.label, lecture.from);
     if (/^c\d+$/i.test(r0)) {
       const threads = this.threads();
       const pages = await this.loadPages([resolveThread(threads, r0).pageId].filter((id) => nb.pages().some((p) => p.id === id)));
@@ -331,7 +436,8 @@ export class AgentHub {
     const regions = this.regions();
     const r = encodeQinkRead(nb, pages, regions, r0, who.clientId);
     this.r.kvPut('regions', regions);
-    return { text: r.text, svg: this.imageSvg(pages, r.image), changed: false };
+    const text = r0 === 'outline' ? [r.text, ...this.lectureOutline()].join('\n') : r.text;
+    return { text, svg: this.imageSvg(pages, r.image), changed: false };
   }
 
   async edit(edit: AgentEdit, who: AgentWho): Promise<string> {

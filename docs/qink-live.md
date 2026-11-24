@@ -1,6 +1,6 @@
 # Q-ink Live: live notes for AI agents
 
-Status: v1.0 (regions replace lines; no on-device recognition) · Owner: qalm-core / mcp server
+Status: v1.1 (regions; lecture recordings §5) · Owner: qalm-core / mcp server
 
 Goal: an agent anywhere can follow a live note-taking session accurately with few tokens.
 Keep it simple. There's no server-side AI, no analyzers, no recognizer and no memory store.
@@ -156,12 +156,13 @@ updatedAt }`, stored per page.
 
 ## 4. MCP tools (4)
 
-Refs: a region `R7`, a box `p6@120,300,260,80` (x,y,w,h on the grid), a page `p6`, a thread `C5`, `outline`, `pdf:p2`.
+Refs: a region `R7`, a box `p6@120,300,260,80` (x,y,w,h on the grid), a page `p6`, a thread `C5`, `outline`, `pdf:p2`,
+a lecture `L2` (or `L2@10:00`).
 
 | Tool | Args | Does |
 |---|---|---|
 | `wait` | `s?` | waits for the next update (long-poll). With no `s`, it lists the live sessions the agent can see |
-| `read` | `ref` | anything on demand: `outline`; a page `p3` (all its ink as regions, read ones as text); a region `R7` (its strokes now, plus any readings of them, marked `stale` if so); a box (a crop of everything in it); `pdf:p2`; a thread `C5` |
+| `read` | `ref` | anything on demand: `outline` (pages, then lecture recordings); a page `p3` (all its ink as regions, read ones as text); a region `R7` (its strokes now, plus any readings of them, marked `stale` if so); a box (a crop of everything in it); `pdf:p2`; a thread `C5`; a lecture `L2` (§5) |
 | `transcribe` | `ref`, `text` | saves the agent's reading of a region or a box's ink (strokes whose centre is inside). The student can edit it |
 | `comment` | `ref` or `thread`, `text`, `resolve?` | with `ref` (a region, box or page) starts a thread on those strokes, with the box as a fallback position, and says its label (`as thread C8`); with `thread` (`C3`) replies in it. `resolve` also marks the thread resolved: use it only when the thread is trivially done. Never changes ink |
 
@@ -214,7 +215,40 @@ leaving or backgrounding the app, signing out, losing the connection or the devi
   and pauses every playing device when it turns on. An old app's header may still say "… is following along" while
   an agent merely waits on a paused notebook. Existing notebooks simply open paused.
 
-## 5. Rough budget (one hour of math tutoring)
+## 5. Lecture recordings
+
+A teacher can record a **lecture** (`docs/lecture-mode.md`): audio, every pen event and a timed transcript on one
+timeline. Agents still only read; the lecture adds no tools.
+
+- **Labels:** sessions are `L1`, `L2`, … notebook-wide, never reused.
+- **Live:** while a lecture records, `wait()` lists it (`s=calc2 "Calculus" live lecture L2 recording 12:40`) and
+  updates carry its **new transcript lines** after the region lines, one per segment, with the time on the lecture's
+  timeline:
+
+  ```
+  #q s=calc2 r=16 p1 1000x1415
+  R6 [1] p1 @99,300 420x70 +12
+  L2 12:31 "so we substitute u equals x squared"
+  L2 12:38 "and du is two x dx"
+  ```
+
+  Talk alone also wakes `wait` (at most one update per 20 s; it doesn't wait for the pen to rest). A new agent gets
+  lines from when it joined.
+- **Crops:** at each writing pause the recording stores the same regions an agent gets (same engine and `R` labels;
+  `read("R6")` works on them).
+- **After:** `read("outline")` ends with one line per lecture (`L2 2026-11-24 47:10 stopped`). `read("L2")` returns
+  the transcript and crops interleaved by time, the crop images as image blocks right after their lines; one read
+  covers 10 minutes and at most 8 images, and ends with `more: read("L2@10:00")` when there is more:
+
+  ```
+  #q L2 00:00-10:00 of 47:10 stopped
+  00:12 "today: integration by substitution"
+  00:41 R40 [1] p1 @99,154 596x68 +20
+  [image]
+  01:05 "what do we pick for u?"
+  ```
+
+## 6. Rough budget (one hour of math tutoring)
 
 About 60 updates an hour, priced at GPT-6 Luna's standard rates. Image tokens are estimated as width × height / 750.
 

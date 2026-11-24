@@ -73,6 +73,8 @@ export interface GrantedNotebook extends NotebookChoice {
   live: boolean;
   /** The student's last edit in the notebook (ms). */
   at: number;
+  /** `lecture L2 recording 12:40` while a lecture session records (docs/lecture-mode.md §7), else null. */
+  lecture: string | null;
 }
 
 /**
@@ -85,7 +87,7 @@ export async function grantedNotebooks(env: Env, g: GrantRow): Promise<GrantedNo
   const infos = await Promise.all(
     notebooks.map(async (n) => {
       const info = await room(env, nbDocId(n.id)).agentInfo(nbDocId(n.id));
-      return { ...n, aiAccess: info.aiAccess, live: info.live, at: info.at };
+      return { ...n, aiAccess: info.aiAccess, live: info.live, at: info.at, lecture: info.lecture };
     }),
   );
   return infos.filter((n) => n.aiAccess);

@@ -1,6 +1,7 @@
 import type { Env } from './env';
 import { num } from './env';
 import { handleAccount } from './account';
+import { handleLectures } from './lecture';
 import { handleAuth, requireUser, TooManyRequests } from './auth';
 import { handleAuthorize, messagePage } from './consent';
 import { canAccess, deleteNotebook, nbDocId, parseDocId, room } from './docs';
@@ -12,11 +13,11 @@ const TICKET_TTL_MS = 30_000;
 const SHA = /^[0-9a-f]{64}$/;
 
 /** Paths the app calls cross-origin (web build on another origin, Electron from file://). Bearer auth only, no cookies. */
-const CORS_PATHS = /^\/(auth\/(email\/start|email\/lookup|email\/verify|refresh|logout)|account\/delete(\/start)?|me\/storage|sync\/ticket|notebooks\/[^/]+|assets\/[^/]+|ai\/.*|health)$/;
+const CORS_PATHS = /^\/(auth\/(email\/start|email\/lookup|email\/verify|refresh|logout)|account\/delete(\/start)?|me\/storage|sync\/ticket|notebooks\/[^/]+|assets\/[^/]+|ai\/.*|lectures\/.*|health)$/;
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Audio-Duration-Ms',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -41,7 +42,7 @@ async function handle(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
     try {
-      const res = (await handleAuth(req, env, path)) ?? (await handleAccount(req, env, path)) ?? (await handleAuthorize(req, env, path)) ?? (await route(req, env, url));
+      const res = (await handleAuth(req, env, path)) ?? (await handleAccount(req, env, path)) ?? (await handleLectures(req, env, path)) ?? (await handleAuthorize(req, env, path)) ?? (await route(req, env, url));
       return res ?? error(404, 'Not found');
     } catch (e) {
       if (e instanceof HttpError) {

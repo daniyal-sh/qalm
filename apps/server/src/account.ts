@@ -79,7 +79,7 @@ export async function deleteAccount(env: Env, user: UserRow): Promise<void> {
   const userId = user.id;
 
   // 1. Notebook data: every notebook room (and the page rooms it knows), every room that reported a size for this
-  //    user, and the library room. Purging an already-empty room is harmless.
+  //    user (lecture sessions included), and the library room. Purging an already-empty room is harmless.
   const nbs = (await env.DB.prepare('SELECT id FROM notebooks WHERE owner_id = ?1').bind(userId).all<{ id: string }>()).results;
   for (const { id } of nbs) await room(env, nbDocId(id)).purgeNotebook(nbDocId(id));
   const docs = (await env.DB.prepare('SELECT doc_id FROM doc_sizes WHERE user_id = ?1').bind(userId).all<{ doc_id: string }>()).results;
@@ -105,7 +105,7 @@ export async function deleteAccount(env: Env, user: UserRow): Promise<void> {
   } while (cursor);
 
   // 4. D1 rows, the user row last.
-  const byUser = ['user_assets', 'doc_sizes', 'grants', 'auth_requests', 'activity', 'sessions', 'sync_tickets', 'notebooks'];
+  const byUser = ['user_assets', 'doc_sizes', 'transcribe_usage', 'grants', 'auth_requests', 'activity', 'sessions', 'sync_tickets', 'notebooks'];
   await env.DB.batch([
     ...byUser.map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE ${t === 'notebooks' ? 'owner_id' : 'user_id'} = ?1`).bind(userId)),
     ...(user.email

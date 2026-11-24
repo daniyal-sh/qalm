@@ -7,6 +7,8 @@ export default defineConfig(async () => {
     plugins: [
       cloudflareTest({
         wrangler: { configPath: './wrangler.jsonc' },
+        // Workers AI (lecture transcription) is always faked in tests (setTestAi): no remote session, no login needed.
+        remoteBindings: false,
         miniflare: {
           bindings: {
             TEST_MIGRATIONS: migrations,
@@ -21,6 +23,8 @@ export default defineConfig(async () => {
             // Pin anything a developer's local .dev.vars might set (vitest-pool-workers reads it), so tests are hermetic.
             MAGIC_LINK_URL: 'https://qalm.example/app/auth/email/verify',
             EMAIL_PROVIDER: 'console',
+            TRANSCRIBE_PER_MINUTE: '3',
+            TRANSCRIBE_MINUTES_PER_MONTH: '1',
           },
         },
       }),
