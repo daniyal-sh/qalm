@@ -101,11 +101,12 @@ export function viewCentre(
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-/** A text box holding pasted text, centred on `at` and kept on the page. */
+/** A Markdown text box holding pasted text, centred on `at` and kept on the page. */
 export function pastedText(text: string, at: { x: number; y: number }, size: { w: number; h: number }, color: string, id: string): TextItem {
   const clean = text.replace(/\r\n?/g, '\n').replace(/\s+$/, '');
   const w = Math.min(DEFAULT_TEXT_WIDTH * 1.5, size.w - 48);
-  const base = { text: clean, w, fontSize: DEFAULT_TEXT_SIZE };
+  // A new box, so Markdown (`format: 'md'`) like a typed one.
+  const base = { text: clean, w, fontSize: DEFAULT_TEXT_SIZE, format: 'md' as const };
   const h = textHeight(base);
   return { id, type: 'text', ...base, color, x: clamp(at.x - w / 2, 12, size.w - w - 12), y: clamp(at.y - h / 2, 12, Math.max(12, size.h - h - 12)) };
 }
