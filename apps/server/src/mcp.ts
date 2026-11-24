@@ -5,12 +5,13 @@ import { activeGrant, grantedNotebooks, sessionOf, userNotebooks, type GrantRow,
 import { svgToPng } from './png';
 import { b64, json, now } from './util';
 import type { AgentResult } from './agent';
+import { LEGACY_VERSIONS as PROTOCOL_VERSIONS, SERVER_INFO, isModern, serveModern } from './mcp-protocol';
 
 /**
  * MCP over Streamable HTTP (stateless, JSON responses). POST /mcp carries JSON-RPC; there is no server-initiated
- * stream, so GET answers 405 as the transport spec allows.
+ * stream, so GET answers 405 as the transport spec allows. Dual-era: 2026-07-28 requests (version in `_meta`) are
+ * validated and shaped in mcp-protocol.ts; `initialize` and everything else is served here as for 2025-11-25.
  */
-const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
 const INSTRUCTIONS =
   'qalm notebooks in Q-ink Live format. Call wait() to list sessions, then wait(s) in a loop to follow live writing. ' +
@@ -53,7 +54,7 @@ const TOOLS = [
     name: 'comment',
     description:
       `Starts a comment thread on ${REF} or a page "p3" (it follows the ink when moved), or replies in a thread (thread "C3", e.g. to answer a note, re or ask). ` +
-      'Set resolve only when the thread is trivially done (e.g. the student said thanks). Never changes ink.',
+      'text is Markdown with TeX maths ($…$, $$…$$). Set resolve only when the thread is trivially done (e.g. the student said thanks). Never changes ink.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -74,6 +75,8 @@ type Content = { type: 'text'; text: string } | { type: 'image'; data: string; m
 interface ToolResult { content: Content[]; isError?: boolean }
 
 class ToolError extends Error {}
+/** The HTTP request a call came in on: its signal aborts when the client disconnects. */
+interface Live { signal: AbortSignal; waitUntil(p: Promise<unknown>): void }
 
 const MAX_TEXT = 4000;
 
@@ -86,11 +89,13 @@ export const mcpHandler = {
     } catch {
       return json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }, 400);
     }
+    const live: Live = { signal: req.signal, waitUntil: (p) => ctx.waitUntil(p) };
+    if (isModern(req, body)) return serveModern(req, body, INSTRUCTIONS, (m) => handle(m, env, ctx.props, live));
     const batch = Array.isArray(body);
     const msgs = (batch ? body : [body]) as RpcMsg[];
     const out = [];
     for (const m of msgs) {
-      const r = await handle(m, env, ctx.props);
+      const r = await handle(m, env, ctx.props, live);
       if (r) out.push(r);
     }
     if (!out.length) return new Response(null, { status: 202 });
@@ -98,7 +103,7 @@ export const mcpHandler = {
   },
 };
 
-async function handle(m: RpcMsg, env: Env, props: McpProps): Promise<object | null> {
+async function handle(m: RpcMsg, env: Env, props: McpProps, live?: Live): Promise<object | null> {
   if (!m || typeof m !== 'object' || typeof m.method !== 'string') {
     return m && 'id' in m ? { jsonrpc: '2.0', id: m.id ?? null, error: { code: -32600, message: 'Invalid request' } } : null;
   }
@@ -111,7 +116,7 @@ async function handle(m: RpcMsg, env: Env, props: McpProps): Promise<object | nu
       return ok({
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'qalm', title: 'qalm by Apollo', version: '0.1.0' },
+        serverInfo: SERVER_INFO,
         instructions: INSTRUCTIONS,
       });
     }
@@ -124,7 +129,7 @@ async function handle(m: RpcMsg, env: Env, props: McpProps): Promise<object | nu
       const args = (m.params?.arguments ?? {}) as Record<string, unknown>;
       if (!TOOLS.some((t) => t.name === name)) return fail(-32602, `Unknown tool: ${name}`);
       try {
-        return ok(await callTool(env, props, name, args));
+        return ok(await callTool(env, props, name, args, live));
       } catch (e) {
         if (e instanceof ToolError || e instanceof Error) return ok({ content: [{ type: 'text', text: e.message }], isError: true });
         throw e;
@@ -167,7 +172,7 @@ async function target(env: Env, g: GrantRow, s: unknown): Promise<NotebookChoice
   return hit;
 }
 
-async function callTool(env: Env, props: McpProps, name: string, args: Record<string, unknown>): Promise<ToolResult> {
+async function callTool(env: Env, props: McpProps, name: string, args: Record<string, unknown>, live?: Live): Promise<ToolResult> {
   const g = await activeGrant(env, props.grantId);
   if (!g || g.user_id !== props.userId) throw new ToolError('Access to qalm has expired or was revoked. Reconnect to continue.');
 
@@ -193,7 +198,12 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
   await env.DB.prepare('UPDATE grants SET last_used_at = ?2, last_session = ?3 WHERE id = ?1').bind(g.id, now(), session).run();
 
   if (name === 'wait') {
-    const r = await stub.agentWait(docId, who, session, agentCfg(env));
+    // A client that disconnects cancels its wait (MCP 2026-07-28 cancellation; legacy responses can't be resumed
+    // either), so nothing is marked delivered that the client never got.
+    const waitId = crypto.randomUUID();
+    const cancel = () => live?.waitUntil(stub.agentCancel(docId, waitId));
+    live?.signal.addEventListener('abort', cancel);
+    const r = await stub.agentWait(docId, who, session, agentCfg(env), waitId).finally(() => live?.signal.removeEventListener('abort', cancel));
     return result(env, g, 'wait', `${nb.title}${r.changed ? '' : r.text.endsWith(' paused') ? ' (paused)' : ' (no changes)'}`, r);
   }
   if (name === 'read') {

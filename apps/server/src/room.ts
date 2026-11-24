@@ -661,13 +661,19 @@ export class DocRoom extends DurableObject<Env> {
     return this.agents().presence();
   }
 
-  async agentWait(docId: string, who: AgentWho, session: string, cfg: AgentConfig): Promise<AgentResult> {
+  async agentWait(docId: string, who: AgentWho, session: string, cfg: AgentConfig, waitId?: string): Promise<AgentResult> {
     this.setDocId(docId);
     try {
-      return await this.agents().wait(who, session, cfg);
+      return await this.agents().wait(who, session, cfg, waitId);
     } catch (e) {
       return { text: e instanceof Error ? e.message : String(e), svg: null, changed: false, error: true };
     }
+  }
+
+  /** The MCP client of wait `waitId` disconnected: end that wait without delivering. */
+  agentCancel(docId: string, waitId: string): void {
+    this.setDocId(docId);
+    this.agents().cancel(waitId);
   }
 
   async agentRead(docId: string, ref: string, who: AgentWho): Promise<AgentResult> {

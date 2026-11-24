@@ -1,5 +1,5 @@
 import type { BBox, ImageItem, Item, PageInfo, ShapeItem, TextItem } from '@qalm/core';
-import { inkPaint, itemBBox, itemsOnPaper, paperPattern, shapePolylines, strokeOutline } from '@qalm/core';
+import { inkPaint, itemBBox, itemsOnPaper, layoutMarkdown, rendersMarkdown, paperPattern, shapePolylines, strokeOutline } from '@qalm/core';
 import {
   BlendMode,
   Canvas,
@@ -33,6 +33,7 @@ import notoMath from '../assets/fonts/NotoSansMath-Subset.ttf';
 import { bakeBudget, jobStillValid, planBake, type Baked, type BakePlan } from './bake';
 import { disposeLater } from './dispose';
 import { provideTextFonts, textParagraph } from './textMetrics';
+import { drawMarkdownText, markdownPicture, provideMarkdownFallback, useMathFill, useMdTypefaces, type MdTypefaces } from './markdownText';
 import { INK_CHUNK, inkGeometryKey, inkRuns, sameItems, type InkItem, type Run } from './inkRuns';
 import { traceOutline } from './outlinePath';
 import { usePageImage } from './usePageImage';
@@ -385,12 +386,14 @@ function drawBackdrop(c: SkCanvas, b: Backdrop, pageW: number, pageH: number): v
 }
 
 /** Draws one item onto a bake surface (page units), as the declarative tree draws it. Images are never baked. */
-function drawItem(c: SkCanvas, it: Item, pathOf: (it: InkItem) => SkPath, paints: Map<string, SkPaint>, fonts: SkTypefaceFontProvider | null): void {
+function drawItem(c: SkCanvas, it: Item, pathOf: (it: InkItem) => SkPath, paints: Map<string, SkPaint>, fonts: SkTypefaceFontProvider | null, md: MdTypefaces | null): void {
   if (it.type === 'stroke' || it.type === 'shape') {
     const k = paintKey(it);
     let paint = paints.get(k);
     if (!paint) paints.set(k, (paint = skiaInkPaint(it)));
     c.drawPath(pathOf(it), paint);
+  } else if (it.type === 'text' && rendersMarkdown(it)) {
+    if (md && fonts) drawMarkdownText(c, it, md);
   } else if (it.type === 'text' && fonts) {
     const para = textParagraph(it, fonts);
     c.save();
@@ -435,6 +438,7 @@ function useBase(
   pageH: number,
   live: ReadonlySet<string> | null,
   fonts: SkTypefaceFontProvider | null,
+  md: MdTypefaces | null,
   backdrop: Backdrop,
   pathOf: (it: InkItem) => SkPath,
 ): { plan: BakePlan; base: Base | null; hadBase: boolean } {
@@ -444,7 +448,10 @@ function useBase(
   const failed = React.useRef(false);
   const running = React.useRef<RunningBake | null>(null);
   const [version, setVersion] = React.useState(0);
-  const bakeable = React.useCallback((it: Item) => it.type === 'stroke' || it.type === 'shape' || (it.type === 'text' && !!fonts), [fonts]);
+  const bakeable = React.useCallback(
+    (it: Item) => it.type === 'stroke' || it.type === 'shape' || (it.type === 'text' && (rendersMarkdown(it) ? !!md && !!fonts : !!fonts)),
+    [fonts, md],
+  );
   const plan = React.useMemo(() => {
     if (!BAKE_ENABLED) return NO_BAKE;
     const p = planBake(base.current?.baked ?? null, items, target, bakeable, live);
@@ -453,8 +460,8 @@ function useBase(
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [items, target.key, target.w, target.h, bakeable, live, version],
   );
-  const inputs = React.useRef({ backdrop, pathOf, fonts });
-  inputs.current = { backdrop, pathOf, fonts };
+  const inputs = React.useRef({ backdrop, pathOf, fonts, md });
+  inputs.current = { backdrop, pathOf, fonts, md };
 
   // A page that didn't fit the budget tries again when another page lets go of its base.
   React.useEffect(() => bakeBudget.onRelease(() => !base.current && !running.current && setVersion((v) => v + 1)), []);
@@ -502,7 +509,7 @@ function useBase(
       c.save();
       c.scale(sx, sy);
       const paints = new Map<string, SkPaint>();
-      for (let i = job.from; i < job.to; i++) drawItem(c, items[i]!, inputs.current.pathOf, paints, inputs.current.fonts);
+      for (let i = job.from; i < job.to; i++) drawItem(c, items[i]!, inputs.current.pathOf, paints, inputs.current.fonts, inputs.current.md);
       c.restore();
       const image = surface.makeImageSnapshot();
       disposeLater(surface, ...paints.values());
@@ -550,7 +557,7 @@ function useBase(
         drawBackdrop(c, inputs.current.backdrop, pageW, pageH);
       }
       const c = surface.getCanvas();
-      while (i < job.to && now() - t0 < BAKE_SLICE_MS) drawItem(c, snapshot[i++]!, inputs.current.pathOf, paints, inputs.current.fonts);
+      while (i < job.to && now() - t0 < BAKE_SLICE_MS) drawItem(c, snapshot[i++]!, inputs.current.pathOf, paints, inputs.current.fonts, inputs.current.md);
       if (i < job.to) {
         timer = setTimeout(step, 0);
         return;
@@ -586,6 +593,17 @@ function useBase(
   return { plan, base: plan.use ? base.current : null, hadBase: hadBase.current };
 }
 
+/** A Markdown text box (`format: 'md'`): core's layout, recorded as a picture. */
+function MarkdownTextNode({ item, md, fonts }: { item: TextItem; md: MdTypefaces; fonts: SkTypefaceFontProvider; fill: number }) {
+  // Recorded again when its layout changes: a complete layout is cached (the same object), so maths filling in on other
+  // boxes doesn't re-record this one; an incomplete one is new each time (`fill` re-renders it). `fonts`: fallback runs
+  // are measured with them.
+  const layout = layoutMarkdown(item.text, item.w, item.fontSize);
+  const picture = React.useMemo(() => markdownPicture(item, md, layout), [item.x, item.y, item.rot, item.color, layout, md, fonts]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => () => disposeLater(picture as unknown as { dispose?: () => void }), [picture]);
+  return <Picture picture={picture} />;
+}
+
 function TextNode({ item, fonts }: { item: TextItem; fonts: SkTypefaceFontProvider }) {
   const paragraph = React.useMemo(() => textParagraph(item, fonts), [item.color, item.fontSize, item.text, item.w, fonts]); // eslint-disable-line react-hooks/exhaustive-deps
   const t = turned(item.x, item.y, item.rot);
@@ -614,7 +632,27 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
   // Figtree, falling back to Noto Sans Math (maths symbols and Greek): see `TEXT_FONTS`.
   const fonts = useFonts({ Figtree: [figtree], NotoSansMath: [notoMath] });
   // Text boxes' heights (frames, hit boxes) are measured with this font once it has loaded.
-  if (fonts) provideTextFonts(fonts);
+  if (fonts) {
+    provideTextFonts(fonts);
+    provideMarkdownFallback(fonts);
+  }
+  // Markdown text boxes' fonts (bold, italic, mono, maths), loaded only for pages that have one.
+  const hasMd = React.useMemo(() => items.some((it) => it.type === 'text' && rendersMarkdown(it)), [items]);
+  const md = useMdTypefaces(hasMd);
+  // Maths the app's time slice deferred: redraw (and re-bake) the page's Markdown boxes once it's ready.
+  const fill = useMathFill(hasMd);
+  // What the page's Markdown boxes draw while some are incomplete (maths deferred by the time slice, or waiting on
+  // MathJax): part of the bake key, so only pages whose boxes actually change are baked again as maths fills in.
+  const mdProgress = React.useMemo(() => {
+    if (!hasMd) return '';
+    let s = '';
+    for (const it of items) {
+      if (it.type !== 'text' || !rendersMarkdown(it)) continue;
+      const l = layoutMarkdown(it.text, it.w, it.fontSize);
+      if (l.pending || l.partial) s += `${it.id}:${l.pending ? 'p' : ''}${l.ops.length}:${l.ops.reduce((n, o) => n + (o.k === 'path' ? 1 : 0), 0)};`;
+    }
+    return s;
+  }, [items, hasMd, fill]); // eslint-disable-line react-hooks/exhaustive-deps
   const pdf = usePageImage(pdfImage);
   const bounds = React.useMemo(() => Skia.XYWHRect(-pageW, -pageH, pageW * 3, pageH * 3), [pageW, pageH]);
   const liveIds = React.useMemo(() => (live?.ids.length ? new Set(live.ids) : null), [live?.ids]);
@@ -643,7 +681,8 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
       box = box ? [Math.min(box[0], b[0]), Math.min(box[1], b[1]), Math.max(box[2], b[2]), Math.max(box[3], b[3])] : b;
     }
     return box;
-  }, [items, selection]);
+    // `fill`: a Markdown box's height changes when its maths fills in (MathJax loaded, or a deferred slice).
+  }, [items, selection, fill]);
 
   // Dense pages: a baked base image plus the newest items as vectors (bake.ts). Highlights are baked under the ink.
   const highlights = React.useMemo(
@@ -665,9 +704,9 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
   const backdrop = React.useMemo((): Backdrop => ({ ...paper, pdf, highlights }), [paper, pdf, highlights]);
   const target = React.useMemo(() => {
     const ratio = PixelRatio.get();
-    return { w: Math.round(width * ratio), h: Math.round(height * ratio), key: `${objectId(paper)}|${objectId(pdf)}|${fonts ? 1 : 0}|${JSON.stringify(highlights)}` };
-  }, [width, height, paper, pdf, fonts, highlights]);
-  const { plan, base, hadBase } = useBase(items, target, pageW, pageH, liveIds, fonts, backdrop, ink.pathOf);
+    return { w: Math.round(width * ratio), h: Math.round(height * ratio), key: `${objectId(paper)}|${objectId(pdf)}|${fonts ? 1 : 0}|${md ? 1 : 0}|${mdProgress}|${JSON.stringify(highlights)}` };
+  }, [width, height, paper, pdf, fonts, md, mdProgress, highlights]);
+  const { plan, base, hadBase } = useBase(items, target, pageW, pageH, liveIds, fonts, md, backdrop, ink.pathOf);
   const tailItems = React.useMemo(() => (base ? items.slice(plan.tailStart) : NO_ITEMS), [base, items, plan.tailStart]);
   const tail = useInk(tailItems, bounds, liveIds);
   // A dense page seen for the first time shows its paper until the base is ready (replaying thousands of paths on the
@@ -694,7 +733,8 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
       }
       const it = run.item;
       let node: React.ReactElement | null = null;
-      if (it.type === 'text') node = fonts ? <TextNode key={it.id} item={it} fonts={fonts} /> : null;
+      if (it.type === 'text' && rendersMarkdown(it)) node = md && fonts ? <MarkdownTextNode key={it.id} item={it} md={md} fonts={fonts} fill={fill} /> : null;
+      else if (it.type === 'text') node = fonts ? <TextNode key={it.id} item={it} fonts={fonts} /> : null;
       else {
         const uri = assetUri?.(it.assetId);
         node = uri ? <ImageNode key={it.id} item={it} uri={uri} /> : null;

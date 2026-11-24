@@ -74,6 +74,9 @@ try {
   win.on('console', (m) => m.type() === 'error' && errors.push(`console: ${m.text()}`));
   win.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   win.on('requestfailed', (r) => errors.push(`requestfailed: ${r.url()} ${r.failure()?.errorText}`));
+  // Every URL the page asked for (lazy chunks: Metro removes their script tag once run, and app:// has no resource timing).
+  const requested = [];
+  win.on('request', (r) => requested.push(r.url()));
 
   // 1. Library, after the sign-in screen when the build has a server.
   const library = win.getByText('All notebooks').first();
@@ -243,6 +246,45 @@ try {
       throw new Error(`after undo: ${JSON.stringify(undone.map((it) => it.kind ?? it.type))}`);
     }
     log('live shape: one undo brought the hand-drawn stroke back; screenshots in', shots);
+
+    // 4b2. A Markdown text box: type, use the format bar (focus stays in the box), leave it, and it renders formatted.
+    // MathJax is its own chunk, fetched only once maths is drawn.
+    const mathChunk = () => requested.some((u) => /\/mathjax-[^/]*\.js$/.test(u));
+    if (!requested.some((u) => /\/_expo\/static\/js\//.test(u))) throw new Error(`no app bundle requests seen: ${requested.slice(0, 5)}`);
+    if (mathChunk()) throw new Error('the MathJax chunk loaded before any maths was drawn');
+    await win.getByLabel('Text box').first().click();
+    const tx = box.x + box.width * 0.12;
+    const ty = box.y + Math.min(box.height, 600) * 0.75;
+    await win.mouse.click(tx, ty);
+    const editor = win.getByPlaceholder('Type here').first();
+    await editor.waitFor({ timeout: 10_000 });
+    await win.keyboard.type('Area ');
+    const bar = win.getByRole('toolbar', { name: 'Format text' }).first();
+    await bar.waitFor({ timeout: 10_000 });
+    await bar.getByLabel('Bold').click();
+    const focused = await win.evaluate(() => document.activeElement?.getAttribute('placeholder'));
+    if (focused !== 'Type here') throw new Error(`the format bar took the focus (${focused})`);
+    await win.keyboard.type('under');
+    await win.keyboard.press('End');
+    await win.keyboard.type(' is ');
+    await bar.getByLabel('Maths').click();
+    await win.keyboard.type('\\int_0^1 x^2\\,dx');
+    await win.keyboard.press('End');
+    await win.keyboard.type('\n');
+    await bar.getByLabel('Bulleted list').click();
+    await win.keyboard.type('done');
+    await shot('text-1-editing.png');
+    await win.keyboard.press('Escape');
+    await win.waitForTimeout(800);
+    if (await bar.isVisible()) throw new Error('the format bar stayed after typing ended');
+    await shot('text-2-rendered.png');
+    await win.getByLabel('Lasso').first().click();
+    const texts = (await pageItems()).filter((it) => it.type === 'text');
+    const want = 'Area **under** is $\\int_0^1 x^2\\,dx$\n- done';
+    if (texts.length !== 1 || texts[0].format !== 'md' || texts[0].text !== want) throw new Error(`text box: ${JSON.stringify(texts)}`);
+    log('markdown text box: format bar kept focus; stored as format md:', JSON.stringify(texts[0].text));
+    if (!mathChunk()) throw new Error('the MathJax chunk never loaded for the maths in the text box');
+    log('markdown text box: the MathJax chunk loaded once maths was typed');
 
     // A pen stroke along (x0, y) → (x1, y) in `n` steps (`dy` bends it), then lifted.
     const penLine = async (pts) => {
@@ -547,6 +589,18 @@ try {
   if (!existsSync(pdfOut)) throw new Error('export wrote nothing');
   if (!whole()) throw new Error(`export is not a whole PDF (starts ${JSON.stringify(readFileSync(pdfOut).subarray(0, 5).toString('latin1'))})`);
   log(`exported ${readFileSync(pdfOut).length} bytes of PDF through saveFile`);
+  // The Markdown box went in with its bold font (pdf-lib names subset fonts Figtree-Bold-<n>).
+  const { PDFDict, PDFName } = require('pdf-lib');
+  const exported = await PDFDocument.load(readFileSync(pdfOut));
+  const fontNames = exported.context
+    .enumerateIndirectObjects()
+    .map(([, o]) => o)
+    .filter((o) => o instanceof PDFDict && o.get(PDFName.of('Type')) === PDFName.of('Font'))
+    .map((d) => String(d.get(PDFName.of('BaseFont'))));
+  if (!fontNames.some((n) => n.startsWith('/Figtree-Bold'))) throw new Error(`the exported PDF has no Figtree Bold for the Markdown box: ${fontNames}`);
+  // Its maths are outlines: no Geist Mono, which only maths' placeholder (MathJax not loaded) would have used.
+  if (fontNames.some((n) => n.includes('GeistMono'))) throw new Error(`the exported PDF drew maths' placeholder: ${fontNames}`);
+  log('exported PDF embeds Figtree Bold for the Markdown text box, and draws its maths as outlines');
 
   // 7. A qalm:// link opened while running reaches the window (second instance → IPC → router).
   const errCount = errors.length;

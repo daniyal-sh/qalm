@@ -23,7 +23,7 @@ iPad and Mac are coming soon.
 - **Pens:** fountain, ball and brush styles, smoothing, pressure, hover preview, tilt shading, and the pen button or a
   double-tap for the eraser where your pen has them.
 - **Tools:** pen, highlighter, eraser, lasso (move, resize, rotate, recolour, duplicate, delete, copy and paste), text
-  boxes with maths symbols, images, custom colours with synced swatches.
+  boxes with Markdown and TeX maths, images, custom colours with synced swatches.
 - **Shapes:** hold at the end of a stroke and it snaps into a line, arrow, rectangle, ellipse, triangle, diamond, star
   and more, live under the pen. Drag to adjust before you lift; one undo brings back your stroke.
 - **PDFs:** import a PDF and write straight on it. Export any notebook to PDF, or to `.qalm` for a full backup.

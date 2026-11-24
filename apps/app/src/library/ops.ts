@@ -124,13 +124,35 @@ function notice(title: string, body: string): void {
   else Alert.alert(title, body);
 }
 
+/** A question with Retry and OK: the browser's confirm on web, an Alert on native. Resolves true for Retry. */
+function askRetry(title: string, body: string): Promise<boolean> {
+  if (Platform.OS === 'web') return Promise.resolve(!!(globalThis as { confirm?: (m: string) => boolean }).confirm?.(`${title}\n\n${body}\n\nRetry?`));
+  return new Promise((resolve) =>
+    Alert.alert(title, body, [
+      { text: 'OK', style: 'cancel', onPress: () => resolve(false) },
+      { text: 'Retry', onPress: () => resolve(true) },
+    ]),
+  );
+}
+
+/** What to say when maths couldn't load for a PDF export (it went in as TeX source). */
+export const MATHS_FALLBACK_NOTICE = {
+  title: 'Maths couldn’t load',
+  body: 'The PDF was exported with its maths as plain TeX. Check your connection and export again to get the formulas.',
+} as const;
+
 export async function exportNotebook(ctx: Pick<Ctx, 'dm' | 'assets'>, id: string, kind: 'pdf' | 'qalm'): Promise<void> {
   const h = await openLoaded(ctx.dm, docIds.notebook(id), 3000);
+  let released = false;
   try {
     const nb = new Notebook(h.doc);
     const src = notebookSource(ctx, nb);
     const skipped: string[] = [];
-    const bytes = kind === 'pdf' ? await buildPdf(src, { toPng, onSkippedImage: (id) => skipped.push(id) }) : await buildQalm(src);
+    let mathsAsTex = false;
+    const bytes =
+      kind === 'pdf'
+        ? await buildPdf(src, { toPng, onSkippedImage: (id) => skipped.push(id), onMathUnavailable: () => (mathsAsTex = true) })
+        : await buildQalm(src);
     await saveFile(exportFileName(nb.meta().title, kind), kind === 'pdf' ? 'application/pdf' : 'application/x-qalm', bytes);
     if (skipped.length) {
       const names = skipped.map((id) => nb.asset(id)?.name ?? 'image');
@@ -140,7 +162,12 @@ export async function exportNotebook(ctx: Pick<Ctx, 'dm' | 'assets'>, id: string
         `${names.join(', ')}: this device can’t convert ${n === 1 ? 'its format' : 'their format'} for PDF. The .qalm backup keeps ${n === 1 ? 'it' : 'them'}.`,
       );
     }
+    if (mathsAsTex && (await askRetry(MATHS_FALLBACK_NOTICE.title, MATHS_FALLBACK_NOTICE.body))) {
+      h.release();
+      released = true;
+      await exportNotebook(ctx, id, kind);
+    }
   } finally {
-    h.release();
+    if (!released) h.release();
   }
 }

@@ -1,5 +1,5 @@
 /** Live AI in the editor: the Play / Pause AI control with who is following, and comment cards in the page margin. */
-import type { Comment } from '@qalm/core';
+import { markdownToPlain, type Comment } from '@qalm/core';
 import * as React from 'react';
 import { Animated, AppState, Platform, Pressable, StyleSheet, View } from 'react-native';
 
@@ -240,7 +240,7 @@ export function MarginCard({
     <AppearIn style={{ position: 'absolute', top, left: 0, width }}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Comment from ${latest.author.name}: ${latest.text}`}
+        accessibilityLabel={`Comment from ${latest.author.name}: ${markdownToPlain(latest.text)}`}
         onPress={onPress}
         style={(s) => [
           styles.card,
@@ -267,7 +267,7 @@ export function MarginCard({
           ) : null}
         </View>
         <Text variant="meta" tone="ink" numberOfLines={2}>
-          {latest.text}
+          {markdownToPlain(latest.text)}
         </Text>
       </Pressable>
     </AppearIn>

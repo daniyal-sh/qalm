@@ -8,6 +8,7 @@ import {
   encodeQinkRead,
   encodeQinkThread,
   cleanAsk,
+  loadMathFor,
   migratePage,
   resolveTarget,
   resolveThread,
@@ -20,6 +21,7 @@ import {
   resolveLecture,
   transcriptLine,
   fmtTExact,
+  withMathBudget,
   type BBox,
   type LectureCrop,
   type LectureMeta,
@@ -74,6 +76,12 @@ interface AgentState {
   lect?: Record<string, number>;
 }
 
+/**
+ * New maths (TeX characters) one step of an agent request may render: Markdown text boxes' formulas, when regions are
+ * measured and when the crop is drawn. Past it, formulas show their source in the crop. Counted in characters because a
+ * Worker's clock doesn't advance during synchronous work.
+ */
+const CROP_MATH = { chars: 10_000, ms: 1000 };
 const agentKey = (clientId: string) => `agent:${clientId}`;
 /** The ink this agent last saw on a page (stroke id → signature), one key per page to keep rows small. */
 const inkKey = (clientId: string, pageId: string) => `ink:${clientId}:${pageId}`;
@@ -105,6 +113,9 @@ export interface Presence {
  */
 export class AgentHub {
   private waiters = new Set<() => void>();
+  /** Pending waits by id, and those whose client disconnected (a disconnect cancels the request, MCP 2026-07-28). */
+  private waitIds = new Set<string>();
+  private cancelled = new Set<string>();
   private changed: Record<string, number>;
 
   constructor(private readonly r: DocRoom, private readonly env: Env, private readonly notebookId: string) {
@@ -237,11 +248,14 @@ export class AgentHub {
         out[id] = new Page(doc);
       }),
     );
+    // Markdown boxes with maths need MathJax (loaded on demand) before anything measures or draws them: their heights
+    // shape regions, and crops must never show maths' placeholder. Pages without maths don't load it.
+    await loadMathFor(Object.values(out).flatMap((p) => p.items()));
     return out;
   }
 
   private imageSvg(pages: Record<string, Page>, image: QinkImage | null): string | null {
-    return image?.rows.length ? renderRegionsSvg(pages, image.rows).svg : null;
+    return image?.rows.length ? withMathBudget(CROP_MATH, () => renderRegionsSvg(pages, image.rows).svg) : null;
   }
 
   private state(clientId: string): AgentState {
@@ -347,8 +361,10 @@ export class AgentHub {
    * Long-polls for the next update (qink-live.md §1): resolves when the pen has been idle for `idleMs`, something
    * changed since the last delivery and `minIntervalMs` passed since the last wake, or at once on a new ask.
    */
-  async wait(who: AgentWho, session: string, cfg: AgentConfig): Promise<AgentResult> {
+  async wait(who: AgentWho, session: string, cfg: AgentConfig, waitId?: string): Promise<AgentResult> {
     const { clientId } = who;
+    if (waitId) this.waitIds.add(waitId);
+    const gone = () => !!waitId && this.cancelled.has(waitId);
     const deadline = Date.now() + cfg.timeoutMs;
     if (!this.r.kvGet(agentKey(clientId))) this.r.kvPut(agentKey(clientId), this.state(clientId));
     this.touch(who);
@@ -361,7 +377,9 @@ export class AgentHub {
     const paused = { text: `#q s=${session} paused`, svg: null, changed: false };
     try {
       for (;;) {
-        const r = await this.tryDeliver(clientId, session, cfg);
+        // Cancelled: end without delivering, so the client's next wait gets the update.
+        if (gone()) return { text: `#q s=${session} cancelled`, svg: null, changed: false };
+        const r = await this.tryDeliver(clientId, session, cfg, gone);
         if ('text' in r) {
           delivered = r.changed;
           return r;
@@ -375,6 +393,10 @@ export class AgentHub {
         await this.sleep(Math.min(r.retryAt, deadline, until || Infinity) - t);
       }
     } finally {
+      if (waitId) {
+        this.waitIds.delete(waitId);
+        this.cancelled.delete(waitId);
+      }
       const n = (this.waiting.get(clientId) ?? 1) - 1;
       if (n > 0) this.waiting.set(clientId, n);
       else this.waiting.delete(clientId);
@@ -382,7 +404,14 @@ export class AgentHub {
     }
   }
 
-  private async tryDeliver(clientId: string, session: string, cfg: AgentConfig): Promise<AgentResult | { retryAt: number }> {
+  /** Cancels a pending wait whose client went away: it ends without delivering anything. */
+  cancel(waitId: string): void {
+    if (!this.waitIds.has(waitId)) return;
+    this.cancelled.add(waitId);
+    this.wakeAll();
+  }
+
+  private async tryDeliver(clientId: string, session: string, cfg: AgentConfig, gone = () => false): Promise<AgentResult | { retryAt: number }> {
     // Checked on every pass: turning AI access off ends a wait at once (meta changes wake waiters).
     // While paused nothing goes out (ink, asks, comments and replies wait); Play wakes the wait and the next update
     // catches up on everything since the last one.
@@ -422,13 +451,13 @@ export class AgentHub {
     // included (lectureLive() is isLive()); nothing is saved, so it all goes with the next update after Play.
     if (!this.isLive() || (news.lines.length && !this.lectureLive())) return { retryAt: Infinity };
     const cur = this.state(clientId);
-    if (cur.rev !== st.rev || cur.askCount !== st.askCount) return { retryAt: 0 };
+    if (gone() || cur.rev !== st.rev || cur.askCount !== st.askCount) return { retryAt: 0 };
     // From here to the kvPuts: no await.
     const regions = this.regions();
     const threads = this.threads();
     const prev: Record<string, InkSeen | undefined> = {};
     for (const id of Object.keys(pages)) prev[id] = this.r.kvGet<InkSeen>(inkKey(clientId, id));
-    const u = encodeQinkUpdate(nb, pages, regions, prev, { session, rev: st.rev + 1, client: clientId, asks, threads, seen: st.seen });
+    const u = withMathBudget(CROP_MATH, () => encodeQinkUpdate(nb, pages, regions, prev, { session, rev: st.rev + 1, client: clientId, asks, threads, seen: st.seen }));
     if (news.lines.length) u.text = `${u.text}\n${news.lines.join('\n')}`;
     this.r.kvPut('regions', regions);
     this.r.kvPut('threads', threads);
@@ -459,7 +488,7 @@ export class AgentHub {
       const threads = this.threads();
       const pages = await this.loadPages([resolveThread(threads, r0).pageId].filter((id) => nb.pages().some((p) => p.id === id)));
       this.requireLive();
-      return { text: encodeQinkThread(nb, pages, threads, r0), svg: null, changed: false };
+      return { text: withMathBudget(CROP_MATH, () => encodeQinkThread(nb, pages, threads, r0)), svg: null, changed: false };
     }
     let ids: string[] = [];
     if (r0 === 'outline') ids = nb.pages().map((p) => p.id);
@@ -467,7 +496,7 @@ export class AgentHub {
     const pages = await this.loadPages(ids);
     this.requireLive();
     const regions = this.regions();
-    const r = encodeQinkRead(nb, pages, regions, r0, who.clientId);
+    const r = withMathBudget(CROP_MATH, () => encodeQinkRead(nb, pages, regions, r0, who.clientId));
     this.r.kvPut('regions', regions);
     const text = r0 === 'outline' ? [r.text, ...this.lectureOutline()].join('\n') : r.text;
     return { text, svg: this.imageSvg(pages, r.image), changed: false };

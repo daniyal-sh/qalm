@@ -4,6 +4,8 @@
   "name": "qalm-server",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
+  // request.signal fires when an MCP client disconnects, so its parked wait is cancelled (mcp.ts).
+  "compatibility_flags": ["enable_request_signal"],
   "durable_objects": {
     "bindings": [{ "name": "DOC_ROOM", "class_name": "DocRoom" }]
   },

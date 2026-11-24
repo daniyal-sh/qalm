@@ -40,7 +40,8 @@ function measureText(item: Pick<TextItem, 'text' | 'w' | 'fontSize'>): number | 
 
 /** Called once the canvas's fonts have loaded: text heights are measured from then on (core's `textHeight`). */
 export function provideTextFonts(fonts: SkTypefaceFontProvider): void {
-  if (provider === fonts) return;
+  // Every page canvas loads its own provider of the same fonts: keep the first, so the cache survives page switches.
+  if (provider) return;
   provider = fonts;
   cache.clear();
   setTextMeasure(measureText);

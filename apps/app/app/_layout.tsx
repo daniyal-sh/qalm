@@ -1,4 +1,4 @@
-import { Figtree_400Regular, Figtree_500Medium, Figtree_600SemiBold, Figtree_700Bold } from '@expo-google-fonts/figtree';
+import { Figtree_400Regular, Figtree_400Regular_Italic, Figtree_500Medium, Figtree_600SemiBold, Figtree_700Bold, Figtree_700Bold_Italic } from '@expo-google-fonts/figtree';
 import { GeistMono_400Regular } from '@expo-google-fonts/geist-mono';
 import { useFonts } from 'expo-font';
 import { router, Stack } from 'expo-router';
@@ -9,6 +9,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { persistClip } from '../src/editor/clipboard';
+// Turns on the maths time slice (MathJax never blocks the UI for long).
+import '../src/lib/maths';
 import { desktop } from '../src/lib/desktop';
 import { useFullscreenShortcut } from '../src/lib/fullscreen';
 import { PEN_DETECTED_TOAST } from '../src/lib/inputPrefs';
@@ -96,7 +98,8 @@ function PenDetectedToast() {
 
 function Shell() {
   const { c, scheme } = useTheme();
-  const [fontsLoaded, fontError] = useFonts({ Figtree_400Regular, Figtree_500Medium, Figtree_600SemiBold, Figtree_700Bold, GeistMono_400Regular });
+  // The italics are for Markdown in comments.
+  const [fontsLoaded, fontError] = useFonts({ Figtree_400Regular, Figtree_400Regular_Italic, Figtree_500Medium, Figtree_600SemiBold, Figtree_700Bold, Figtree_700Bold_Italic, GeistMono_400Regular });
   useDesktopDeepLinks(fontsLoaded || !!fontError);
   useFullscreenShortcut();
   if (!fontsLoaded && !fontError) {

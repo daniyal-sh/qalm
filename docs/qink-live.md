@@ -117,7 +117,9 @@ ask C1 R5 [1] p1 @99,154 495x68 "is this right?"
 
 **Thread IDs** (`C1`, `C2`, …) are assigned by the server too, notebook-wide, and never reused. Only the student's words
 are sent (each entry once per agent); the agent's own comments never come back to it. Comment text is cut at 1000
-characters.
+characters. Comments are Markdown: the app renders bold, lists, code, links and TeX maths (`$x^2$`, `$$…$$`) and shows
+raw HTML as text; agents send and receive the text exactly as written. Maths past the limits (1000 characters a formula,
+30 formulas a comment) shows as TeX source.
 
 **A new agent gets no replay of history.** Asks from before it connected are not sent. On a page's first look, the
 page's threads are not replayed either: each **unresolved** thread goes out once as `open C2 p3@… student "latest
@@ -164,7 +166,17 @@ a lecture `L2` (or `L2@10:00`).
 | `wait` | `s?` | waits for the next update (long-poll). With no `s`, it lists the live sessions the agent can see |
 | `read` | `ref` | anything on demand: `outline` (pages, then lecture recordings); a page `p3` (all its ink as regions, read ones as text); a region `R7` (its strokes now, plus any readings of them, marked `stale` if so); a box (a crop of everything in it); `pdf:p2`; a thread `C5`; a lecture `L2` (§5) |
 | `transcribe` | `ref`, `text` | saves the agent's reading of a region or a box's ink (strokes whose centre is inside). The student can edit it |
-| `comment` | `ref` or `thread`, `text`, `resolve?` | with `ref` (a region, box or page) starts a thread on those strokes, with the box as a fallback position, and says its label (`as thread C8`); with `thread` (`C3`) replies in it. `resolve` also marks the thread resolved: use it only when the thread is trivially done. Never changes ink |
+| `comment` | `ref` or `thread`, `text`, `resolve?` | with `ref` (a region, box or page) starts a thread on those strokes, with the box as a fallback position, and says its label (`as thread C8`); with `thread` (`C3`) replies in it. `text` is Markdown with TeX maths (`$…$`, `$$…$$`), rendered in the app. `resolve` also marks the thread resolved: use it only when the thread is trivially done. Never changes ink |
+
+**Protocol versions.** `/mcp` speaks both MCP eras. Clients on 2025-11-25 and older send `initialize` and are served
+exactly as before. 2026-07-28 clients skip the handshake: each request carries
+`_meta["io.modelcontextprotocol/protocolVersion"]` and `clientCapabilities`, plus the `MCP-Protocol-Version`, `Mcp-Method`
+and (for `tools/call`) `Mcp-Name` headers, and may start with `server/discover`. Results add `resultType: "complete"` and
+`serverInfo` in `_meta`; `tools/list` and `server/discover` add `ttlMs` (1 h) and `cacheScope: "public"`. Missing or
+mismatched headers get 400 with -32020, missing `_meta` 400 with -32602, an unknown version 400 with -32022 and
+`data.supported`, and methods 2026-07-28 dropped (`initialize`, `ping`, …) 404 with -32601. `initialize` always gets
+the legacy handshake. The tools, OAuth and long-poll `wait` are the same in both eras; in both, a client that
+disconnects cancels its pending `wait`, so the update it would have carried goes to the next `wait` instead.
 
 **Which notebooks an agent sees.** An approved agent can use every notebook whose **AI access** is on, now and in the
 future, and none other: there is no per-agent notebook choice. `wait()` lists exactly those, and every tool checks the

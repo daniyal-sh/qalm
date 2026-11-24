@@ -53,7 +53,9 @@ export function rowScale(row: Pick<RegionRow, 'box' | 'unit' | 'scale'>): number
 
 /**
  * Renders region rows as one image: white background, `[n]` labels, new ink black, context grey, erased strokes faint
- * red dashed. Rows may come from several pages (`pages` by id); unknown pages or ids are skipped.
+ * red dashed. Rows may come from several pages (`pages` by id); unknown pages or ids are skipped. Markdown boxes' maths
+ * needs MathJax, loaded on demand: `await loadMathFor(...)` with the pages' items first (the server does, in
+ * `loadPages`), or it draws as its placeholder.
  */
 export function renderRegionsSvg(pages: Record<string, Page>, rows: readonly RegionRow[]): { svg: string; width: number; height: number } {
   let top = 0;
