@@ -277,6 +277,13 @@ listed in `apps/server/.dev.vars.example`.
   staging` in `apps/server`). Email is sent as `qalm <qalm@apollolearn.app>` via the owner's Resend domain.
 - Deploy: `pnpm --filter @qalm/server migrate:staging`, `pnpm --filter @qalm/server deploy:staging`, then
   `EXPO_PUBLIC_QALM_SERVER_URL=https://qalm-api-staging.apollolearn.workers.dev pnpm --filter @qalm/app deploy:staging`.
+- Client builds against staging: desktop `EXPO_PUBLIC_QALM_SERVER_URL=https://qalm-api-staging.apollolearn.workers.dev pnpm
+  --filter @qalm/desktop build`. Android (in `apps/app`, same env var): `npx expo prebuild -p android --no-install`, then in
+  `android/` `./gradlew assembleRelease -PreactNativeArchitectures=x86_64 --max-workers=1 -I ../scripts/android-windows.gradle`
+  (Gradle heap `-Xmx3072m`, `org.gradle.parallel=false`, `kotlin.compiler.execution.strategy=in-process` in the generated
+  `gradle.properties`; `./gradlew --stop` after). Sign-in tokens are stored per server (#48), so switching a build's server
+  just asks for sign-in again.
+- Shells inside T3 inherit `ELECTRON_RUN_AS_NODE=1`: launch the exe with `env -u ELECTRON_RUN_AS_NODE` or it runs as Node and exits.
 - `apollolearn.app` DNS is on Vercel, so custom domains (e.g. `qalm.apollolearn.app`) need either moving its DNS to
   Cloudflare or hosting the web app on Vercel. Decide before production.
 

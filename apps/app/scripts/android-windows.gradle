@@ -1,0 +1,15 @@
+// Gradle init script for building the Android app on Windows: ./gradlew assembleRelease -I ../scripts/android-windows.gradle
+// CMake object paths embed absolute source paths and pass Windows' 260-char limit, so each module builds in
+// %TEMP%\qx\<hash> with hashed object dirs. One compile job per module keeps clang from running out of memory.
+allprojects {
+  ['com.android.library', 'com.android.application'].each { id ->
+    plugins.withId(id) {
+      def tag = Integer.toHexString(project.path.hashCode())
+      def stage = new File(System.getenv('TEMP'), "qx/${tag}")
+      project.android.externalNativeBuild.cmake.buildStagingDirectory = stage
+      project.android.defaultConfig.externalNativeBuild.cmake.arguments(
+        '-DCMAKE_JOB_POOLS=compile=1', '-DCMAKE_JOB_POOL_COMPILE=compile', '-DCMAKE_JOB_POOL_LINK=compile',
+        '-DCMAKE_OBJECT_PATH_MAX=255')
+    }
+  }
+}
