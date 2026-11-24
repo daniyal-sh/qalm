@@ -209,6 +209,12 @@ async function usedMs(env: Env, userId: string, t: number): Promise<number> {
   return r?.ms ?? 0;
 }
 
+/** Local end-to-end runs only (`--var WHISPER_FAKE:1`): a canned transcript instead of Workers AI. */
+const fakeWhisper: AiRun = async (_model, input) => {
+  const secs = Math.max(1, Math.round(String(input.audio ?? '').length / 5300)); // ~32 kbps of base64
+  return { text: 'this is the fake whisper transcript', transcription_info: { duration: secs }, segments: [{ start: 0.2, end: Math.min(secs, 2), text: ' this is the fake whisper transcript' }] };
+};
+
 /** Whisper's output as timeline segments (ms), shifted by nothing: the client adds the chunk's start. */
 export function whisperSegments(out: WhisperOut): TranscriptSegment[] {
   const segs = out.segments?.length ? out.segments : out.text?.trim() ? [{ start: 0, end: out.transcription_info?.duration ?? 0, text: out.text }] : [];
@@ -249,7 +255,8 @@ export async function handleLectures(req: Request, env: Env, path: string): Prom
 
 async function transcribe(req: Request, env: Env): Promise<Response> {
   const userId = await liveUser(req, env);
-  const ai: AiRun | null = testAi === false ? null : (testAi ?? (env.AI ? (model, input) => env.AI!.run(model as never, input as never) : null));
+  const ai: AiRun | null =
+    testAi === false ? null : (testAi ?? (env.WHISPER_FAKE === '1' ? fakeWhisper : env.AI ? (model, input) => env.AI!.run(model as never, input as never) : null));
   if (!ai) throw new HttpError(503, 'Cloud transcription is not set up on this server');
   const type = (req.headers.get('Content-Type') ?? '').toLowerCase();
   if (!AUDIO_TYPES.test(type)) throw new HttpError(415, 'Send one audio chunk (audio/webm, audio/ogg, audio/mp4, audio/mpeg or audio/wav)');

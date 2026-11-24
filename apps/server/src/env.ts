@@ -38,6 +38,8 @@ export interface Env {
   /** Cloud transcription limits per user: requests per minute (default 6) and audio minutes per month (default 600). */
   TRANSCRIBE_PER_MINUTE?: string;
   TRANSCRIBE_MINUTES_PER_MONTH?: string;
+  /** Local end-to-end tests only: '1' answers transcription with a canned transcript (never set in deployments). */
+  WHISPER_FAKE?: string;
 }
 
 /** What completeAuthorization() stores; reaches the MCP handler as ctx.props. */
