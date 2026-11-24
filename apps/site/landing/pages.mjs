@@ -17,7 +17,7 @@ const PAGE_CSS = `
 .doc-hero h1{font-size:clamp(40px,6vw,72px);line-height:1;letter-spacing:-.04em;font-weight:600;margin:16px 0 0;max-width:14em;text-wrap:balance}
 .doc-hero .lead{font-size:clamp(17px,1.5vw,19px);color:var(--muted);line-height:1.6;margin-top:20px;max-width:38em}
 .updated{display:inline-block;margin-top:26px;padding-bottom:4px;border-bottom:2px solid var(--accent);font-size:14px;font-weight:600}
-.doc{display:grid;grid-template-columns:15rem minmax(0,1fr);gap:clamp(32px,6vw,72px);padding:clamp(36px,5vw,64px) 0 clamp(56px,7vw,96px)}
+.doc{display:grid;grid-template-columns:15rem minmax(0,1fr);gap:clamp(32px,6vw,72px);padding-block:clamp(36px,5vw,64px) clamp(56px,7vw,96px)}
 .toc{position:sticky;top:24px;align-self:start;border-top:1px solid var(--line)}
 .toc a{display:flex;align-items:center;gap:12px;min-height:44px;padding:6px 0;border-bottom:1px solid var(--line-2);font-size:14px;color:var(--muted);text-decoration:none;line-height:1.35}
 .toc a:hover{color:var(--accent-ink)}
@@ -45,7 +45,7 @@ const PAGE_CSS = `
 }
 
 /* contact */
-.ways{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;padding:clamp(36px,5vw,64px) 0}
+.ways{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;padding-block:clamp(36px,5vw,64px)}
 .way{padding:clamp(22px,3vw,32px);display:flex;flex-direction:column;gap:10px}
 .way .ic{width:44px;height:44px;border-radius:var(--r12);display:grid;place-items:center;background:var(--accent-soft);color:var(--accent-ink);margin-bottom:6px}
 .way .ic svg{width:22px;height:22px}
@@ -53,11 +53,11 @@ const PAGE_CSS = `
 .way p{font-size:16px;color:var(--muted);line-height:1.6}
 .way .btn{align-self:flex-start;margin-top:8px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r12);box-shadow:var(--shadow-1)}
-.small-print{padding:0 0 clamp(56px,7vw,96px);font-size:15px;color:var(--muted);line-height:1.7;max-width:46em}
+.small-print{padding-bottom:clamp(56px,7vw,96px);font-size:15px;color:var(--muted);line-height:1.7;max-width:46em}
 @media (max-width:760px){.ways{grid-template-columns:1fr}}
 
 /* 404 and "not available yet" */
-.note-page{padding:clamp(28px,6vw,88px) 0 clamp(64px,9vw,120px);display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:clamp(32px,6vw,80px);align-items:center}
+.note-page{padding-block:clamp(28px,6vw,88px) clamp(64px,9vw,120px);display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:clamp(32px,6vw,80px);align-items:center}
 .note-page h1{font-size:clamp(38px,5vw,64px);line-height:1.02;letter-spacing:-.04em;font-weight:600;text-wrap:balance}
 .note-page p{margin-top:18px;font-size:clamp(17px,1.5vw,19px);color:var(--muted);line-height:1.6;max-width:30em}
 .note-page .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px}

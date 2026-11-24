@@ -274,15 +274,20 @@ listed in `apps/server/.dev.vars.example`.
   on this machine.
 
 **Web layout** (owner's decision; `apps/site`):
-- `/` is the landing page: `apps/site/public/` (today a placeholder `index.html` + `404.html` + `favicon.svg`).
-  **Drop the real landing page in as `apps/site/public/index.html`** (from `mockups/landing.html`, being designed on
-  another branch); link to the app with `/app`. Other landing files go next to it; anything outside `/app` that
-  doesn't exist gets `404.html`, never the app.
+- `/` is the landing page, with `/privacy`, `/terms`, `/data-rights`, `/contact` and the 404 page next to it. They are
+  generated into `apps/site/public/` by `apps/site/landing/` (handwritten ink, template, legal copy; see its README):
+  `pnpm --filter @qalm/site build:landing`, and `build:og` for `og.png`. Never edit `public/*.html` by hand. Anything
+  outside `/app` and `/download` that doesn't exist gets `404.html`, never the app. The legal pages' facts are listed
+  with their sources in `landing/legal.mjs`; update it (and `UPDATED` in `site.mjs`) when sign-in, storage,
+  providers or retention change.
+- `/download/windows` and `/download/android` stream `windows/qalm-setup.exe` and `android/qalm.apk` from the R2
+  binding `DOWNLOADS` (bucket `qalm-downloads-staging` for staging, `qalm-downloads` for production; create them and
+  upload the files). Until a file is there, the route shows a "not available yet" page.
 - `/app/…` is the Expo web export, built by `apps/site/scripts/build.mjs` with `QALM_WEB_BASE_URL=/app`
   (`apps/app/app.config.js` turns it into Expo's `experiments.baseUrl`; web only, unset everywhere else). Every
   script, font, `canvaskit.wasm` and `pdf.worker.min.mjs` loads from `/app/…` (index.ts and qalm-ink find their base
   from the bundle's own URL), and expo-router strips `/app` from routes.
-- One Worker (`apps/site/wrangler.jsonc`): static assets first. `src/worker.js` runs only for `/app` routes
+- One Worker (`apps/site/wrangler.jsonc`): static assets first. `src/worker.js` runs only for `/download/*` and `/app` routes
   (`run_worker_first`, minus `/app/_expo/*`, `/app/assets/*` and the wasm/mjs files) and gives the SPA fallback: a
   missing `/app/…` path without a file extension (`/app/notebook/<id>`, `/app/auth/email/verify?token=…`) gets
   `/app/index.html`; a missing file (`.js`, `.ttf`, …) stays 404. `/app` redirects to `/app/`.
