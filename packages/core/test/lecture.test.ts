@@ -18,6 +18,7 @@ import {
   lectureFiles,
   readLectureFiles,
   packQalm,
+  packQalmStream,
   parseCropRegions,
   parseLectureRef,
   parseT,
@@ -304,6 +305,32 @@ describe('.qalm with lectures', () => {
     expect(lec.events().filter((e) => 'p' in e).every((e) => (e as { p: string }).p === 'newpg')).toBe(true);
     expect(lec.audio()[0]!.sha).toBe('c'.repeat(64));
     expect(lec.crops()[0]!.sha).toBe('d'.repeat(64));
+  });
+
+  it('streamed: the same files, written in parts, one session at a time', async () => {
+    const { nb, pages, bundle } = recorded();
+    const assets = new Map([['img1', new Uint8Array([7, 7, 7])]]);
+    const pulled: string[] = [];
+    async function* sessions() {
+      for (const id of ['s1', 's2']) {
+        pulled.push(`session ${id}`);
+        yield { ...bundle, id, meta: { ...bundle.meta, id } };
+      }
+    }
+    const parts: Uint8Array[] = [];
+    await packQalmStream({ index: nb.doc, pages, assets }, sessions(), (p) => {
+      parts.push(p);
+      pulled.push('part');
+    });
+    // Parts went out before the second session was even read.
+    expect(pulled.indexOf('part')).toBeLessThan(pulled.indexOf('session s2'));
+    const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    parts.reduce((at, p) => (all.set(p, at), at + p.length), 0);
+    const streamed = unzipSync(all);
+    const whole = unzipSync(packQalm({ index: nb.doc, pages, assets, lectures: [bundle, { ...bundle, id: 's2', meta: { ...bundle.meta, id: 's2' } }] }));
+    expect(Object.keys(streamed).sort()).toEqual(Object.keys(whole).sort());
+    for (const k of Object.keys(whole)) expect(streamed[k]).toEqual(whole[k]);
+    expect(unpackQalm(all).lectures!.map((l) => l.id).sort()).toEqual(['s1', 's2']);
   });
 
   it('skips a broken session instead of failing the import', () => {

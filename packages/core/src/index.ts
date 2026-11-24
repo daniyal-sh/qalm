@@ -71,7 +71,7 @@ export {
   MAX_CONTEXT,
 } from './geometry/regions';
 export { exportPdf, type ExportPdfOptions } from './export/pdf';
-export { packQalm, unpackQalm, type QalmBundle } from './export/qalm';
+export { packQalm, packQalmStream, unpackQalm, type QalmBundle } from './export/qalm';
 export {
   encodeQinkUpdate,
   encodeQinkRead,
