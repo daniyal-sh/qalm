@@ -422,6 +422,9 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
         }}
         lassoMode={t.lassoMode}
         eraserMode={t.eraserMode}
+        laserMode={t.laserMode}
+        // The ruler (window coordinates): a pen stroke starting near its edge follows it.
+        ruler={ed.ruler}
         onLasso={({ nativeEvent: e }) => {
           const pts = e.polygon;
           const last = pts[pts.length - 1];

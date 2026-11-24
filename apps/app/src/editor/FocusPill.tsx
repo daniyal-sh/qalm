@@ -1,4 +1,5 @@
-// The fullscreen focus layout's floating tool pill: pen, highlighter, eraser, lasso, colour, undo / redo and exit.
+// The fullscreen focus layout's floating tool pill: pen, highlighter, eraser, lasso, laser, ruler, colour, undo / redo and
+// exit (on a narrow edge the laser and ruler fold into "More tools").
 // It sits on one window edge (vertical on the left and right), can be dragged to another one by its grip (a tap on
 // the grip moves it to the next edge, for keyboards and screen readers), and remembers where it was (local prefs).
 import { splitAlpha, type PaperColor } from '@qalm/core';
@@ -13,13 +14,15 @@ import { IconButton } from '../ui/controls';
 import { Icon } from '../ui/Icon';
 import { contrastRatio } from './colors.logic';
 import type { ToolState } from './context';
-import { DEFAULT_PILL, isVertical, parsePill, pillOrigin, pillScale, snapPill, type Edge, type Pad, type PillPlace, type Size } from './focus.logic';
+import { DEFAULT_PILL, isVertical, parsePill, pillCompact, pillOrigin, pillScale, snapPill, type Edge, type Pad, type PillPlace, type Size } from './focus.logic';
 import { SwatchStrip } from './Swatches';
 import { ToolButton } from './Toolbar';
 import type { ToolId } from './view';
 
 const PILL_KEY = 'focusPill';
 const NEXT_EDGE: Record<Edge, Edge> = { top: 'right', right: 'bottom', bottom: 'left', left: 'top' };
+/** A pill button and its gap: the extras (laser, ruler) are two of them; folded, one "More tools" button. */
+const BTN_ALONG = CONTROL_H + 2;
 const PILL_TOOLS: { id: ToolId; icon: 'pen' | 'highlighter' | 'eraser' | 'lasso'; label: string }[] = [
   { id: 'pen', icon: 'pen', label: 'Pen' },
   { id: 'highlighter', icon: 'highlighter', label: 'Highlighter' },
@@ -52,6 +55,9 @@ export interface FocusPillProps {
   paper?: PaperColor;
   onTool(t: ToolId): void;
   onChange(p: Partial<ToolState>): void;
+  /** The ruler is shown. */
+  ruler: boolean;
+  onRuler(): void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo(): void;
@@ -63,9 +69,13 @@ export interface FocusPillProps {
 export function FocusPill(p: FocusPillProps) {
   const { c } = useTheme();
   const vertical = isVertical(p.place.edge);
-  const [size, setSize] = React.useState<Size & { vertical: boolean }>({ w: 0, h: 0, vertical });
+  const [size, setSize] = React.useState<Size & { vertical: boolean; compact: boolean }>({ w: 0, h: 0, vertical, compact: false });
   // Right after the pill turns (top ↔ side), its last measured size is the other way round.
   const full = size.vertical === vertical ? size : { w: size.h, h: size.w };
+  // Its length with the laser and ruler shown (measured folded: one More button in place of the two).
+  const along = (vertical ? full.h : full.w) + (size.compact ? BTN_ALONG : 0);
+  const compact = size.w > 0 && pillCompact(p.place, p.view, along, p.pad);
+  const [more, setMore] = React.useState(false);
   // On a narrow screen the pill shrinks to fit its edge; `pill` and `at` are the box it shows in.
   const scale = pillScale(p.place, p.view, full, p.pad);
   const pill = { w: full.w * scale, h: full.h * scale };
@@ -81,7 +91,10 @@ export function FocusPill(p: FocusPillProps) {
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
         onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: () => setColours(false),
+        onPanResponderGrant: () => {
+          setColours(false);
+          setMore(false);
+        },
         onPanResponderMove: (_e, g) => setDrag({ dx: g.dx, dy: g.dy }),
         onPanResponderRelease: (_e, g) => {
           setDrag(null);
@@ -97,6 +110,12 @@ export function FocusPill(p: FocusPillProps) {
   const t = p.tools.tool;
   const hl = t === 'highlighter';
   const colour = hl ? splitAlpha(p.tools.hlColor, 1).rgb : p.tools.penColor;
+  const extras = (
+    <>
+      <ToolButton icon="laser" label="Laser pointer" selected={t === 'laser'} onPress={() => p.onTool('laser')} />
+      <ToolButton toggle icon="ruler" label={p.ruler ? 'Hide ruler' : 'Show ruler'} selected={p.ruler} onPress={p.onRuler} />
+    </>
+  );
   const sep = <View style={[vertical ? styles.sepH : styles.sepV, { backgroundColor: c.line }]} />;
   const tip = (label: string) => (Platform.OS === 'web' ? ({ title: label } as object) : {});
 
@@ -133,7 +152,7 @@ export function FocusPill(p: FocusPillProps) {
         <View
           onLayout={(e) => {
             const { width, height } = e.nativeEvent.layout;
-            setSize((s) => (s.w === width && s.h === height && s.vertical === vertical ? s : { w: width, h: height, vertical }));
+            setSize((s) => (s.w === width && s.h === height && s.vertical === vertical && s.compact === compact ? s : { w: width, h: height, vertical, compact }));
             const s = pillScale(p.place, p.view, { w: width, h: height }, p.pad);
             p.onSize?.({ w: width * s, h: height * s });
           }}
@@ -153,12 +172,28 @@ export function FocusPill(p: FocusPillProps) {
           {PILL_TOOLS.map((x) => (
             <ToolButton key={x.id} icon={x.icon} label={x.label} selected={t === x.id} onPress={() => p.onTool(x.id)} />
           ))}
+          {compact ? (
+            <IconButton
+              icon="more-horizontal"
+              label="More tools"
+              selected={more || t === 'laser' || p.ruler}
+              onPress={() => {
+                setColours(false);
+                setMore((x) => !x);
+              }}
+            />
+          ) : (
+            extras
+          )}
           {sep}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={hl ? 'Highlighter colour' : 'Pen colour'}
             accessibilityState={{ expanded: colours }}
-            onPress={() => setColours((x) => !x)}
+            onPress={() => {
+              setMore(false);
+              setColours((x) => !x);
+            }}
             {...tip(hl ? 'Highlighter colour' : 'Pen colour')}
             style={(s) => [
               styles.btn,
@@ -176,6 +211,11 @@ export function FocusPill(p: FocusPillProps) {
           <IconButton icon="minimize" label={p.exitLabel} onPress={p.onExit} />
         </View>
       </Appear>
+      {more && compact ? (
+        <Appear from={p.place.edge === 'bottom' ? 'bottom' : 'top'} style={[styles.pop, shadow2, pop, { backgroundColor: c.surface, borderColor: c.line }]}>
+          {extras}
+        </Appear>
+      ) : null}
       {colours ? (
         <Appear from={p.place.edge === 'bottom' ? 'bottom' : 'top'} style={[styles.pop, shadow2, pop, { backgroundColor: c.surface, borderColor: c.line }]}>
           <SwatchStrip

@@ -1,4 +1,5 @@
 import { createUndoManager, type Comment, type Item, type Notebook, type Page, type PenStyle, type Reading, type TextItem } from '@qalm/core';
+import type { InkRuler } from 'qalm-ink';
 import * as React from 'react';
 import type * as Y from 'yjs';
 
@@ -21,6 +22,8 @@ export interface ToolState {
   snapShapes: boolean;
   /** Lasso: draw a loop around things, or drag a rectangle over them. Tapping selects either way. */
   lassoMode: 'free' | 'rect';
+  /** Laser pointer: a fading trail, or a dot that follows the pen. */
+  laserMode: 'trail' | 'dot';
 }
 
 export interface Selection {
@@ -55,6 +58,8 @@ export interface EditorCtx {
   setTool(t: ToolId): void;
   onPenButton(): void;
   input: InputPrefs;
+  /** The on-screen ruler in window coordinates while it's shown (editor UI, never in the page), else null. */
+  ruler: InkRuler | null;
   /** An overlay saw a real pen (auto-picks "draw with"). */
   onPenSeen(): void;
   undo: CrossPageUndo;

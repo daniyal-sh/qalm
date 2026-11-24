@@ -83,6 +83,15 @@ export function pillScale(place: PillPlace, view: Size, pill: Size, pad: Pad = N
   return Math.max(PILL_MIN_SCALE, Math.min(1, (room - 2 * PILL_MARGIN) / along));
 }
 
+/**
+ * Whether the pill folds its extra tools (laser and ruler) behind a "More tools" button: `along` is its length (px,
+ * unscaled) with them shown, and even at PILL_MIN_SCALE that doesn't fit along its edge (a portrait phone).
+ */
+export function pillCompact(place: PillPlace, view: Size, along: number, pad: Pad = NO_PAD): boolean {
+  const room = isVertical(place.edge) ? view.h - pad.top - pad.bottom : view.w - pad.left - pad.right;
+  return along * PILL_MIN_SCALE > room - 2 * PILL_MARGIN;
+}
+
 /** Where a pill dropped with its centre at (x, y) goes: the nearest edge, at that point along it. */
 export function snapPill(x: number, y: number, view: Size): PillPlace {
   const w = Math.max(1, view.w);

@@ -21,6 +21,13 @@ const TOOLS: { id: ToolId; icon: ToolIconName; label: string }[] = [
   { id: 'eraser', icon: 'eraser', label: 'Eraser' },
   { id: 'lasso', icon: 'lasso', label: 'Lasso select' },
   { id: 'text', icon: 'text', label: 'Text box' },
+  { id: 'laser', icon: 'laser', label: 'Laser pointer' },
+];
+
+/** The laser's modes (K pressed again while the laser is on switches). */
+export const LASER_MODES: { id: 'trail' | 'dot'; icon: ToolIconName; label: string }[] = [
+  { id: 'trail', icon: 'laser-trail', label: 'Laser trail' },
+  { id: 'dot', icon: 'laser-dot', label: 'Laser dot' },
 ];
 
 export const ERASER_SIZES = [4, 10, 22] as const;
@@ -40,13 +47,18 @@ const PEN_STYLE_OPTIONS: { id: PenStyle; icon: ToolIconName; label: string }[] =
 /** A web hover tooltip with the control's name (icon-only controls). */
 const tip = (label: string) => (Platform.OS === 'web' ? ({ title: label } as object) : {});
 
-export function ToolButton({ icon, label, selected, onPress }: { icon: ToolIconName; label: string; selected?: boolean; onPress(): void }) {
+/**
+ * A toolbar tool (solid accent when it's the current tool), or with `toggle` an on/off control such as the ruler
+ * (accent-soft with an accent-line border when on, never a solid fill).
+ */
+export function ToolButton({ icon, label, selected, onPress, toggle }: { icon: ToolIconName; label: string; selected?: boolean; onPress(): void; toggle?: boolean }) {
   const { c } = useTheme();
+  const solid = selected && !toggle;
   return (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole={toggle ? 'switch' : 'button'}
       accessibilityLabel={label}
-      accessibilityState={{ selected }}
+      accessibilityState={toggle ? { checked: !!selected } : { selected }}
       onPress={onPress}
       {...tip(label)}
       // Web: a tool is a toggle button, so screen readers hear "pressed" for the current one.
@@ -54,10 +66,13 @@ export function ToolButton({ icon, label, selected, onPress }: { icon: ToolIconN
       style={(s) => [
         styles.tool,
         hoverTransition,
-        { backgroundColor: selected ? c.accent : s.pressed ? c.soft : (s as { hovered?: boolean }).hovered ? c.surface2 : 'transparent' },
+        {
+          backgroundColor: solid ? c.accent : selected ? c.accentSoft : s.pressed ? c.soft : (s as { hovered?: boolean }).hovered ? c.surface2 : 'transparent',
+          borderColor: selected && toggle ? c.accentLine : 'transparent',
+        },
       ]}
     >
-      <ToolIcon name={icon} size={22} color={selected ? c.onAccent : c.ink2} />
+      <ToolIcon name={icon} size={22} color={solid ? c.onAccent : selected ? c.accentInk : c.ink2} />
     </Pressable>
   );
 }
@@ -142,10 +157,15 @@ export interface ToolbarProps {
   paper?: PaperColor;
   /** Controls placed before the tools (Undo / Redo on a phone, where the header has no room for them). */
   leading?: React.ReactNode;
+  /** The ruler is shown (a toggle, not a tool: the pen stays the tool). */
+  ruler: boolean;
+  onRuler(): void;
+  /** Presentation view (from the laser's options). */
+  onPresent(): void;
 }
 
 /** The floating toolbar: a solid surface with shadow-2 (brand.md). Scrolls sideways on narrow screens. */
-export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoomReset, paper, leading }: ToolbarProps) {
+export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoomReset, paper, leading, ruler, onRuler, onPresent }: ToolbarProps) {
   const { c } = useTheme();
   const t = tools.tool;
   const [dragging, setDragging] = React.useState(false);
@@ -183,6 +203,7 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
           <ToolButton key={x.id} icon={x.icon} label={x.label} selected={t === x.id} onPress={() => onTool(x.id)} />
         ))}
         <ToolButton icon="image" label="Insert image" onPress={onImage} />
+        <ToolButton toggle icon="ruler" label={ruler ? 'Hide ruler' : 'Show ruler'} selected={ruler} onPress={onRuler} />
         <Sep />
         {t === 'pen' || t === 'text' ? (
           <>
@@ -232,6 +253,15 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
             </Text>
           </>
         ) : null}
+        {t === 'laser' ? (
+          <>
+            {LASER_MODES.map((o) => (
+              <StyleOption key={o.id} icon={o.icon} label={o.label} selected={tools.laserMode === o.id} onPress={() => onChange({ laserMode: o.id })} />
+            ))}
+            <Sep />
+            <IconButton icon="monitor" label="Present" size={CONTROL_H_SM} onPress={onPresent} {...tip(`Present${Platform.OS === 'web' ? ' (F5)' : ''}`)} />
+          </>
+        ) : null}
         <Sep />
         <IconButton icon="zoom-out" label="Zoom out" size={CONTROL_H_SM} onPress={() => onZoom(-1)} {...tip('Zoom out')} />
         <Pressable
@@ -256,7 +286,7 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
 const styles = StyleSheet.create({
   bar: { borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth, maxWidth: '100%', alignSelf: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 4 },
-  tool: { width: CONTROL_H, height: CONTROL_H, borderRadius: radius.control, alignItems: 'center', justifyContent: 'center' },
+  tool: { width: CONTROL_H, height: CONTROL_H, borderRadius: radius.control, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
   sizeHit: { width: CONTROL_H_SM, height: CONTROL_H_SM, alignItems: 'center', justifyContent: 'center', borderRadius: radius.control, borderWidth: StyleSheet.hairlineWidth },
   edge: { position: 'absolute', top: 0, bottom: 0, width: 32, alignItems: 'center', justifyContent: 'center' },
   zoomLabel: { minWidth: 48, height: CONTROL_H_SM, paddingHorizontal: space.xxs, borderRadius: radius.control, alignItems: 'center', justifyContent: 'center' },
