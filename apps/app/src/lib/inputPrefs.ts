@@ -18,6 +18,7 @@ export function loadInputPrefs(saved: Partial<InputPrefs> | undefined, cur: Inpu
   next.penSeen = !!(saved?.penSeen || cur.penSeen);
   if (typeof saved?.drawWithAuto !== 'boolean') next.drawWithAuto = saved?.drawWith === 'pen' ? false : cur.drawWithAuto;
   if (next.drawWith !== 'pen' && next.drawWith !== 'any') next.drawWith = cur.drawWith;
+  if (typeof next.scribbleErase !== 'boolean') next.scribbleErase = cur.scribbleErase;
   if (next.drawWithAuto) next.drawWith = autoDrawWith(next.penSeen);
   return next;
 }

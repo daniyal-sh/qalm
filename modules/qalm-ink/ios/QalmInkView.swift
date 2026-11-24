@@ -44,6 +44,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private var penStyle = "fountain"
   private var smoothing = 0
   private var lassoRect = false
+  private var eraserPartial = false  // partial erase: show the eraser's recent trail
   private var drawWithPen = true
   private var rightHanded = true
   private var palmThresholdMm = 20.0
@@ -123,6 +124,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private let liveLayer = CAShapeLayer()
   private let lassoLayer = CAShapeLayer()
   private let cursorLayer = CAShapeLayer()  // hover preview and eraser cursor
+  private let trailLayer = CAShapeLayer()   // partial erase: where the eraser just went
+  private static let eraseTrailMs = 250.0   // InkOverlay.types ERASE_TRAIL_MS
 
   private let inkGesture = InkGestureRecognizer(target: nil, action: nil)
   private var hoverGesture: UIHoverGestureRecognizer?
@@ -136,7 +139,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
 
     strokesLayer.masksToBounds = true
     layer.addSublayer(strokesLayer)
-    for l in [liveLayer, lassoLayer, cursorLayer] {
+    for l in [liveLayer, lassoLayer, cursorLayer, trailLayer] {
       l.fillRule = .nonZero
       l.actions = ["path": NSNull(), "position": NSNull(), "bounds": NSNull(), "hidden": NSNull(),
                    "fillColor": NSNull(), "strokeColor": NSNull(), "opacity": NSNull()]
@@ -148,6 +151,11 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     lassoLayer.lineDashPattern = [6, 4]
     lassoLayer.lineJoin = .round
     layer.addSublayer(lassoLayer)
+    trailLayer.fillColor = nil
+    trailLayer.strokeColor = QalmInkView.eraserCursorColor.withAlphaComponent(0.16).cgColor
+    trailLayer.lineCap = .round
+    trailLayer.lineJoin = .round
+    layer.addSublayer(trailLayer)
     cursorLayer.isHidden = true
     layer.addSublayer(cursorLayer)
 
@@ -206,6 +214,10 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     lassoRect = mode == "rect"
   }
 
+  func setEraserMode(_ mode: String) {
+    eraserPartial = mode == "partial"
+  }
+
   func setInput(drawWith: String, hand: String, palm: String) {
     drawWithPen = drawWith != "any"
     rightHanded = hand != "left"
@@ -249,12 +261,12 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     super.layoutSubviews()
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    for l in [strokesLayer, liveLayer, lassoLayer, cursorLayer] {
+    for l in [strokesLayer, liveLayer, lassoLayer, cursorLayer, trailLayer] {
       l.frame = bounds
     }
     let scale = window?.screen.scale ?? traitCollection.displayScale
     if scale > 0 {
-      for l in [strokesLayer, liveLayer, lassoLayer, cursorLayer] { l.contentsScale = scale }
+      for l in [strokesLayer, liveLayer, lassoLayer, cursorLayer, trailLayer] { l.contentsScale = scale }
     }
     CATransaction.commit()
     rebuildAllPaths()
@@ -675,6 +687,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
       }
       lassoLayer.path = path
     case .eraser:
+      trailLayer.path = eraserPartial ? eraseTrail(pts) : nil
+      trailLayer.lineWidth = CGFloat(a.width) * sx
       if let last = pts.last {
         showCursor(at: CGPoint(x: CGFloat(last.x) * sx, y: CGFloat(last.y) * sy), tool: .eraser, width: a.width, color: a.color)
       }
@@ -740,6 +754,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     case .eraser:
       emitErase(a, isFinal: true)
       cursorLayer.isHidden = true
+      trailLayer.path = nil
     case .lasso:
       let polygon: [[String: Any]] = a.points.map { ["x": $0.x, "y": $0.y] }
       CATransaction.begin()
@@ -767,18 +782,31 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     CATransaction.setDisableActions(true)
     liveLayer.path = nil
     lassoLayer.path = nil
+    trailLayer.path = nil
     CATransaction.commit()
+  }
+
+  /// Partial erase: the eraser's path over its last `eraseTrailMs` (view points).
+  private func eraseTrail(_ pts: [Pt]) -> CGPath? {
+    guard let now = pts.last?.t else { return nil }
+    let trail = pts.filter { $0.t >= now - QalmInkView.eraseTrailMs }
+    guard trail.count > 1, let first = trail.first else { return nil }
+    let path = CGMutablePath()
+    path.move(to: CGPoint(x: CGFloat(first.x) * sx, y: CGFloat(first.y) * sy))
+    for p in trail.dropFirst() { path.addLine(to: CGPoint(x: CGFloat(p.x) * sx, y: CGFloat(p.y) * sy)) }
+    return path
   }
 
   private func emitErase(_ a: Active, isFinal: Bool) {
     let n = a.points.count
     if n == 0 { return }
-    if n <= a.erasedUpTo { return }
+    // The last segment always goes (the app bakes a partial erase on it), even with no new points.
+    if n <= a.erasedUpTo && !isFinal { return }
     // Overlap by one point so consecutive segments join.
-    let from = max(0, a.erasedUpTo - 1)
+    let from = max(0, min(a.erasedUpTo, n) - 1)
     let path: [[String: Any]] = a.points[from..<n].map { ["x": $0.x, "y": $0.y] }
     a.erasedUpTo = n
-    onErase(["path": path])
+    onErase(isFinal ? ["path": path, "final": true] : ["path": path])
   }
 
   /// How long the pen stayed within `heldRadius` page units of where it lifted.

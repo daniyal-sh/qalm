@@ -139,6 +139,9 @@ class Page {                         // wraps one page doc
   items(): Item[]; addItem(item: Item): void; updateItem(id, patch): void; removeItems(ids: string[]): void
   addItems(items: Item[]): void; updateItems(patches: Iterable<[id, patch]>): void   // one transaction (one undo step) each; same result as one call per item
   reorder(ids: string[], to: 'front' | 'back'): void   // z-order; keeps their order among themselves
+  replaceItems(reps: { id; with: Item[] }[]): void     // one transaction: new items take the old one's z-slot; readings of it read
+                                                        // them (stale), threads on it follow them; adds and removes like addItem/removeItems
+  applyErase(plan: ErasePlan): void                     // a partial-erase pass (replaceItems + removeItems), one transaction
   readings(): Reading[]
   setReading(ids, text, src: 'agent'|'user', by?): string | null   // null: no such strokes, or an agent over the student's reading
   editReading(id, text): void       // the student's edit: becomes theirs and fresh; '' removes it
@@ -211,7 +214,11 @@ strokeOutline(s: StrokeItem): [number, number][]; strokeSvgPath(s: StrokeItem): 
 recognizeShape(points): ShapeItem | null                                // no hold gate: the overlays time the hold; see below
 snapShape(points: InkPoint[], heldMs: number): ShapeItem | null          // recognizeShape, only if heldMs >= SNAP_HOLD_MS (400)
 adjustShape(shape, from, to): pts                                        // dragging after the snap; see below
-hitTestErase(items: Item[], path: {x:number;y:number}[], radius: number): string[]
+hitTestErase(items: Item[], path: {x:number;y:number}[], radius: number): string[]   // box culled first: cheap on dense pages
+splitStroke(stroke, path, radius, makeId?): StrokeItem[] | null    // partial erase of one stroke (§7, Erasing); null = missed
+planPartialErase(items, path, radius, makeId?): ErasePlan          // { split: { id, pieces }[]; remove: shape ids }
+scribbleShape(points): ScribbleShape; isScribble(points): boolean  // the scribble shape test (§7, Erasing)
+scribbleTargets(items, points, width): string[]; detectScribble(items, points, width): string[] | null
 lassoSelect(items: Item[], polygon: {x:number;y:number}[]): string[]   // most of the ink inside, or a box's centre
 // Selection (geometry/transform.ts). Sim = { s, r, ox, oy, dx, dy }: p' = o + s·R(r)·(p − o) + d
 transformItem(item, sim): Item; transformPatch(item, sim): Partial<Item>   // widths and font sizes scale; text/images turn (rot)
@@ -510,6 +517,71 @@ in-app clipboard that works across pages and notebooks, copying image assets int
 front / sends to back, comments, asks and deletes; Ctrl/Cmd + C / X / V / D / A and Delete work on desktop. A thread
 started from a selection stores its item ids (`anchorIds`), so its pin, margin card and Q-ink box ref follow the ink; once
 that ink is all deleted, the thread shows only in the panel ("Ink removed").
+
+### Erasing (eraser modes, scribble to erase)
+- **Eraser modes** (the eraser's toolbar options, kv `tools.eraserMode`, default **Whole stroke**; E pressed again while
+  the eraser is on switches): *Whole stroke* removes every stroke or shape the eraser touches (`hitTestErase`).
+  *Partial* rubs out only where it passes (`planPartialErase`): each touched stroke's centreline is cut where it comes
+  within the eraser radius plus half the stroke width, so the pieces' round ends just touch the eraser and the gap is as
+  wide as the eraser. Cuts are found by sampling near the eraser and bisection (one interpolated point per cut); every
+  other point is the stroke's own, so pieces keep pressure, tilt and time, and the tool, colour, width, style, smoothing
+  and `createdAt`. Pieces under ~0.5 units are dropped.
+  - **Nothing is written while the eraser is down.** An `EraseSession` (core `geometry/erase.ts`) keeps what the page
+    would look like: each touched stroke's pieces so far, touched shapes gone. The page draws that (PageCanvas, on
+    every platform) and the next segment is hit-tested against it.
+  - **The pen-up commits it once** (the overlay's last `onErase` has `final: true`; else 400 ms after the last
+    segment, or when the page goes away): one transaction, one undo step: each touched stroke deleted, its pieces
+    added in its z-order slot as ordinary new strokes with `splitFrom` naming the stroke as drawn (copies drop it).
+    Undo is the plain delete/add undo. Older builds and servers see ordinary strokes (no deploy order). An app killed
+    mid-gesture has written nothing. A 50-move rub along a 1000-point stroke grows the doc by ~12 KB (one write of the
+    ~500 points left), against ~907 KB when every move re-created the pieces.
+  - **Two devices at once:** a move of the stroke elsewhere that lands after the erase is lost (the stroke is gone);
+    undoing the erase brings the stroke back as it was. A delete elsewhere stays a delete, but the other device's
+    pieces remain. **Accepted limit:** two devices partially erasing the *same* stroke at the same moment each keep
+    their own pieces, so ink can show twice (and an erased spot can show the other side's ink). Rare for one person's
+    devices; nothing is lost. **Highlighters split too. Shapes are erased whole** (they are
+  geometric, so a piece of a rectangle isn't a rectangle); text boxes and images are never erased. The radius is the
+  eraser size (4 / 10 / 22 units). Each overlay `onErase` segment is one `applyErase` transaction; the app merges a
+  gesture's segments into one undo entry (`CrossPageUndo.merging('erase')`), so **one undo restores the strokes whole**.
+  While erasing in Partial mode the overlay draws a faint trail of the eraser's last 250 ms (`ERASE_TRAIL_MS`) on web,
+  Android and iOS. Cost: the box cull in `hitTestErase` first, then only hit strokes are split (a pass over a
+  3000-stroke page is a few ms).
+- **Agents and readings:** a split is an erase plus new ink. In Q-ink a stroke whose new path is a shorter one inside
+  its old box counts as erased (its old shape, faint red) and fresh (what's left), and the pieces are fresh, so the
+  region is reported as `+pieces -1 (was R…)`. A reading of a split stroke reads its pieces too and goes stale; a
+  thread anchored to it follows the new pieces as well. Lecture mode and anything else that
+  follows the page's items sees the same add/remove events as any edit.
+- **Scribble to erase** (GoodNotes 6 style; Settings → Pen, `scribbleErase`, on by default): when a pen stroke ends
+  (not a snapped shape), `detectScribble` runs. Both must hold, else the stroke is ink:
+  1. **It is a scribble** (`scribbleShape`, on the stroke resampled every 0.4 mm): ≥ **4 sharp reversals** (a turn of
+     ≥ 130° within 1.2 mm of path either side); legs (between reversals) with a median chord of **2.5–120 mm** and
+     **straightness ≥ 0.8**; same-side reversals close together: for 3 in 4 of them, their distance is **≤ 0.4 × the leg
+     length** (the legs lie side by side; "m", "w", "MMM", "NNN" spread theirs out); average speed **≥ 60 mm/s** and
+     at most **3 s** long.
+  2. **It covers ink** (`scribbleTargets`): strokes and shapes with **≥ 60% of their points** inside the scribble's convex
+     hull (grown by 1 mm plus half the pen width) that the **middles of ≥ 3 legs cross** (a leg is the path between
+     two reversals, less **1.2 mm** at each end where it turns; marks under **4 mm** across need one). Two rules for
+     **outlines**: snapped closed shapes, and closed strokes (ends within 20% of their size) that are **≥ 8 mm**
+     across on average, or box-like (**≥ 3 corners** of 60°+ and filling **≥ 85%** of their own box). A small round
+     closed stroke (o, 0, 8) is a letter. An outline whose box, grown by **0.4 × its shorter side (1.5–3 mm)**, holds
+     the whole scribble is never a target (a checkbox ticked with a zig-zag that overshoots it); and when **≥ 60% of
+     the scribble's turns lie within 1.5 mm** of an outline whose grown box holds ≥ 80% of them, the scribble is
+     shading and **deletes nothing**, not even ink written inside (a "2" in a shaded box), unless the ink inside spans
+     **≥ 60% of the outline one way and ≥ 40% the other** (a boxed answer being scribbled out). Text and images are
+     never deleted.
+  A scribble over empty paper (or shading) covers nothing and stays ink. Otherwise the covered ink is removed in one
+  transaction (one undo brings it back), the scribble is never added (the overlay drops it through `committedIds`, as
+  a hand-off), and the deleted ink fades out over 320 ms (`EraseFade`; at once with reduced motion). Thresholds are in
+  page mm (1 unit = 1/72 in), so the same scribble works at any zoom. Tests: real-looking zig-zags (horizontal,
+  vertical scratch-out, diagonal, small, uneven) and a corpus of ~150 handwriting strokes that must not trigger (m, mmm,
+  w, www, MMM, NNN, ZZZ, eee, lll, sine, 8, spiral, a slow spring, a sparse sawtooth, a double underline, a tremor;
+  2.5–8 mm at 25–90 mm/s, plus tall fast coils at 120–260 mm/s), and shading inside a 30 × 15 mm box and a 10 mm circle
+  (hand-drawn and snapped; 0.6 / 1 / 1.5 mm apart at 80 / 150 / 200 mm/s; turning at the outline or overshooting it by
+  1 mm; diagonal) that must keep the outline, 6–8 mm checkboxes ticked 2 mm past their sides, and a "2" inside a
+  shaded box, in `packages/core/test/scribble.test.ts`; scribble-outs of a word in a hand-drawn box (1.5 / 2 / 3 mm
+  margins) and of small closed letters (o, 8, "2o") in `scribbleProbes.test.ts`.
+- **Limits:** a vertical scratch-out with legs further apart than ~0.4 × their length (e.g. 6 mm legs moving on 1.5 mm
+  each) is kept as ink; scribble back and forth along the words instead. Circular scribbles ("@@@") aren't detected.
 
 ### Shape snapping (live: `recognizeShape`, `adjustShape`)
 GoodNotes-style, gated by the `snapShapes` setting (the app passes `recognizeShape` to the overlay only when it's on):

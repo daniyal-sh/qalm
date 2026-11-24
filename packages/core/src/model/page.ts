@@ -3,6 +3,8 @@ import { LOCAL_ORIGIN } from '../origin';
 import { encodePoints, decodePoints } from '../points';
 import { itemBBox, unionBBox } from '../geometry/bbox';
 import { boxGap, NEAR, pageUnit, ROW_GAP, ROW_OVERLAP } from '../geometry/regions';
+import type { ErasePlan } from '../geometry/erase';
+import { transformPatch, type Sim } from '../geometry/transform';
 import { newId } from '../ids';
 import type { Author, BBox, Comment, InkPoint, Item, Reading, ReadingSrc } from '../types';
 
@@ -262,6 +264,75 @@ export class Page {
     });
   }
 
+  /**
+   * Replaces items by others in one transaction (one undo step), e.g. a stroke by the pieces a partial erase left
+   * (`with: []` removes it). The new items take the old one's place in the z-order. It goes through the same paths as
+   * `addItem` and `removeItems` (new ids added, old ids removed), so anything that follows the page's items, readings or
+   * an agent's regions sees an erase and new ink. Readings of a replaced stroke read its pieces instead, and go stale
+   * (the ink they read changed); comment threads on it follow its pieces too (and keep the old id, for undo).
+   */
+  replaceItems(replacements: readonly { id: string; with: readonly Item[] }[]): void {
+    const reps = replacements.filter((r) => this.itemMap.has(r.id));
+    if (!reps.length) return;
+    this.tx(() => {
+      const byOld = new Map(reps.map((r) => [r.id, r.with.map((it) => it.id)]));
+      // Readings first, before this transaction notes any ink (see inkChanges): they read the pieces from now on.
+      this.readingMap.forEach((m) => {
+        const ids = m.get('ids');
+        if (!Array.isArray(ids) || !ids.some((id) => byOld.has(id as string))) return;
+        const next = (ids as string[]).flatMap((id) => byOld.get(id) ?? [id]);
+        if (next.length) {
+          m.set('ids', [...new Set(next)]);
+          m.set('stale', true);
+        }
+      });
+      this.commentMap.forEach((m) => {
+        const ids = m.get('anchorIds');
+        if (!Array.isArray(ids) || !ids.some((id) => byOld.has(id as string))) return;
+        m.set('anchorIds', [...new Set((ids as string[]).flatMap((id) => [id, ...(byOld.get(id) ?? [])]))]);
+      });
+      this.dirty();
+      for (const r of reps) {
+        const at = this.order.toArray().indexOf(r.id);
+        for (const item of r.with) {
+          this.noteInk(item.id);
+          const m = new Y.Map<unknown>();
+          this.itemMap.set(item.id, m);
+          m.set('id', item.id);
+          m.set('type', item.type);
+          setFields(m, item as unknown as Record<string, unknown>);
+        }
+        const ids = r.with.map((it) => it.id);
+        if (!ids.length) continue;
+        if (at >= 0) this.order.insert(at, ids);
+        else this.order.push(ids);
+      }
+      this.removeItems(reps.map((r) => r.id));
+    });
+  }
+
+  /** Moves, turns or resizes items about `f`, in one transaction (one undo step). */
+  transformItems(ids: Iterable<string>, f: Sim): void {
+    this.tx(() => {
+      for (const id of ids) {
+        const it = this.item(id);
+        if (it) this.updateItem(id, transformPatch(it, f));
+      }
+    });
+  }
+
+  /**
+   * Commits a partial erase in one transaction (one undo step): strokes replaced by their pieces (in their z-order
+   * slot; none left: removed), shapes removed. The app calls it once per eraser gesture, when the pen lifts.
+   */
+  applyErase(plan: ErasePlan): void {
+    if (!plan.split.length && !plan.remove.length) return;
+    this.tx(() => {
+      this.replaceItems(plan.split.map((s) => ({ id: s.id, with: s.pieces })));
+      if (plan.remove.length) this.removeItems(plan.remove);
+    });
+  }
+
   // ---- readings ----
 
   readings(): Reading[] {
@@ -480,7 +551,7 @@ export class Page {
         this.itemMap.set(id, m);
         from.forEach((v, k) => {
           if (k === 'id') m.set('id', id);
-          else if (k === 'line') return;
+          else if (k === 'line' || k === 'splitFrom') return; // a copy is new ink, not a piece of anything here
           else m.set(k, v instanceof Uint8Array ? v.slice() : Array.isArray(v) ? JSON.parse(JSON.stringify(v)) : v);
         });
         order.push(id);

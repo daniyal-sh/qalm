@@ -9,6 +9,7 @@ import { IconButton } from '../ui/controls';
 import { Icon } from '../ui/Icon';
 import { Text } from '../ui/Text';
 import type { ToolState } from './context';
+import type { EraserMode } from './items';
 import { SwatchStrip } from './Swatches';
 import { ToolIcon, type ToolIconName } from './toolIcons';
 import { toolbarOverflow } from './toolbar.logic';
@@ -23,6 +24,12 @@ const TOOLS: { id: ToolId; icon: ToolIconName; label: string }[] = [
 ];
 
 export const ERASER_SIZES = [4, 10, 22] as const;
+
+/** The eraser's modes (E switches between them while the eraser is on). */
+export const ERASER_MODES: { id: EraserMode; icon: ToolIconName; label: string }[] = [
+  { id: 'stroke', icon: 'erase-stroke', label: 'Whole stroke' },
+  { id: 'partial', icon: 'erase-partial', label: 'Partial' },
+];
 
 const PEN_STYLE_OPTIONS: { id: PenStyle; icon: ToolIconName; label: string }[] = [
   { id: 'fountain', icon: 'fountain', label: 'Fountain pen' },
@@ -207,6 +214,10 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
         ) : null}
         {t === 'eraser' ? (
           <>
+            {ERASER_MODES.map((o) => (
+              <StyleOption key={o.id} icon={o.icon} label={o.label} selected={tools.eraserMode === o.id} onPress={() => onChange({ eraserMode: o.id })} />
+            ))}
+            <Sep />
             {ERASER_SIZES.map((r, i) => (
               <SizeDot key={r} size={6 + i * 5} label={['Small eraser', 'Medium eraser', 'Large eraser'][i]!} selected={tools.eraserRadius === r} onPress={() => onChange({ eraserRadius: r })} />
             ))}

@@ -56,6 +56,8 @@ export interface ShapePreview {
 }
 export interface EraseEvent {
   path: { x: number; y: number }[];
+  /** The pen (or finger, mouse) lifted: this is the gesture's last segment (the app bakes a partial erase then). */
+  final?: boolean;
 }
 export interface LassoEvent {
   /**
@@ -82,6 +84,11 @@ export interface InkOverlayProps {
   penStyle?: InkPenStyle;
   /** pen only; default 0 (none) */
   smoothing?: InkSmoothing;
+  /**
+   * eraser only: 'partial' (the app splits strokes where it passes) also shows a faint trail of the eraser's last
+   * ERASE_TRAIL_MS under the pen, while the page catches up. Default 'stroke'.
+   */
+  eraserMode?: 'stroke' | 'partial';
   /** lasso only: a freeform loop (default) or a rectangle from where the drag started to where it is now */
   lassoMode?: 'free' | 'rect';
   input: InkInputSettings;
@@ -121,6 +128,8 @@ export interface InkOverlayProps {
 /** Palm rejection constants (tech-spec §3). Shared by every overlay implementation. */
 export const PALM_MAJOR_MM = { relaxed: 30, standard: 20, strict: 14 } as const;
 export const PEN_LOCKOUT_MS = 600;
+/** Partial erase: the trail under the eraser covers its last this many ms. */
+export const ERASE_TRAIL_MS = 250;
 /** Live shapes: hold this long (ms) … */
 export const SHAPE_HOLD_MS = 400;
 /** … within this distance (mm) of where the hold began (core: SNAP_HOLD_MS / SNAP_HOLD_TOLERANCE_MM). */
