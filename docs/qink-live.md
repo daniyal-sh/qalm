@@ -173,8 +173,9 @@ exactly as before. 2026-07-28 clients skip the handshake: each request carries
 and (for `tools/call`) `Mcp-Name` headers, and may start with `server/discover`. Results add `resultType: "complete"` and
 `serverInfo` in `_meta`; `tools/list` and `server/discover` add `ttlMs` (1 h) and `cacheScope: "public"`. Missing or
 mismatched headers get 400 with -32020, missing `_meta` 400 with -32602, an unknown version 400 with -32022 and
-`data.supported`, and methods 2026-07-28 dropped (`initialize`, `ping`, …) 404 with -32601. The tools, OAuth and
-long-poll `wait` are the same in both eras.
+`data.supported`, and methods 2026-07-28 dropped (`initialize`, `ping`, …) 404 with -32601. `initialize` always gets
+the legacy handshake. The tools, OAuth and long-poll `wait` are the same in both eras; in both, a client that
+disconnects cancels its pending `wait`, so the update it would have carried goes to the next `wait` instead.
 
 **Which notebooks an agent sees.** An approved agent can use every notebook whose **AI access** is on, now and in the
 future, and none other: there is no per-agent notebook choice. `wait()` lists exactly those, and every tool checks the

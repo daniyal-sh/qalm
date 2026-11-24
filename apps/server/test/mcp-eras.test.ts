@@ -14,7 +14,12 @@ const META = (version = V) => ({
 
 let id = 1000;
 /** A modern POST: `_meta` in the body and the mirrored headers, any of which a test can override or drop (null). */
-async function modern(token: string, method: string, params: Record<string, unknown> = {}, over: { headers?: Record<string, string | null>; meta?: unknown; body?: unknown } = {}) {
+async function modern(
+  token: string,
+  method: string,
+  params: Record<string, unknown> = {},
+  over: { headers?: Record<string, string | null>; meta?: unknown; body?: unknown; signal?: AbortSignal } = {},
+) {
   const body = over.body ?? { jsonrpc: '2.0', id: ++id, method, params: { ...params, _meta: over.meta === undefined ? META() : over.meta } };
   const h: Record<string, string | null> = {
     Accept: 'application/json, text/event-stream',
@@ -24,7 +29,7 @@ async function modern(token: string, method: string, params: Record<string, unkn
     ...over.headers,
   };
   const headers = Object.fromEntries(Object.entries(h).filter((e): e is [string, string] => e[1] !== null));
-  const r = await call('/mcp', { method: 'POST', token, headers, body: JSON.stringify(body) });
+  const r = await call('/mcp', { method: 'POST', token, headers, body: JSON.stringify(body), signal: over.signal });
   return { status: r.status, body: r.status === 202 ? null : ((await r.json()) as { id?: unknown; result?: any; error?: any }) };
 }
 const text = (r: { result?: { content: { type: string; text?: string }[] } }) => r.result!.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n');
@@ -61,6 +66,22 @@ describe('mcp protocol eras', () => {
     // Legacy unknown tools and methods keep their old answers (HTTP 200, no modern error codes).
     expect((await mcp(token, 'tools/call', { name: 'nope', arguments: {} })).error.code).toBe(-32602);
     expect((await mcp(token, 'server/list')).error.code).toBe(-32601);
+
+    // initialize selects legacy semantics even when a client already sends a modern MCP-Protocol-Version header.
+    const hs = await call('/mcp', {
+      method: 'POST',
+      token,
+      headers: { 'MCP-Protocol-Version': V, 'Mcp-Method': 'initialize' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {} } }),
+    });
+    expect(hs.status).toBe(200);
+    expect(((await hs.json()) as { result: { protocolVersion: string } }).result.protocolVersion).toBe('2025-11-25');
+    // A version header that isn't a date never counts as modern.
+    for (const v of ['zzz', '9999', 'latest']) {
+      const r = await call('/mcp', { method: 'POST', token, headers: { 'MCP-Protocol-Version': v }, body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list' }) });
+      expect(r.status, v).toBe(200);
+      expect(Object.keys(((await r.json()) as { result: object }).result), v).toEqual(['tools']);
+    }
   });
 
   it('modern: server/discover → tools/list → tools/call with _meta, long-poll wait included', async () => {
@@ -113,6 +134,8 @@ describe('mcp protocol eras', () => {
     expect(bad.body!.result).toMatchObject({ resultType: 'complete', isError: true });
     expect((await modern(token, 'tools/call', { name: 'nope', arguments: {} })).body!.error.code).toBe(-32602);
     expect((await modern(token, 'tools/call', { name: 'wait', arguments: 'x' })).body!.error.code).toBe(-32602);
+    // A non-string tool name is invalid params, not a header mismatch.
+    expect((await modern(token, 'tools/call', { name: 5, arguments: {} })).body!.error).toMatchObject({ code: -32602, message: expect.stringContaining('name must be a string') });
     // tools/list is one page; a cursor we never issued is invalid.
     expect((await modern(token, 'tools/list', { cursor: 'abc' })).body!.error).toMatchObject({ code: -32602, message: 'Invalid cursor' });
   });
@@ -172,6 +195,14 @@ describe('mcp protocol eras', () => {
   it('modern: methods 2026-07-28 removed answer 404 -32601; GET and DELETE stay 405', async () => {
     await signIn('era-removed@example.com');
     const token = await connectAgent('era-removed@example.com', { comment: false, transcribe: false });
+    // Unserved methods are 404 -32601 before any header check, so a dual-era probe reads them as modern, not legacy.
+    for (const [method, params] of [['resources/read', { uri: 'qalm://x' }], ['prompts/get', { name: 'x' }]] as const) {
+      const r = await modern(token, method, params, { headers: { 'Mcp-Name': null } });
+      expect(r.status, method).toBe(404);
+      expect(r.body!.error.code, method).toBe(-32601);
+    }
+    const mis = await modern(token, 'initialize', { protocolVersion: V, capabilities: {} }, { headers: { 'Mcp-Method': 'ping' } });
+    expect([mis.status, mis.body!.error.code]).toEqual([404, -32601]);
     for (const method of ['initialize', 'ping', 'logging/setLevel', 'subscriptions/listen', 'resources/list']) {
       const r = await modern(token, method, method === 'initialize' ? { protocolVersion: V, capabilities: {} } : {});
       expect(r.status, method).toBe(404);
@@ -184,5 +215,24 @@ describe('mcp protocol eras', () => {
     // Notifications are accepted and ignored.
     const note = await modern(token, 'notifications/cancelled', {}, { body: { jsonrpc: '2.0', method: 'notifications/cancelled', params: { _meta: META() } } });
     expect(note.status).toBe(202);
+  });
+
+  it('a wait whose client disconnects is cancelled: nothing is marked delivered, and the next wait gets the update', async () => {
+    const t = await signIn('era-cancel@example.com');
+    const n = await notebook(t, 'eracancel', 'Cancel');
+    const token = await connectAgent('era-cancel@example.com', { comment: false, transcribe: false });
+    const s = sessionOf('eracancel');
+    const ac = new AbortController();
+    const gone = modern(token, 'tools/call', { name: 'wait', arguments: { s } }, { signal: ac.signal }).catch((e: unknown) => e);
+    await new Promise((r) => setTimeout(r, 100));
+    ac.abort();
+    expect(await gone).toBeInstanceOf(Error);
+    // The student writes and pauses well past WAKE_IDLE_MS: an uncancelled wait would deliver (and consume) r=1 now.
+    n.page.addItem(stroke('k1', 50, 100, 200, 120));
+    await new Promise((r) => setTimeout(r, 1000));
+    const at = Date.now();
+    const next = await modern(token, 'tools/call', { name: 'wait', arguments: { s } });
+    expect(text(next.body!)).toBe([`#q s=${s} r=1 p1 1000x1415 first look`, 'R1 [1] p1 @84,168 253x34'].join('\n'));
+    expect(Date.now() - at).toBeLessThan(1500); // delivered at once, not after the 2.5 s timeout
   });
 });

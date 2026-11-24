@@ -74,6 +74,8 @@ type Content = { type: 'text'; text: string } | { type: 'image'; data: string; m
 interface ToolResult { content: Content[]; isError?: boolean }
 
 class ToolError extends Error {}
+/** The HTTP request a call came in on: its signal aborts when the client disconnects. */
+interface Live { signal: AbortSignal; waitUntil(p: Promise<unknown>): void }
 
 const MAX_TEXT = 4000;
 
@@ -86,12 +88,13 @@ export const mcpHandler = {
     } catch {
       return json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }, 400);
     }
-    if (isModern(req, body)) return serveModern(req, body, INSTRUCTIONS, (m) => handle(m, env, ctx.props));
+    const live: Live = { signal: req.signal, waitUntil: (p) => ctx.waitUntil(p) };
+    if (isModern(req, body)) return serveModern(req, body, INSTRUCTIONS, (m) => handle(m, env, ctx.props, live));
     const batch = Array.isArray(body);
     const msgs = (batch ? body : [body]) as RpcMsg[];
     const out = [];
     for (const m of msgs) {
-      const r = await handle(m, env, ctx.props);
+      const r = await handle(m, env, ctx.props, live);
       if (r) out.push(r);
     }
     if (!out.length) return new Response(null, { status: 202 });
@@ -99,7 +102,7 @@ export const mcpHandler = {
   },
 };
 
-async function handle(m: RpcMsg, env: Env, props: McpProps): Promise<object | null> {
+async function handle(m: RpcMsg, env: Env, props: McpProps, live?: Live): Promise<object | null> {
   if (!m || typeof m !== 'object' || typeof m.method !== 'string') {
     return m && 'id' in m ? { jsonrpc: '2.0', id: m.id ?? null, error: { code: -32600, message: 'Invalid request' } } : null;
   }
@@ -125,7 +128,7 @@ async function handle(m: RpcMsg, env: Env, props: McpProps): Promise<object | nu
       const args = (m.params?.arguments ?? {}) as Record<string, unknown>;
       if (!TOOLS.some((t) => t.name === name)) return fail(-32602, `Unknown tool: ${name}`);
       try {
-        return ok(await callTool(env, props, name, args));
+        return ok(await callTool(env, props, name, args, live));
       } catch (e) {
         if (e instanceof ToolError || e instanceof Error) return ok({ content: [{ type: 'text', text: e.message }], isError: true });
         throw e;
@@ -168,7 +171,7 @@ async function target(env: Env, g: GrantRow, s: unknown): Promise<NotebookChoice
   return hit;
 }
 
-async function callTool(env: Env, props: McpProps, name: string, args: Record<string, unknown>): Promise<ToolResult> {
+async function callTool(env: Env, props: McpProps, name: string, args: Record<string, unknown>, live?: Live): Promise<ToolResult> {
   const g = await activeGrant(env, props.grantId);
   if (!g || g.user_id !== props.userId) throw new ToolError('Access to qalm has expired or was revoked. Reconnect to continue.');
 
@@ -193,7 +196,12 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
   await env.DB.prepare('UPDATE grants SET last_used_at = ?2, last_session = ?3 WHERE id = ?1').bind(g.id, now(), session).run();
 
   if (name === 'wait') {
-    const r = await stub.agentWait(docId, who, session, agentCfg(env));
+    // A client that disconnects cancels its wait (MCP 2026-07-28 cancellation; legacy responses can't be resumed
+    // either), so nothing is marked delivered that the client never got.
+    const waitId = crypto.randomUUID();
+    const cancel = () => live?.waitUntil(stub.agentCancel(docId, waitId));
+    live?.signal.addEventListener('abort', cancel);
+    const r = await stub.agentWait(docId, who, session, agentCfg(env), waitId).finally(() => live?.signal.removeEventListener('abort', cancel));
     return result(env, g, 'wait', `${nb.title}${r.changed ? '' : r.text.endsWith(' paused') ? ' (paused)' : ' (no changes)'}`, r);
   }
   if (name === 'read') {

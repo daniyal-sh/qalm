@@ -25,6 +25,8 @@ const UNSUPPORTED_PROTOCOL_VERSION = -32022;
 const CACHE = { ttlMs: 60 * 60 * 1000, cacheScope: 'public' } as const;
 /** Methods whose name or uri goes in the `Mcp-Name` header, and the param it mirrors. */
 const NAMED: Record<string, string> = { 'tools/call': 'name', 'resources/read': 'uri', 'prompts/get': 'name' };
+/** The methods served in the modern era; anything else is 404 -32601. */
+const SERVED = new Set(['server/discover', 'tools/list', 'tools/call']);
 
 export interface RpcRequest { jsonrpc: '2.0'; id: string | number; method: string; params: Record<string, unknown> }
 /** Runs a request the way mcp.ts does for legacy clients: a JSON-RPC response with a result or an error. */
@@ -32,21 +34,24 @@ type Dispatch = (m: RpcRequest) => Promise<object | null>;
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const metaOf = (m: unknown) => (isObj(m) && isObj(m.params) && isObj(m.params._meta) ? m.params._meta : undefined);
-const isModernVersion = (v: string) => !LEGACY_VERSIONS.includes(v) && v >= MODERN_VERSIONS[MODERN_VERSIONS.length - 1]!;
+const isModernVersion = (v: unknown) =>
+  typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !LEGACY_VERSIONS.includes(v) && v >= MODERN_VERSIONS[MODERN_VERSIONS.length - 1]!;
 
 /**
  * Whether a POST body is modern. Legacy clients never put a protocol version in `_meta`, so any `_meta` version that isn't
  * a legacy one makes the request modern (including an unknown one, which then gets -32022), as does `server/discover`
- * (modern only) or an `MCP-Protocol-Version` header naming a modern version. Anything else, `initialize` included, stays
- * on the legacy path exactly as before.
+ * (modern only) or an `MCP-Protocol-Version` header naming a modern version. `initialize` selects legacy semantics
+ * (basic/versioning), so it is modern only when its `_meta` names a modern version. Anything else stays on the legacy
+ * path exactly as before.
  */
 export function isModern(req: Request, body: unknown): boolean {
-  const header = req.headers.get('MCP-Protocol-Version');
-  if (header !== null && isModernVersion(header)) return true;
+  const header = isModernVersion(req.headers.get('MCP-Protocol-Version'));
   return (Array.isArray(body) ? body : [body]).some((m) => {
     const v = metaOf(m)?.[PROTOCOL_VERSION];
+    const method = isObj(m) ? m.method : undefined;
+    if (method === 'initialize') return isModernVersion(v);
     if (v !== undefined && !(typeof v === 'string' && LEGACY_VERSIONS.includes(v))) return true;
-    return isObj(m) && m.method === 'server/discover';
+    return header || method === 'server/discover';
   });
 }
 
@@ -78,6 +83,8 @@ export async function serveModern(req: Request, body: unknown, instructions: str
   const method = body.method;
   const params = body.params ?? {};
   if (!isObj(params)) return fail(400, id, -32602, 'Invalid params: params must be an object');
+  // Unserved (or removed: initialize, ping, …) methods first, so they are 404 -32601 whatever their headers say.
+  if (!SERVED.has(method)) return fail(404, id, -32601, `Method not found: ${method}`);
 
   // Streamable HTTP "Server Validation": the standard headers are required and must match the body.
   const mismatch = (what: string) => fail(400, id, HEADER_MISMATCH, `Header mismatch: ${what}`);
@@ -88,6 +95,7 @@ export async function serveModern(req: Request, body: unknown, instructions: str
   if (hMethod !== method) return mismatch(`Mcp-Method header value '${hMethod}' does not match body value '${method}'`);
   const nameParam = NAMED[method];
   if (nameParam) {
+    if (typeof params[nameParam] !== 'string') return fail(200, id, -32602, `Invalid params for ${method}: ${nameParam} must be a string`);
     const raw = req.headers.get('Mcp-Name');
     if (raw === null) return mismatch('missing Mcp-Name header');
     const name = headerValue(raw);
@@ -122,7 +130,6 @@ export async function serveModern(req: Request, body: unknown, instructions: str
       if (params.cursor !== undefined) return fail(200, id, -32602, 'Invalid cursor');
       return run(CACHE);
     case 'tools/call':
-      if (typeof params.name !== 'string') return fail(200, id, -32602, 'Invalid params for tools/call: name must be a string');
       if (params.arguments !== undefined && !isObj(params.arguments)) return fail(200, id, -32602, "Invalid params for tools/call: 'arguments' must be an object");
       return run();
     default:
