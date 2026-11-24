@@ -395,6 +395,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
           if (eraseAlong(page, ed.undo, e.path, t.eraserRadius, t.eraserMode, newId)) ed.touchPage(info.id);
         }}
         lassoMode={t.lassoMode}
+        eraserMode={t.eraserMode}
         onLasso={({ nativeEvent: e }) => {
           const pts = e.polygon;
           const last = pts[pts.length - 1];

@@ -127,8 +127,8 @@ describe('scribble to erase', () => {
     const items: Item[] = [];
     for (let r = 0; r < 40; r++) for (let c = 0; c < 6; c++) items.push(...handwriting(`d${r}_${c}_`, 'cos(x)', 40 + c * 90, 20 + r * 20, 14));
     const pts = trace(zigzag(30, 0.6, 12), { at: [130, 400], speed: 160 });
-    const t0 = performance.now();
+    const t0 = Date.now();
     for (let i = 0; i < 10; i++) detectScribble(items, pts, 1.8);
-    expect((performance.now() - t0) / 10).toBeLessThan(25);
+    expect((Date.now() - t0) / 10).toBeLessThan(25);
   });
 });

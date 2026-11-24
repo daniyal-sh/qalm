@@ -51,6 +51,10 @@ public class QalmInkModule: Module {
         view.setLassoMode(mode ?? "free")
       }
 
+      Prop("eraserMode") { (view: QalmInkView, mode: String?) in
+        view.setEraserMode(mode ?? "stroke")
+      }
+
       Prop("input") { (view: QalmInkView, input: [String: Any]) in
         view.setInput(
           drawWith: input["drawWith"] as? String ?? "pen",

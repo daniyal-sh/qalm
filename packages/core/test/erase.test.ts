@@ -111,9 +111,9 @@ describe('planPartialErase', () => {
     expect(items.length).toBeGreaterThan(3000);
     const path = Array.from({ length: 8 }, (_, i) => ({ x: 100 + i * 4, y: 200 + i }));
     planPartialErase(items, path, 10, ids);
-    const t0 = performance.now();
+    const t0 = Date.now();
     for (let i = 0; i < 20; i++) planPartialErase(items, path, 10, ids);
-    expect((performance.now() - t0) / 20).toBeLessThan(8);
+    expect((Date.now() - t0) / 20).toBeLessThan(8);
   });
 });
 

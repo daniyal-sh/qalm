@@ -1,7 +1,7 @@
 // Smoke test of the packaged app (release/win-unpacked, or QALM_EXE): library renders, PDF import through the
 // native open dialog (stubbed in main), drawing with the mouse, reload on a deep route (SPA fallback), PDF export
 // through the native save dialog (stubbed), a live shape drawn with a simulated pen (hold to snap, drag to resize, lift,
-// undo), a qalm:// link handed to a second instance, and no console errors.
+// undo), the partial eraser splitting a line (undo), scribble to erase (undo), a qalm:// link handed to a second instance, and no console errors.
 //
 // A build with a server URL (EXPO_PUBLIC_QALM_SERVER_URL) opens on the sign-in screen with a fresh profile:
 //   QALM_E2E_SIGNIN=skip  (default) "Continue without an account"
@@ -241,6 +241,85 @@ try {
       throw new Error(`after undo: ${JSON.stringify(undone.map((it) => it.kind ?? it.type))}`);
     }
     log('live shape: one undo brought the hand-drawn stroke back; screenshots in', shots);
+
+    // A pen stroke along (x0, y) → (x1, y) in `n` steps (`dy` bends it), then lifted.
+    const penLine = async (pts) => {
+      await pen('mouseMoved', ...pts[0]);
+      penDown = true;
+      await pen('mousePressed', ...pts[0]);
+      for (const p of pts.slice(1)) await pen('mouseMoved', ...p);
+      penDown = false;
+      await pen('mouseReleased', ...pts[pts.length - 1]);
+      await win.waitForTimeout(600);
+    };
+    const H = Math.min(box.height, 600);
+    const strokesOf = (items) => items.filter((it) => it.type === 'stroke');
+    const xRange = (it) => [Math.min(...it.points.map((q) => q.x)), Math.max(...it.points.map((q) => q.x))];
+
+    // 4c. Partial eraser: a pen line, then the eraser in "Partial" mode across its middle splits it in two (style and
+    // pressure kept); one undo brings the line back whole.
+    await win.keyboard.press('p');
+    const ly = box.y + H * 0.82;
+    const lx0 = box.x + box.width * 0.2;
+    const lx1 = box.x + box.width * 0.5;
+    const before4c = await pageItems();
+    await win.keyboard.press('p');
+    await penLine(Array.from({ length: 31 }, (_, i) => [lx0 + ((lx1 - lx0) * i) / 30, ly]));
+    const withLine = await pageItems();
+    const lineItem = strokesOf(withLine).find((it) => !before4c.some((b) => b.id === it.id));
+    if (!lineItem) throw new Error('the pen line was not added');
+    await win.keyboard.press('e');
+    await win.getByLabel('Partial', { exact: true }).first().click();
+    const ex = (lx0 + lx1) / 2;
+    await penLine(Array.from({ length: 11 }, (_, i) => [ex, ly - 30 + i * 6]));
+    await shot('erase-1-partial.png');
+    const split = await pageItems();
+    const pieces = strokesOf(split).filter((it) => !withLine.some((b) => b.id === it.id));
+    if (split.some((it) => it.id === lineItem.id) || pieces.length !== 2) {
+      throw new Error(`partial erase: expected the line split in two, got ${pieces.length} new strokes (line ${split.some((it) => it.id === lineItem.id) ? 'kept' : 'gone'})`);
+    }
+    const [a4c, b4c] = pieces.map(xRange).sort((p, q) => p[0] - q[0]);
+    if (!(a4c[1] < b4c[0]) || pieces.some((p) => p.width !== lineItem.width || p.color !== lineItem.color || p.style !== lineItem.style)) {
+      throw new Error(`partial erase: the pieces should keep the line's look and leave a gap (${JSON.stringify([a4c, b4c])})`);
+    }
+    await win.keyboard.press('Control+z');
+    await win.waitForTimeout(500);
+    const unsplit = await pageItems();
+    if (!unsplit.some((it) => it.id === lineItem.id) || unsplit.length !== withLine.length) throw new Error('partial erase: one undo should restore the line');
+    log(`partial eraser: split the line in two (gap ${((b4c[0] - a4c[1]) * pxPerUnit).toFixed(0)} px), one undo restored it`);
+    // Back to whole-stroke mode (the default), so later steps and runs start as a new user would.
+    await win.keyboard.press('e');
+    await win.getByLabel('Whole stroke', { exact: true }).first().click();
+
+    // 4d. Scribble to erase: a quick zig-zag with the pen over a short stroke deletes it (and isn't kept); one undo
+    // brings it back. Back-and-forth over empty paper stays ink.
+    await win.keyboard.press('p');
+    const sy = box.y + H * 0.66;
+    const sx0 = box.x + box.width * 0.62;
+    const sx1 = box.x + box.width * 0.78;
+    await penLine(Array.from({ length: 21 }, (_, i) => [sx0 + ((sx1 - sx0) * i) / 20, sy + Math.sin(i / 3) * 4]));
+    const withTarget = await pageItems();
+    const target = strokesOf(withTarget).find((it) => !unsplit.some((b) => b.id === it.id));
+    if (!target) throw new Error('scribble: the target stroke was not added');
+    await win.keyboard.press('p');
+    const zig = [];
+    for (let leg = 0; leg <= 10; leg++) {
+      const y = sy - 14 + leg * 2.8;
+      const [from, to] = leg % 2 ? [sx1 + 8, sx0 - 8] : [sx0 - 8, sx1 + 8];
+      for (let k = 0; k < 6; k++) zig.push([from + ((to - from) * k) / 6, y + (2.8 * k) / 6]);
+    }
+    await penLine(zig);
+    await shot('scribble-1-erased.png');
+    const scribbled = await pageItems();
+    if (scribbled.some((it) => it.id === target.id) || scribbled.length !== withTarget.length - 1) {
+      throw new Error(`scribble: expected the target deleted and the scribble not kept (${withTarget.length} → ${scribbled.length} items)`);
+    }
+    await win.keyboard.press('Control+z');
+    await win.waitForTimeout(500);
+    const back = await pageItems();
+    if (!back.some((it) => it.id === target.id)) throw new Error('scribble: one undo should bring the ink back');
+    log('scribble to erase: a zig-zag deleted the stroke under it (scribble not kept), one undo brought it back');
+    await win.keyboard.press('p');
   }
 
   // 5. Reload on the deep route: the app:// protocol serves index.html for /notebook/<id>.

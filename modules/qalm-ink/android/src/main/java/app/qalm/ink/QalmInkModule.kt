@@ -47,6 +47,7 @@ class QalmInkModule : Module() {
       Prop("strokeWidth") { view: QalmInkView, v: Double -> view.strokeWidth = v } // not "width": Fabric would read that as layout width
       Prop("penStyle") { view: QalmInkView, v: String? -> view.penStyle = v ?: "fountain" }
       Prop("smoothing") { view: QalmInkView, v: Int? -> view.smoothing = (v ?: 0).coerceIn(0, 3) }
+      Prop("eraserMode") { view: QalmInkView, v: String? -> view.eraserMode = if (v == "partial") "partial" else "stroke" }
       Prop("lassoMode") { view: QalmInkView, v: String? -> view.lassoMode = if (v == "rect") "rect" else "free" }
       Prop("input") { view: QalmInkView, v: InputRecord ->
         view.drawWith = v.drawWith

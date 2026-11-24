@@ -9,6 +9,7 @@ import {
   type InkPoint,
   type InkSmoothing,
   type ShapePreview,
+  ERASE_TRAIL_MS,
   SHAPE_HOLD_MM,
   SHAPE_HOLD_MS,
 } from './InkOverlay.types';
@@ -20,6 +21,7 @@ const PULSE_MS = 260;
 /** The halo starts this wide (CSS px) beyond the line. */
 const PULSE_PX = 7;
 const LASSO_COLOR = '#4338ca'; // brand accent
+const ERASE_TRAIL_COLOR = '#8b8b95'; // brand faint
 /** A finished stroke whose id never reaches committedIds (e.g. snapped to a shape) is dropped after this. */
 const PENDING_FALLBACK_MS = 4000;
 /**
@@ -215,6 +217,21 @@ export function InkOverlay(props: InkOverlayProps) {
         ctx.strokeStyle = LASSO_COLOR;
         ctx.stroke();
         ctx.setLineDash([]);
+      }
+
+      // Partial erase: a faint trail of where the eraser just went, while the page catches up.
+      if (live?.kind === 'erase' && propsRef.current.eraserMode === 'partial' && live.points.length > 1) {
+        const now = live.points[live.points.length - 1]!.t;
+        const trail = live.points.filter((p) => p.t >= now - ERASE_TRAIL_MS);
+        if (trail.length > 1) {
+          ctx.beginPath();
+          trail.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+          ctx.lineWidth = propsRef.current.width;
+          ctx.strokeStyle = ERASE_TRAIL_COLOR;
+          ctx.globalAlpha = 0.16;
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
       }
 
       // Brush preview: hover, or the eraser under the pen.

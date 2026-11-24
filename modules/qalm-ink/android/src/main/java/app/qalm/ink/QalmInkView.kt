@@ -83,6 +83,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   var penStyle = "fountain"
   var smoothing = 0
   var lassoMode = "free" // free | rect
+  /** partial: the live eraser leaves a faint trail of its last ERASE_TRAIL_MS (the app splits strokes as it goes). */
+  var eraserMode = "stroke"
   /** Live shapes on (the app passed `recognizeShape`): report holds with onShapeHold. */
   var shapeSnap = false
   var drawWith by input::drawWith
@@ -417,6 +419,9 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     /** A snapped shape: stroked at [shapeWidth] page units in [fillColor] / [fillAlpha]. */
     val shape: Path? = null,
     val shapeWidth: Float = 0f,
+    /** Partial erase: where the eraser just went, stroked at [trailWidth] page units. */
+    val trail: Path? = null,
+    val trailWidth: Float = 0f,
   )
 
   /** Pens are opaque; a highlighter uses its colour's own alpha (#rrggbbaa) or HIGHLIGHTER_ALPHA (tech-spec §2). */
@@ -455,9 +460,20 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
           }
         },
       )
-      else -> l.points.lastOrNull()?.let { Frame(cursor = doubleArrayOf(it.x, it.y, l.width / 2), cursorColor = ERASER_CURSOR) } ?: Frame()
+      else -> l.points.lastOrNull()?.let {
+        Frame(cursor = doubleArrayOf(it.x, it.y, l.width / 2), cursorColor = ERASER_CURSOR, trail = eraseTrail(l), trailWidth = l.width.toFloat())
+      } ?: Frame()
     }
     layer.drawFrame(frame)
+  }
+
+  /** Partial erase: the eraser's path over its last ERASE_TRAIL_MS (null in whole-stroke mode). */
+  private fun eraseTrail(l: Live): Path? {
+    if (eraserMode != "partial" || l.points.size < 2) return null
+    val now = l.points.last().t
+    val trail = l.points.filter { it.t >= now - ERASE_TRAIL_MS }
+    if (trail.size < 2) return null
+    return Path().apply { trail.forEachIndexed { i, p -> if (i == 0) moveTo(p.x.toFloat(), p.y.toFloat()) else lineTo(p.x.toFloat(), p.y.toFloat()) } }
   }
 
   private fun frameForHover(): Frame? {
@@ -520,6 +536,12 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
       linePaint.pathEffect = DashPathEffect(floatArrayOf(6f * resources.displayMetrics.density * px, 4f * resources.displayMetrics.density * px), 0f)
       canvas.drawPath(it, linePaint)
       linePaint.pathEffect = null
+    }
+    frame.trail?.let {
+      shapePaint.color = ERASER_CURSOR
+      shapePaint.alpha = 41 // ~0.16
+      shapePaint.strokeWidth = frame.trailWidth
+      canvas.drawPath(it, shapePaint)
     }
     frame.cursor?.let {
       linePaint.color = frame.cursorColor
@@ -608,6 +630,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     const val PENDING_FALLBACK_MS = 4000L
     /** How long a finished stroke stays after its id is in committedIds (same as iOS). */
     const val HANDOFF_MS = 50L
+    /** Partial erase: the trail under the eraser (InkOverlay.types ERASE_TRAIL_MS). */
+    const val ERASE_TRAIL_MS = 250.0
     const val HIGHLIGHTER_ALPHA = 0.45
     val LASSO_COLOR = Color.parseColor("#4338ca")
     val ERASER_CURSOR = Color.parseColor("#8b8b95")
