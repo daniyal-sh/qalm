@@ -1,6 +1,6 @@
 # qalm v1 technical spec (rev 3)
 
-Read with `decisions.md` (scope), `qink-live.md` (AI format) and **`brand.md` (qalm by Apollo: colours, type, mark)**.
+Read with `decisions.md` (scope), `qink-live.md` (AI format), `lecture-mode.md` (recording sessions) and **`brand.md` (qalm by Apollo: colours, type, mark)**.
 Layouts and flows come from [`design/mockups/editor.html`](design/mockups/editor.html), [`screens-library.html`](design/mockups/screens-library.html) and [`screens-ai.html`](design/mockups/screens-ai.html).
 Their colours and fonts are superseded by `brand.md`.
 This file is the **contract between packages**. If you must change a contract, change it here too.
@@ -49,6 +49,9 @@ pg:{notebookId}:{pageId}   page doc
   comments: Y.Map<commentId, Y.Map>
 
 lib:{userId}               library doc: folders + notebook entries {id,title,cover,folderId,updatedAt,aiAccess,favorite,deletedAt}
+  lectures: Y.Map<sessionId, LectureSummary>   lecture sessions (lecture-mode.md §5)
+
+lec:{notebookId}:{sessionId}   lecture session doc: meta, timeline (deflated JSONL chunks), audio, transcript, crops
   swatches: Y.Map<'pen'|'highlighter', Y.Array<string>>   saved colours, in order; a missing key = the brand palette
 ```
 

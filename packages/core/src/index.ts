@@ -98,3 +98,34 @@ export {
   type QinkAsk,
 } from './qink';
 export { threadBox, anchorInkRemoved } from './anchor';
+export { LectureClock } from './lecture/clock';
+export { LectureLog } from './lecture/log';
+export { LectureReplay, strokeTimes, type BaseLookup } from './lecture/replay';
+export { LectureDoc, lectureDocId, LECTURE_SERVER_ORIGIN } from './lecture/doc';
+export {
+  itemToJson,
+  itemFromJson,
+  eventsToJsonl,
+  eventsFromJsonl,
+  packTimelineChunk,
+  unpackTimelineChunk,
+  unpackTimeline,
+  fmtT,
+  parseT,
+} from './lecture/timeline';
+export { lectureFiles, readLectureFiles, lectureReadme, lectureBundleOf, lectureDocFromBundle, type LectureBundle } from './lecture/bundle';
+export {
+  emptyLectures,
+  lectureLabel,
+  resolveLecture,
+  transcriptLine,
+  lectureLine,
+  parseLectureRef,
+  encodeLectureRead,
+  parseCropRegions,
+  LECTURE_READ_WINDOW_MS,
+  LECTURE_READ_IMAGES,
+  type QinkLectures,
+  type LectureReadPart,
+} from './lecture/qink';
+export type * from './lecture/types';
