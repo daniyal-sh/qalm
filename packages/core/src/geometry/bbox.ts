@@ -1,5 +1,5 @@
 import { wrapText } from '../render/text';
-import { layoutMarkdown } from '../markdown/layout';
+import { layoutMarkdown, rendersMarkdown } from '../markdown/layout';
 import { TEXT_CHAR_WIDTH, TEXT_LINE_HEIGHT } from './textConstants';
 import type { BBox, ImageItem, Item, TextItem } from '../types';
 
@@ -49,7 +49,7 @@ export function setTextMeasure(fn: TextMeasure | null): void {
  */
 export function textHeight(item: Pick<TextItem, 'text' | 'w' | 'fontSize' | 'format'>): number {
   const row = item.fontSize * TEXT_LINE_HEIGHT;
-  if (item.format === 'md') return Math.max(row, layoutMarkdown(item.text, item.w, item.fontSize).height);
+  if (rendersMarkdown(item)) return Math.max(row, layoutMarkdown(item.text, item.w, item.fontSize).height);
   const h = measure?.(item);
   if (h != null && Number.isFinite(h)) return Math.max(row, h);
   return textRows(item) * row;

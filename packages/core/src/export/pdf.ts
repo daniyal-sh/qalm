@@ -10,8 +10,8 @@ import type { Notebook } from '../model/notebook';
 import type { Page } from '../model/page';
 import { FIGTREE_REGULAR_B64 } from './figtreeFont';
 import { FONT_B_B64, FONT_BI_B64, FONT_I_B64, FONT_M_B64, FONT_X_B64 } from '../markdown/fontData';
-import { layoutMarkdown } from '../markdown/layout';
-import type { MdFont } from '../markdown/fonts';
+import { layoutMarkdown, rendersMarkdown } from '../markdown/layout';
+import { clusters, type MdFont } from '../markdown/fonts';
 import type { TextItem } from '../types';
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -60,6 +60,9 @@ function textRuns(fonts: { font: PDFFont; has: Set<number> }[], s: string): Run[
   return runs;
 }
 
+/** The layout places glyphs by their plain advances: no ligatures (fi, fl, ->) in Markdown boxes' text. */
+const NO_LIGATURES = { liga: false, clig: false, dlig: false, calt: false };
+
 const MD_FONT_B64: Record<Exclude<MdFont, 'r'>, string> = { b: FONT_B_B64, i: FONT_I_B64, bi: FONT_BI_B64, m: FONT_M_B64, x: FONT_X_B64 };
 
 /**
@@ -74,7 +77,8 @@ async function drawMarkdown(out: PDFPage, H: number, item: TextItem, font: (f: M
   const at = (u: number, v: number) => ({ x: item.x + u * cos - v * sin, y: H - (item.y + u * sin + v * cos) });
   const rotate = rot ? { rotate: degrees((-rot * 180) / Math.PI) } : {};
   for (const op of layoutMarkdown(item.text, item.w, item.fontSize).ops) {
-    if (op.k === 'text') out.drawText(op.text, { ...at(op.x, op.y), size: op.size, font: await font(op.font), color, ...rotate });
+    // Text no bundled font has draws as `?` (one per character), as plain boxes do.
+    if (op.k === 'text') out.drawText(op.fallback ? clusters(op.text).map(() => '?').join('') : op.text, { ...at(op.x, op.y), size: op.size, font: await font(op.font), color, ...rotate });
     else if (op.k === 'rect') out.drawRectangle({ ...at(op.x, op.y + op.h), width: op.w, height: op.h, color, ...(op.alpha < 1 ? { opacity: op.alpha } : {}), ...rotate });
     else out.drawSvgPath(op.d, { ...at(op.x, op.y), scale: op.s, color, borderWidth: 0, ...rotate });
   }
@@ -124,7 +128,7 @@ export async function exportPdf(
   const mdFonts = new Map<MdFont, Promise<PDFFont>>();
   const mdFont = (f: MdFont) => {
     let p = mdFonts.get(f);
-    if (!p) mdFonts.set(f, (p = pdf.embedFont(f === 'r' ? figtreeBytes() : fromBase64(MD_FONT_B64[f]), { subset: true })));
+    if (!p) mdFonts.set(f, (p = pdf.embedFont(f === 'r' ? figtreeBytes() : fromBase64(MD_FONT_B64[f]), { subset: true, features: NO_LIGATURES })));
     return p;
   };
   const sources = new Map<string, Promise<PDFDocument>>();
@@ -198,7 +202,7 @@ export async function exportPdf(
           break;
         }
         case 'text': {
-          if (item.format === 'md') {
+          if (rendersMarkdown(item)) {
             await drawMarkdown(out, H, item, mdFont);
             break;
           }

@@ -1,4 +1,4 @@
-import { inkPaint, itemsOnPaper, paperPattern, shapePolylines, textHeight, type Item, type PageInfo } from '@qalm/core';
+import { inkPaint, itemsOnPaper, paperPattern, rendersMarkdown, shapePolylines, textHeight, type Item, type PageInfo } from '@qalm/core';
 import { BlendMode, ImageFormat, PaintStyle, Skia, StrokeCap, StrokeJoin, type SkImage, type SkPaint } from '@shopify/react-native-skia';
 
 
@@ -106,7 +106,7 @@ export async function renderThumbnail({ info, items, background, width }: Thumbn
     } else if (it.type === 'text') {
       turn(it.x, it.y, it.rot);
       // A Markdown box's rows come from its layout (headings, lists, maths); a plain one's from its lines.
-      const lines = it.format === 'md' ? Math.max(1, Math.round(textHeight(it) / (it.fontSize * 1.3))) : Math.max(1, it.text.split('\n').length);
+      const lines = rendersMarkdown(it) ? Math.max(1, Math.round(textHeight(it) / (it.fontSize * 1.3))) : Math.max(1, it.text.split('\n').length);
       const grey = paint((q) => q.setColor(Skia.Color(inkPaint('pen', it.color).rgb)));
       grey.setAlphaf(0.35);
       for (let l = 0; l < lines; l++) canvas.drawRect(Skia.XYWHRect(it.x, it.y + l * it.fontSize * 1.3 + it.fontSize * 0.25, it.w * 0.9, it.fontSize * 0.6), grey);

@@ -3,8 +3,8 @@ import MarkdownItCtor, { type MarkdownIt, type StateBlock, type StateInline, typ
 /**
  * The Markdown qalm renders in text boxes (with `format: 'md'`) and comments: bold, italic, strikethrough, headings,
  * bullet and numbered lists, blockquotes, inline code and code blocks, links and TeX maths (`$x^2$`, `$$…$$`).
- * Raw HTML is dropped (never rendered), images show their alt text (nothing is ever fetched), and a single newline is
- * a line break, as people type in a note. Parsed into a small tree that every renderer (Skia on the page, pdf-lib,
+ * Raw HTML is never rendered: it shows as the text it is (so `0<x and y>1` or `<T>` stay as typed). Images show their
+ * alt text (nothing is ever fetched), and a single newline is a line break, as people type in a note. Parsed into a small tree that every renderer (Skia on the page, pdf-lib,
  * SVG for agents' crops, React Native for comments) draws the same way.
  */
 
@@ -115,8 +115,9 @@ function mathBlock(state: StateBlock, startLine: number, endLine: number, silent
 let md: MarkdownIt | null = null;
 function parser(): MarkdownIt {
   if (md) return md;
-  // html: true only so raw HTML becomes html_* tokens, which toBlocks drops: it is stripped, never shown or rendered.
-  md = new MarkdownItCtor('commonmark', { html: true, breaks: true, linkify: false, typographer: false });
+  // html: false: tags are plain text. (Dropping HTML tokens deleted ordinary text like `if 0<x and y>1`, and a `<pre>`
+  // or `<!--` line hid the rest of the box.)
+  md = new MarkdownItCtor('commonmark', { html: false, breaks: true, linkify: false, typographer: false });
   md.enable('strikethrough');
   md.validateLink = (url) => safeHref(url) !== null || !/^[a-z][a-z0-9+.-]*:/i.test(url.trim());
   md.inline.ruler.after('escape', 'math_inline', mathInline);
@@ -185,7 +186,6 @@ function inlines(children: readonly Token[]): MdInline[] {
         // Never fetched: an image shows its alt text.
         text(tok.children ? tok.children.map((c) => c.content).join('') : tok.content);
         break;
-      // html_inline: raw HTML is stripped.
     }
   }
   return out;
@@ -253,7 +253,6 @@ function blocks(tokens: readonly Token[], from: number, to: number): MdBlock[] {
       case 'hr':
         out.push({ t: 'hr' });
         break;
-      // html_block: raw HTML is stripped.
     }
     i++;
   }

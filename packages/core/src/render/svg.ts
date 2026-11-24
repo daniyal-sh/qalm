@@ -3,7 +3,7 @@ import { inkPaint } from '../geometry/color';
 import { shapePolylines } from '../geometry/shape';
 import { itemsOnPaper, paperPattern, DOT_RADIUS, RULE_WIDTH } from '../geometry/paper';
 import { TEXT_LINE_HEIGHT } from '../geometry/bbox';
-import { layoutMarkdown } from '../markdown/layout';
+import { layoutMarkdown, rendersMarkdown } from '../markdown/layout';
 import type { MdFont } from '../markdown/fonts';
 import { escapeXml, wrapText } from './text';
 import type { Page } from '../model/page';
@@ -41,7 +41,8 @@ export function markdownSvg(item: Pick<TextItem, 'x' | 'y' | 'w' | 'text' | 'fon
     return `<path transform="translate(${n(op.x)} ${n(op.y)}) scale(${op.s.toFixed(5)})" d="${op.d}"/>`;
   });
   const rot = item.rot ? ` rotate(${n((item.rot * 180) / Math.PI)})` : '';
-  return `<g transform="translate(${n(item.x)} ${n(item.y)})${rot}" fill="${fill}">${parts.join('')}</g>`;
+  // The layout places glyphs by their plain advances: no kerning or ligatures here either (resvg applies both by default).
+  return `<g transform="translate(${n(item.x)} ${n(item.y)})${rot}" fill="${fill}" font-kerning="none" font-variant-ligatures="none">${parts.join('')}</g>`;
 }
 
 /** SVG markup of one item, in page units. `ink` overrides every colour (used by the line strip). */
@@ -60,7 +61,7 @@ export function itemSvg(item: Item, opts: { assetUrl?: (id: string) => string; i
     case 'shape':
       return `<path d="${shapeSvgPath(item)}" fill="none" stroke="${escapeXml(opts.ink ?? item.color)}" stroke-width="${n(item.width)}" stroke-linecap="round" stroke-linejoin="round"/>`;
     case 'text': {
-      if (item.format === 'md') return markdownSvg(item, opts.ink ?? item.color);
+      if (rendersMarkdown(item)) return markdownSvg(item, opts.ink ?? item.color);
       const rows = wrapText(item.text, item.w, (s) => s.length * item.fontSize * 0.55);
       const lh = item.fontSize * TEXT_LINE_HEIGHT;
       const spans = rows.map((r, i) => `<tspan x="${n(item.x)}" y="${n(item.y + item.fontSize + i * lh)}">${escapeXml(r)}</tspan>`).join('');

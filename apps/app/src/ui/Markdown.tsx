@@ -1,4 +1,4 @@
-import { parseMarkdown, texToPath, type MathBox, type MdBlock, type MdInline } from '@qalm/core';
+import { allowedMath, parseMarkdown, texToPath, type MathBox, type MdBlock, type MdInline } from '@qalm/core';
 import * as React from 'react';
 import { Linking, Platform, StyleSheet, View, type TextStyle } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -10,6 +10,9 @@ import { Text } from './Text';
 /** Maths is drawn this much larger than the text (as in text boxes: Computer Modern runs small next to Figtree). */
 const MATH_SCALE = 1.15;
 const HEADING = [1.3, 1.15, 1.05, 1, 1, 1];
+
+/** The comment's formulas that may render (`allowedMath`: a cap per comment); the rest show their source. */
+const MathAllowed = React.createContext<ReadonlySet<object>>(new Set());
 
 /** TeX as an inline SVG of its outlines (the same paths text boxes draw), sitting on the text's baseline. */
 function MathSvg({ box, size, color }: { box: MathBox; size: number; color: string }) {
@@ -44,13 +47,14 @@ function inlineStyle(m: MdInline & { t: 'text' | 'math' }, colors: { link: strin
 
 function Inlines({ c: items, size, color }: { c: readonly MdInline[]; size: number; color: string }) {
   const { c } = useTheme();
+  const allowed = React.useContext(MathAllowed);
   const colors = { link: c.accent, code: c.soft };
   return (
     <>
       {items.map((x, k) => {
         if (x.t === 'br') return '\n';
         if (x.t === 'math') {
-          const box = texToPath(x.tex, false);
+          const box = allowed.has(x) ? texToPath(x.tex, false) : null;
           if (box) return <MathSvg key={k} box={box} size={size} color={color} />;
           return (
             <Text key={k} style={inlineStyle({ ...x, m: { ...x.m, code: true } }, colors)}>
@@ -75,6 +79,7 @@ function Inlines({ c: items, size, color }: { c: readonly MdInline[]; size: numb
 
 function Blocks({ blocks, size, color, depth = 0 }: { blocks: readonly MdBlock[]; size: number; color: string; depth?: number }) {
   const { c } = useTheme();
+  const allowed = React.useContext(MathAllowed);
   return (
     <View style={styles.blocks}>
       {blocks.map((b, k) => {
@@ -121,7 +126,7 @@ function Blocks({ blocks, size, color, depth = 0 }: { blocks: readonly MdBlock[]
               </View>
             );
           case 'math': {
-            const box = texToPath(b.tex, true);
+            const box = allowed.has(b) ? texToPath(b.tex, true) : null;
             return box ? (
               <View key={k} style={styles.mathBlock} accessibilityLabel={b.tex}>
                 <MathSvg box={box} size={size} color={color} />
@@ -142,12 +147,17 @@ function Blocks({ blocks, size, color, depth = 0 }: { blocks: readonly MdBlock[]
 
 /**
  * A comment's text as Markdown (the same parser as text boxes): bold, italic, strikethrough, headings, lists, quotes,
- * code, links (http, https and mailto only) and TeX maths. Raw HTML is stripped, never rendered.
+ * code, links (http, https and mailto only) and TeX maths (capped per comment). Raw HTML shows as text, never rendered.
  */
 export function Markdown({ text, color }: { text: string; color?: string }) {
   const { c } = useTheme();
   const blocks = React.useMemo(() => parseMarkdown(text), [text]);
-  return <Blocks blocks={blocks} size={typeRamp.body.fontSize} color={color ?? c.ink} />;
+  const allowed = React.useMemo(() => allowedMath(blocks), [blocks]);
+  return (
+    <MathAllowed.Provider value={allowed}>
+      <Blocks blocks={blocks} size={typeRamp.body.fontSize} color={color ?? c.ink} />
+    </MathAllowed.Provider>
+  );
 }
 
 const styles = StyleSheet.create({

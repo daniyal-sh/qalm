@@ -13,6 +13,7 @@ import {
   resolveThread,
   renderRegionsSvg,
   threadLabel,
+  withMathBudget,
   type BBox,
   type InkSeen,
   type QinkImage,
@@ -53,6 +54,12 @@ interface AgentState {
   seen?: QinkSeen;
 }
 
+/**
+ * New maths (TeX characters) one step of an agent request may render: Markdown text boxes' formulas, when regions are
+ * measured and when the crop is drawn. Past it, formulas show their source in the crop. Counted in characters because a
+ * Worker's clock doesn't advance during synchronous work.
+ */
+const CROP_MATH = { chars: 10_000, ms: 1000 };
 const agentKey = (clientId: string) => `agent:${clientId}`;
 /** The ink this agent last saw on a page (stroke id → signature), one key per page to keep rows small. */
 const inkKey = (clientId: string, pageId: string) => `ink:${clientId}:${pageId}`;
@@ -191,7 +198,7 @@ export class AgentHub {
   }
 
   private imageSvg(pages: Record<string, Page>, image: QinkImage | null): string | null {
-    return image?.rows.length ? renderRegionsSvg(pages, image.rows).svg : null;
+    return image?.rows.length ? withMathBudget(CROP_MATH, () => renderRegionsSvg(pages, image.rows).svg) : null;
   }
 
   private state(clientId: string): AgentState {
@@ -269,7 +276,7 @@ export class AgentHub {
     const threads = this.threads();
     const prev: Record<string, InkSeen | undefined> = {};
     for (const id of Object.keys(pages)) prev[id] = this.r.kvGet<InkSeen>(inkKey(clientId, id));
-    const u = encodeQinkUpdate(nb, pages, regions, prev, { session, rev: st.rev + 1, client: clientId, asks, threads, seen: st.seen });
+    const u = withMathBudget(CROP_MATH, () => encodeQinkUpdate(nb, pages, regions, prev, { session, rev: st.rev + 1, client: clientId, asks, threads, seen: st.seen }));
     this.r.kvPut('regions', regions);
     this.r.kvPut('threads', threads);
     for (const [id, ink] of Object.entries(u.ink)) this.r.kvPut(inkKey(clientId, id), ink);
@@ -305,7 +312,7 @@ export class AgentHub {
     const pages = await this.loadPages(ids);
     this.requireAccess();
     const regions = this.regions();
-    const r = encodeQinkRead(nb, pages, regions, r0, who.clientId);
+    const r = withMathBudget(CROP_MATH, () => encodeQinkRead(nb, pages, regions, r0, who.clientId));
     this.r.kvPut('regions', regions);
     return { text: r.text, svg: this.imageSvg(pages, r.image), changed: false };
   }

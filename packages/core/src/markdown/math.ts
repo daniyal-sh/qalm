@@ -1,12 +1,11 @@
-import { mathjax } from 'mathjax-full/js/mathjax.js';
+import { HTMLHandler } from 'mathjax-full/js/handlers/html/HTMLHandler.js';
 import { TeX } from 'mathjax-full/js/input/tex.js';
 import { SVG } from 'mathjax-full/js/output/svg.js';
 import { liteAdaptor, type LiteAdaptor } from 'mathjax-full/js/adaptors/liteAdaptor.js';
-import { RegisterHTMLHandler } from 'mathjax-full/js/handlers/html.js';
+import type { MathDocument } from 'mathjax-full/js/core/MathDocument.js';
 import type { LiteElement } from 'mathjax-full/js/adaptors/lite/Element.js';
 import 'mathjax-full/js/input/tex/base/BaseConfiguration.js';
 import 'mathjax-full/js/input/tex/ams/AmsConfiguration.js';
-import 'mathjax-full/js/input/tex/newcommand/NewcommandConfiguration.js';
 import 'mathjax-full/js/input/tex/noundefined/NoUndefinedConfiguration.js';
 import 'mathjax-full/js/input/tex/boldsymbol/BoldsymbolConfiguration.js';
 
@@ -25,16 +24,45 @@ export interface MathBox {
 
 type Affine = [sx: number, sy: number, tx: number, ty: number];
 
-let jax: { adaptor: LiteAdaptor; doc: ReturnType<typeof mathjax.document> } | null = null;
+/**
+ * Limits on maths, so one box or comment (synced, or written by an agent) can't stall the app, PDF export or the
+ * Worker: MathJax is synchronous, so the only defence is what it's given. Past a limit the TeX source is shown instead.
+ */
+export const MATH_LIMITS = {
+  /** TeX characters in one formula. */
+  texChars: 1000,
+  /** Path data of one formula (~200 KB); `x+x+…` at 1000 characters makes ~500 KB. */
+  pathChars: 200_000,
+  /** Formulas rendered per text box or comment (`mathAllowance`). */
+  perDoc: 30,
+  /** TeX characters rendered per text box or comment, in total (~0.3 s of MathJax at worst, on a desktop). */
+  docChars: 5000,
+  /** MathJax's own limits: macro expansions per formula, and the size its input may grow to while expanding. */
+  maxMacros: 500,
+  maxBuffer: 4 * 1024,
+} as const;
+
+/** The AMS package's `\DeclareMathOperator` table: global in MathJax, so it is emptied after every formula. */
+const AMS_DECLARED_OPS = 'ams-declare-ops';
+
+let jax: { adaptor: LiteAdaptor; doc: MathDocument<unknown, unknown, unknown>; tex: TeX<unknown, unknown, unknown> } | null = null;
 function mathJax() {
   if (jax) return jax;
   const adaptor = liteAdaptor();
-  RegisterHTMLHandler(adaptor);
-  const doc = mathjax.document('', {
-    InputJax: new TeX({ packages: ['base', 'ams', 'newcommand', 'noundefined', 'boldsymbol'] }),
-    OutputJax: new SVG({ fontCache: 'none' }),
-  });
-  return (jax = { adaptor, doc });
+  // The document comes straight from its handler, not MathJax's global handler registry (a second copy of that module,
+  // as in the Workers test runtime, would leave the registry empty).
+  // No `newcommand`: definitions (\def, \newcommand, \renewcommand) would outlive their formula and change every later
+  // one (another user's, in the same Worker), and they're what makes TeX expand exponentially.
+  const tex = new TeX({ packages: ['base', 'ams', 'noundefined', 'boldsymbol'], maxMacros: MATH_LIMITS.maxMacros, maxBuffer: MATH_LIMITS.maxBuffer });
+  const doc = new HTMLHandler(adaptor).create('', { InputJax: tex, OutputJax: new SVG({ fontCache: 'none' }) });
+  return (jax = { adaptor, doc, tex });
+}
+
+/** Forgets what a formula defined (`\DeclareMathOperator`, `\label`), so each formula renders the same on its own. */
+function resetTex(tex: TeX<unknown, unknown, unknown>): void {
+  const ops = tex.parseOptions.handlers.retrieve(AMS_DECLARED_OPS) as unknown as { map?: Map<string, unknown> } | undefined;
+  ops?.map?.clear();
+  tex.reset();
 }
 
 const r = (v: number) => Math.round(v * 10) / 10;
@@ -171,31 +199,106 @@ function collect(adaptor: LiteAdaptor, node: LiteElement, m: Affine, out: string
   }
 }
 
-const MAX_CACHED = 300;
+/** Cached formulas, most recently used last, bounded by count and by the size of their paths (tests lower these). */
+export const MATH_CACHE = { count: 2000, chars: 4_000_000 };
 const cache = new Map<string, MathBox | null>();
+let cachedChars = 0;
+const sizeOf = (b: MathBox | null | undefined) => b?.path.length ?? 0;
+
+function remember(key: string, box: MathBox | null): void {
+  cache.set(key, box);
+  cachedChars += sizeOf(box);
+  while (cache.size > MATH_CACHE.count || cachedChars > MATH_CACHE.chars) {
+    const [k, old] = cache.entries().next().value!;
+    cache.delete(k);
+    cachedChars -= sizeOf(old);
+  }
+}
+
+/** A per-request maths budget (`withMathBudget`): TeX characters left, and a deadline where the clock moves. */
+let budget: { chars: number; until: number } | null = null;
+let skipped = 0;
+const clock = (globalThis as { performance?: { now(): number } }).performance;
+const now = () => (clock ? clock.now() : Date.now());
 
 /**
- * Lays out TeX with MathJax; null when it can't be rendered (a TeX error), so the caller shows the source instead.
- * `display` is display style (`$$…$$`). Cached.
+ * Runs `fn` with at most `chars` TeX characters (and, where the clock advances during work, `ms`) of new maths: formulas
+ * past it show their source. For work that renders many boxes at once, like the Worker's crops for agents. Cached
+ * formulas are free. Nested budgets don't add up: the inner one applies while it runs.
+ */
+export function withMathBudget<T>(limit: { chars: number; ms: number }, fn: () => T): T {
+  const prev = budget;
+  budget = { chars: limit.chars, until: now() + limit.ms };
+  try {
+    return fn();
+  } finally {
+    budget = prev;
+  }
+}
+
+/** How many formulas a budget has turned away so far (layouts that had any aren't cached). */
+export const mathSkipped = (): number => skipped;
+
+/**
+ * Counts the maths of one text box or comment against `MATH_LIMITS.perDoc` and `docChars`: true while a formula may
+ * still be rendered.
+ */
+export function mathAllowance(): (tex: string) => boolean {
+  let n = 0;
+  let chars = 0;
+  return (tex) => {
+    if (n >= MATH_LIMITS.perDoc || chars + tex.length > MATH_LIMITS.docChars) return false;
+    n++;
+    chars += tex.length;
+    return true;
+  };
+}
+
+/**
+ * Lays out TeX with MathJax; null when it can't be rendered (a TeX error, or past `MATH_LIMITS` or the budget), so the
+ * caller shows the source instead. `display` is display style (`$$…$$`). Cached.
  */
 export function texToPath(tex: string, display: boolean): MathBox | null {
+  if (tex.length > MATH_LIMITS.texChars) return null;
   const key = `${display ? 'D' : 'I'}${tex}`;
-  if (cache.has(key)) return cache.get(key)!;
+  if (cache.has(key)) {
+    const hit = cache.get(key)!;
+    // Most recently used last.
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit;
+  }
+  if (budget) {
+    if (budget.chars < tex.length || now() > budget.until) {
+      skipped++;
+      return null;
+    }
+    budget.chars -= tex.length;
+  }
   let box: MathBox | null = null;
+  let mj: ReturnType<typeof mathJax>;
   try {
-    const { adaptor, doc } = mathJax();
+    mj = mathJax();
+  } catch {
+    // MathJax couldn't start here: show sources (not cached, so a later call may try again).
+    return null;
+  }
+  try {
+    const { adaptor, doc } = mj;
     const container = doc.convert(tex, { display, em: 16, ex: 8, containerWidth: 80 * 16 }) as LiteElement;
     const svg = adaptor.firstChild(container) as LiteElement;
     if (svg && adaptor.kind(svg) === 'svg' && !adaptor.outerHTML(container).includes('data-mjx-error')) {
       const [minX = 0, minY = 0, vw = 0, vh = 0] = String(adaptor.getAttribute(svg, 'viewBox') ?? '').split(/\s+/).map(Number);
       const paths: string[] = [];
       for (const child of adaptor.childNodes(svg)) collect(adaptor, child as LiteElement, [1, 1, -minX, 0], paths);
-      box = { w: vw / 1000, a: -minY / 1000, d: (vh + minY) / 1000, path: paths.join('') };
+      const path = paths.join('');
+      if (path.length <= MATH_LIMITS.pathChars) box = { w: vw / 1000, a: -minY / 1000, d: (vh + minY) / 1000, path };
     }
   } catch {
     box = null;
+  } finally {
+    resetTex(mj.tex);
   }
-  if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value!);
-  cache.set(key, box);
+  remember(key, box);
   return box;
 }

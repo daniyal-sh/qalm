@@ -1,6 +1,19 @@
-import { layoutMarkdown, type MdFont, type TextItem } from '@qalm/core';
+import { layoutMarkdown, setFallbackTextMeasure, type MdFont, type TextItem } from '@qalm/core';
 import * as React from 'react';
-import { FontHinting, Skia, useTypeface, type SkCanvas, type SkFont, type SkPath, type SkPicture, type SkTypeface } from '@shopify/react-native-skia';
+import {
+  FontHinting,
+  FontSlant,
+  Skia,
+  TextAlign,
+  useTypeface,
+  type SkCanvas,
+  type SkFont,
+  type SkParagraph,
+  type SkPath,
+  type SkPicture,
+  type SkTypeface,
+  type SkTypefaceFontProvider,
+} from '@shopify/react-native-skia';
 
 import figtree from '../assets/fonts/Figtree-Regular.ttf';
 import figtreeBold from '../assets/fonts/Figtree-Bold.ttf';
@@ -9,6 +22,7 @@ import figtreeBoldItalic from '../assets/fonts/Figtree-BoldItalic.ttf';
 import geistMono from '../assets/fonts/GeistMono-Regular.ttf';
 import notoMath from '../assets/fonts/NotoSansMath-Subset.ttf';
 import { disposeLater } from './dispose';
+import { TEXT_FONTS } from './textMetrics';
 
 /** The typefaces of Markdown text boxes, by core's font key (`MdFont`). */
 export type MdTypefaces = Record<MdFont, SkTypeface>;
@@ -59,8 +73,48 @@ function pathOf(d: string): SkPath | null {
 }
 
 /**
+ * Text none of the Markdown fonts has (Cyrillic, CJK, emoji, …: core's fallback runs) is drawn and measured by a Skia
+ * Paragraph, as plain text boxes are: with the text fonts, and on iOS and Android the system's fonts behind them (and
+ * its shaping). Set once the text fonts have loaded; until then those runs are estimated and drawn as missing glyphs.
+ */
+let fallbackFonts: SkTypefaceFontProvider | null = null;
+const MAX_WIDTHS = 4000;
+const widths = new Map<string, number>();
+
+function fallbackParagraph(text: string, font: MdFont, size: number, color: string, fonts: SkTypefaceFontProvider): SkParagraph {
+  const bold = font === 'b' || font === 'bi';
+  const italic = font === 'i' || font === 'bi';
+  const p = Skia.ParagraphBuilder.Make({ textAlign: TextAlign.Left }, fonts)
+    .pushStyle({ color: Skia.Color(color), fontFamilies: TEXT_FONTS, fontSize: size, fontStyle: { weight: bold ? 700 : 400, slant: italic ? FontSlant.Italic : FontSlant.Upright } })
+    .addText(text)
+    .pop()
+    .build();
+  p.layout(1e6);
+  return p;
+}
+
+/** Installs Skia's measure for fallback runs into core's layout (after the text fonts load; layouts are redone). */
+export function provideMarkdownFallback(fonts: SkTypefaceFontProvider): void {
+  if (fallbackFonts === fonts) return;
+  fallbackFonts = fonts;
+  widths.clear();
+  setFallbackTextMeasure((text, font, size) => {
+    const key = `${font}|${size}|${text}`;
+    let w = widths.get(key);
+    if (w === undefined) {
+      const p = fallbackParagraph(text, font, size, '#000000', fonts);
+      w = p.getMaxIntrinsicWidth();
+      (p as { dispose?: () => void }).dispose?.();
+      if (widths.size >= MAX_WIDTHS) widths.delete(widths.keys().next().value!);
+      widths.set(key, w);
+    }
+    return w;
+  });
+}
+
+/**
  * Draws a Markdown text box (`format: 'md'`) from core's layout: the same ops PDF export and agents' crops draw.
- * Text runs are placed by advance (`drawText`, as the layout measures), maths as outlines.
+ * Text runs are placed by advance (`drawText`, as the layout measures), fallback runs as Paragraphs, maths as outlines.
  */
 export function drawMarkdownText(c: SkCanvas, item: TextItem, faces: MdTypefaces): void {
   const { ops } = layoutMarkdown(item.text, item.w, item.fontSize);
@@ -72,7 +126,12 @@ export function drawMarkdownText(c: SkCanvas, item: TextItem, faces: MdTypefaces
   c.translate(item.x, item.y);
   if (item.rot) c.rotate((item.rot * 180) / Math.PI, 0, 0);
   for (const op of ops) {
-    if (op.k === 'text') c.drawText(op.text, op.x, op.y, paint, fontOf(faces[op.font], op.size));
+    if (op.k === 'text' && op.fallback && fallbackFonts) {
+      // A fallback run: a Paragraph, its first baseline on the layout's.
+      const p = fallbackParagraph(op.text, op.font, op.size, item.color, fallbackFonts);
+      p.paint(c, op.x, op.y - (p.getLineMetrics()[0]?.baseline ?? op.size));
+      disposeLater(p as unknown as { dispose?: () => void });
+    } else if (op.k === 'text') c.drawText(op.text, op.x, op.y, paint, fontOf(faces[op.font], op.size));
     else if (op.k === 'rect') {
       paint.setAlphaf(op.alpha);
       c.drawRect(Skia.XYWHRect(op.x, op.y, op.w, op.h), paint);

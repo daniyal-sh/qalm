@@ -98,7 +98,7 @@ export {
 } from './qink';
 export { threadBox, anchorInkRemoved } from './anchor';
 export { parseMarkdown, markdownToPlain, safeHref, type MdBlock, type MdInline, type Marks } from './markdown/parse';
-export { layoutMarkdown, type MdLayout, type MdOp } from './markdown/layout';
-export { texToPath, type MathBox } from './markdown/math';
-export { MD_FONTS, fontRuns, textWidth, type MdFont } from './markdown/fonts';
+export { allowedMath, layoutMarkdown, rendersMarkdown, LAYOUT_VERSION, type MdLayout, type MdOp } from './markdown/layout';
+export { texToPath, withMathBudget, mathAllowance, MATH_LIMITS, type MathBox } from './markdown/math';
+export { MD_FONTS, clusters, fontRuns, hasRtl, setFallbackTextMeasure, textMetricsEpoch, textWidth, type FallbackMeasure, type FontRun, type MdFont } from './markdown/fonts';
 export { markdownSvg } from './render/svg';

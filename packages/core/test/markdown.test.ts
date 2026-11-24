@@ -41,10 +41,10 @@ describe('parseMarkdown', () => {
     expect(parseMarkdown('one\ntwo')[0]).toEqual({ t: 'p', c: [{ t: 'text', text: 'one', m: {} }, { t: 'br' }, { t: 'text', text: 'two', m: {} }] });
   });
 
-  it('strips raw HTML: tags are never rendered or shown', () => {
-    expect(markdownToPlain('<b>hi</b> <img src=x onerror=alert(1)> there')).toBe('hi  there');
-    expect(markdownToPlain('<script>\nalert(1)\n</script>\n\nafter')).toBe('after');
-    expect(JSON.stringify(parseMarkdown('<div onclick="x()">a</div>\n\n<iframe src="https://evil">'))).not.toMatch(/div|iframe|onclick/);
+  it('never renders raw HTML: it is plain text (more in markdown-limits.test.ts)', () => {
+    expect(markdownToPlain('<b>hi</b> <img src=x onerror=alert(1)> there')).toBe('<b>hi</b> <img src=x onerror=alert(1)> there');
+    const all = parseMarkdown('<script>\nalert(1)\n</script>\n\n<iframe src="https://evil">');
+    expect(all.every((b) => b.t === 'p' && b.c.every((x) => x.t !== 'math' && (x.t === 'br' || !x.m.href)))).toBe(true);
   });
 
   it('only links http, https and mailto, and never fetches images', () => {

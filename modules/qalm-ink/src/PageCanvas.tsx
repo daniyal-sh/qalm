@@ -1,5 +1,5 @@
 import type { BBox, ImageItem, Item, PageInfo, ShapeItem, TextItem } from '@qalm/core';
-import { inkPaint, itemBBox, itemsOnPaper, paperPattern, shapePolylines, strokeOutline } from '@qalm/core';
+import { inkPaint, itemBBox, itemsOnPaper, rendersMarkdown, paperPattern, shapePolylines, strokeOutline } from '@qalm/core';
 import {
   BlendMode,
   Canvas,
@@ -33,7 +33,7 @@ import notoMath from '../assets/fonts/NotoSansMath-Subset.ttf';
 import { bakeBudget, jobStillValid, planBake, type Baked, type BakePlan } from './bake';
 import { disposeLater } from './dispose';
 import { provideTextFonts, textParagraph } from './textMetrics';
-import { drawMarkdownText, markdownPicture, useMdTypefaces, type MdTypefaces } from './markdownText';
+import { drawMarkdownText, markdownPicture, provideMarkdownFallback, useMdTypefaces, type MdTypefaces } from './markdownText';
 import { INK_CHUNK, inkGeometryKey, inkRuns, sameItems, type InkItem, type Run } from './inkRuns';
 import { traceOutline } from './outlinePath';
 import { usePageImage } from './usePageImage';
@@ -392,8 +392,8 @@ function drawItem(c: SkCanvas, it: Item, pathOf: (it: InkItem) => SkPath, paints
     let paint = paints.get(k);
     if (!paint) paints.set(k, (paint = skiaInkPaint(it)));
     c.drawPath(pathOf(it), paint);
-  } else if (it.type === 'text' && it.format === 'md') {
-    if (md) drawMarkdownText(c, it, md);
+  } else if (it.type === 'text' && rendersMarkdown(it)) {
+    if (md && fonts) drawMarkdownText(c, it, md);
   } else if (it.type === 'text' && fonts) {
     const para = textParagraph(it, fonts);
     c.save();
@@ -449,7 +449,7 @@ function useBase(
   const running = React.useRef<RunningBake | null>(null);
   const [version, setVersion] = React.useState(0);
   const bakeable = React.useCallback(
-    (it: Item) => it.type === 'stroke' || it.type === 'shape' || (it.type === 'text' && (it.format === 'md' ? !!md : !!fonts)),
+    (it: Item) => it.type === 'stroke' || it.type === 'shape' || (it.type === 'text' && (rendersMarkdown(it) ? !!md && !!fonts : !!fonts)),
     [fonts, md],
   );
   const plan = React.useMemo(() => {
@@ -594,8 +594,9 @@ function useBase(
 }
 
 /** A Markdown text box (`format: 'md'`): core's layout, recorded as a picture. */
-function MarkdownTextNode({ item, md }: { item: TextItem; md: MdTypefaces }) {
-  const picture = React.useMemo(() => markdownPicture(item, md), [item.x, item.y, item.rot, item.color, item.fontSize, item.text, item.w, md]); // eslint-disable-line react-hooks/exhaustive-deps
+function MarkdownTextNode({ item, md, fonts }: { item: TextItem; md: MdTypefaces; fonts: SkTypefaceFontProvider }) {
+  // `fonts`: its fallback runs are measured with them, so the layout changes once they load.
+  const picture = React.useMemo(() => markdownPicture(item, md), [item.x, item.y, item.rot, item.color, item.fontSize, item.text, item.w, md, fonts]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => () => disposeLater(picture as unknown as { dispose?: () => void }), [picture]);
   return <Picture picture={picture} />;
 }
@@ -628,9 +629,12 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
   // Figtree, falling back to Noto Sans Math (maths symbols and Greek): see `TEXT_FONTS`.
   const fonts = useFonts({ Figtree: [figtree], NotoSansMath: [notoMath] });
   // Text boxes' heights (frames, hit boxes) are measured with this font once it has loaded.
-  if (fonts) provideTextFonts(fonts);
+  if (fonts) {
+    provideTextFonts(fonts);
+    provideMarkdownFallback(fonts);
+  }
   // Markdown text boxes' fonts (bold, italic, mono, maths), loaded only for pages that have one.
-  const md = useMdTypefaces(React.useMemo(() => items.some((it) => it.type === 'text' && it.format === 'md'), [items]));
+  const md = useMdTypefaces(React.useMemo(() => items.some((it) => it.type === 'text' && rendersMarkdown(it)), [items]));
   const pdf = usePageImage(pdfImage);
   const bounds = React.useMemo(() => Skia.XYWHRect(-pageW, -pageH, pageW * 3, pageH * 3), [pageW, pageH]);
   const liveIds = React.useMemo(() => (live?.ids.length ? new Set(live.ids) : null), [live?.ids]);
@@ -710,7 +714,7 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
       }
       const it = run.item;
       let node: React.ReactElement | null = null;
-      if (it.type === 'text' && it.format === 'md') node = md ? <MarkdownTextNode key={it.id} item={it} md={md} /> : null;
+      if (it.type === 'text' && rendersMarkdown(it)) node = md && fonts ? <MarkdownTextNode key={it.id} item={it} md={md} fonts={fonts} /> : null;
       else if (it.type === 'text') node = fonts ? <TextNode key={it.id} item={it} fonts={fonts} /> : null;
       else {
         const uri = assetUri?.(it.assetId);
