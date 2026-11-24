@@ -125,6 +125,11 @@ apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Objec
   - **Agents:** MCP at `/mcp` (Streamable HTTP, OAuth 2.1 with dynamic client registration, via
     `@cloudflare/workers-oauth-provider`) exposes 4 tools: `wait`, `read`, `transcribe`, `comment`. Region images are
     rendered to PNG with resvg-wasm.
+  - **Grants:** an approved agent can use every notebook of the user whose AI access is on, now and later
+    (`grantedNotebooks` in `apps/server/src/grants.ts` reads each notebook's switch live from its room). There is no
+    per-agent notebook choice: the consent page has no picker, and `PATCH /ai/grants` ignores `notebookIds`/`folderIds`
+    from older apps. `grants.notebook_ids`/`folder_ids` stay in D1 but are unused, so grants made before this became
+    "all AI-enabled notebooks" with no migration (and an older Worker can still read the rows).
 
 ## 5. Status: what exists and what's verified
 
@@ -174,12 +179,18 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
   - **Writing tools:** pen, highlighter, eraser, lasso (move, recolour, duplicate, delete), text boxes, images and
     shape snapping.
   - **PDFs:** PDF backgrounds.
-  - **AI:** the comments panel (docked at ≥ 1100 px, floating below that, closed when the window narrows), Ask, and
-    Reading (what an agent read in the selected ink, with a "stale" badge; editable).
+  - **AI:** the comments panel (starts closed at every width; docked at ≥ 1100 px, floating below that, closed when the
+    window narrows), Ask, and Reading (what an agent read in the selected ink, with a "stale" badge; editable).
+  - **AI only where it's on:** with the notebook's AI access off, the editor shows no AI UI: no comments button, panel,
+    unread badge, margin cards or pins, no Ask (header or selection bar), no "Comment on selection", no presence pill and
+    no new-comment toasts (`aiUi` in `src/editor/ai.logic.ts`). Threads and readings stay in the notebook and come back
+    when AI access is turned on. The switch itself stays in the notebook's "…" menu and its settings. **Reading stays**:
+    students can type their own reading of ink (`setReading(…, 'user')`), so it's a user feature; with AI off the sheet
+    doesn't mention agents.
 - **Settings:**
   - Account and pen/palm settings with a test area.
-  - AI access: connect URL, pending requests, per-agent comment and transcribe switches, a notebook picker and an
-    activity log.
+  - AI access: connect URL, pending requests, per-agent comment and transcribe switches, disconnect, and an activity
+    log. No notebook picker: every approved agent sees the notebooks with AI access on (each card says how many).
   - Appearance: system, light or dark.
 - **Desktop:**
   - **Security:** sandboxed with context isolation; IPC checks the sender and validates its arguments.
@@ -209,7 +220,7 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
 - **iOS palm size:** uses `2 × majorRadius`, matching Android and web.
 
 D1 migrations: `0001_init`, `0002_user_assets`, `0003_notebook_deleted`, `0004_auth_hardening`, `0005_storage` (`doc_sizes`), `0006_account_delete` (`magic_links.purpose`, `users.deleting_at`). `users.apple_sub` and `google_sub` are unused since
-email-only sign-in and stay in place.
+email-only sign-in, and `grants.notebook_ids` / `folder_ids` since grants cover every AI-enabled notebook; all stay in place.
 
 ## 6. Not verified, and known gaps
 

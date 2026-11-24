@@ -165,7 +165,11 @@ Refs: a region `R7`, a box `p6@120,300,260,80` (x,y,w,h on the grid), a page `p6
 | `transcribe` | `ref`, `text` | saves the agent's reading of a region or a box's ink (strokes whose centre is inside). The student can edit it |
 | `comment` | `ref` or `thread`, `text`, `resolve?` | with `ref` (a region, box or page) starts a thread on those strokes, with the box as a fallback position, and says its label (`as thread C8`); with `thread` (`C3`) replies in it. `resolve` also marks the thread resolved: use it only when the thread is trivially done. Never changes ink |
 
-The student grants access for each notebook or folder on the approval screen. `transcribe` and `comment` each have their own switch.
+**Which notebooks an agent sees.** An approved agent can use every notebook whose **AI access** is on, now and in the
+future, and none other: there is no per-agent notebook choice. `wait()` lists exactly those, and every tool checks the
+notebook's switch live (in its room) and that the grant is still valid, so turning AI access off hides a notebook from
+every agent at once. The approval screen says so ("It can read the notebooks you've turned AI access on for") and keeps
+the `transcribe` and `comment` switches, which also stay in Settings → AI access per agent.
 A student's reply reopens a resolved thread.
 
 **Presence and pause (app side, no protocol change).** The app shows "Claude is following along" while an agent has a
