@@ -168,16 +168,39 @@ Refs: a region `R7`, a box `p6@120,300,260,80` (x,y,w,h on the grid), a page `p6
 **Which notebooks an agent sees.** An approved agent can use every notebook whose **AI access** is on, now and in the
 future, and none other: there is no per-agent notebook choice. `wait()` lists exactly those, and every tool checks the
 notebook's switch live (in its room) and that the grant is still valid, so turning AI access off hides a notebook from
-every agent at once. The approval screen says so ("It can read the notebooks you've turned AI access on for") and keeps
+every agent at once. The approval screen says so ("It can read notebooks you've turned AI access on for, only while
+you've pressed Play in qalm") and keeps
 the `transcribe` and `comment` switches, which also stay in Settings → AI access per agent.
 A student's reply reopens a resolved thread.
 
-**Presence and pause (app side, no protocol change).** The app shows "Claude is following along" while an agent has a
-pending `wait` on the notebook or made a call in the last minute, named by its OAuth client name. The student can
-**pause sharing** there: while paused, `wait` sends nothing (it times out as `#q s=… paused`, and the session list marks
-the session `paused`), and `read`, `transcribe` and `comment` fail with a message saying so. The grant stays. When the
-student resumes, a pending `wait` wakes and the next update catches up on everything since the last one, so agents
-should simply keep calling `wait`. "Stop" turns the notebook's AI access off.
+**Play / Pause AI: data only while the student is playing.** AI access says *which* notebooks an agent may use; Play
+says *when*. An agent gets a notebook's data only while it is open in qalm on one of the owner's devices with **AI live**
+(the Play / Pause AI control in the editor header). Opening a notebook starts **paused**; Pause, closing the notebook,
+leaving or backgrounding the app, signing out, losing the connection or the device sleeping stop it.
+
+- **Liveness is ephemeral and server-verified**, never a synced flag. While playing, the editor sends the text frame
+  `ai:live` on the notebook's sync socket (`nb:{id}`, which only the owner can open) every **15 s**. The notebook's room
+  counts that socket as live for **40 s** after its last heartbeat (`AI_LIVE_TTL_MS`: two missed beats plus slack), or
+  until the socket closes. Nothing is stored, so a restarted room is paused. Several devices or tabs each send their
+  own heartbeat; the notebook is live while any of them is. `ai:pause` (the button) clears every socket and the room
+  sends `ai:paused` to the other devices, whose headers switch to paused; `ai:stop` (backgrounded, notebook closing)
+  stops only that device. After a dropped connection the editor sends a heartbeat on the new socket at once if it is
+  back within 40 s, and otherwise switches to paused. Constants: `packages/core/src/aiLive.ts`.
+- **One gate**: `AgentHub.isLive()` (AI access on *and* a live heartbeat) is checked by every MCP path. New paths,
+  such as Lecture mode's live transcript, must use it too.
+- **While live** the agent may read the whole notebook (any page, older threads with `read("C5")`) and gets updates.
+- **While paused:** `read`, `transcribe` and `comment` fail with "The student hasn't turned on AI for this notebook
+  right now." `wait()` lists a paused notebook as `s=… paused` **without its title** (live ones are listed first, as
+  `s=… "Title" live`), so the agent knows the session exists and can park a `wait(s)` on it without learning anything
+  about it. A `wait(s)` that was live and pauses mid-wait returns `#q s=… paused` at once (also when a device's
+  heartbeat lapses); one that starts paused parks until Play, or ends as `#q s=… paused` at its timeout. Agents should
+  simply keep calling `wait`. Nothing goes out while paused: ink, Asks, and the student's comments and replies to
+  the agent are held, and the first update after Play catches up on all of them.
+- **Presence:** the header shows "AI live · Claude" while an agent has a pending `wait` or made a call in the last
+  minute (named by its OAuth client name), "Claude is thinking…" after an Ask, "AI live" with no agent, and "AI
+  paused" (neutral, not assistant blue). Stop is "Turn off AI access" in the notebook's menu.
+- The synced `meta.aiPaused` flag ("Pause sharing", before Play / Pause) is gone; the server and app ignore it, so
+  existing notebooks simply open paused.
 
 ## 5. Rough budget (one hour of math tutoring)
 

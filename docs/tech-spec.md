@@ -36,7 +36,7 @@ on screen (plus or minus 2) are loaded on the device. Durable Objects hold one d
 
 ```
 nb:{notebookId}            index doc
-  meta:   Y.Map  { id, title, cover, paper, paperColor, size:{w,h}, orientation, aiAccess, aiPaused?, threadsIndexed?, createdAt, updatedAt }
+  meta:   Y.Map  { id, title, cover, paper, paperColor, size:{w,h}, orientation, aiAccess, threadsIndexed?, createdAt, updatedAt }
   pages:  Y.Array<Y.Map>   { id, size:{w,h}, paper, paperColor, background: {kind:'paper'} | {kind:'pdf', assetId, pageIndex}, bookmarked? }
   assets: Y.Map<assetId, {id, sha256, mime, name, bytes, pageCount?}>
   asks:   Y.Array<{id, pageId, text, at, sel?: {itemIds, bbox}, commentId?}>   sel: an Ask about a selection; commentId: its thread
@@ -371,7 +371,7 @@ from the region images with its own vision. That keeps the app about 20 MB light
   upload waits in the queue (a 413 stays queued).
 - **App API** (Bearer, CORS `*` for the web/Electron build): `GET /ai/grants`, `PATCH /ai/grants/{id} {canComment?, canTranscribe?}`,
   `DELETE /ai/grants/{id}`, `GET /ai/requests`, `POST /ai/requests/{id}/deny`, `GET /ai/activity?limit=`, `GET /ai/presence?nb={notebookId}` (owner only:
-  `{aiAccess, paused, agents: [{name, waiting, lastAt, canComment, canTranscribe}]}`, the agents with a pending `wait` or a call in the last
+  `{aiAccess, live, paused (= !live, for older apps), agents: [{name, waiting, lastAt, canComment, canTranscribe}]}`, the agents with a pending `wait` or a call in the last
   60 s; empty while AI access is off; the editor polls it every 8 s), and `DELETE /notebooks/{id}` (owner only,
   "Delete forever": sets `notebooks.deleted_at`, refuses sync tickets from then on, and purges the notebook's `nb:`/`pg:` room storage, best effort).
   Moving to the trash is only `deletedAt` in the library doc, so restoring from the trash needs no server call.
@@ -421,9 +421,14 @@ from the region images with its own vision. That keeps the app about 20 MB light
   which keeps `lastCommentAt`). Only the changed pages are loaded.
 - **Threads:** the notebook room stores `QinkThreads` (labels `C1`, `C2`, …) and, in each agent's state, `QinkSeen`. `comment {ref}` creates the
   comment in the page room (on the region's strokes still on the page, or the ink in a box, with the box as fallback) and labels it; `comment {thread, resolve?}` replies there (author: the grant's client name). Agents still never touch ink.
-- **Presence and pause:** every agent call records `presence` (client id → name, grant switches, last call) in the notebook room; pending waits
-  are counted in memory. `meta.aiPaused` ("Pause sharing") is read live like `aiAccess`: while it's on, `wait` delivers nothing (times out as
-  `#q s=… paused`) and the other tools fail; turning it off wakes pending waits.
+- **Presence:** every agent call records `presence` (client id → name, grant switches, last call) in the notebook room; pending waits
+  are counted in memory.
+- **Play / Pause AI (liveness):** agents get a notebook only while one of the owner's devices plays it (`docs/qink-live.md` §4). The editor
+  sends `ai:live` text frames on the `nb:` sync socket every 15 s; `DocRoom` keeps `liveUntil` (last beat + 40 s) in that socket's attachment
+  (survives hibernation, never stored or synced) and `liveUntil()` is the latest over open sockets. `ai:pause` clears all of them and sends
+  `ai:paused` to the other sockets; `ai:stop` and a closing socket clear one. Every MCP path goes through `AgentHub.isLive()` /
+  `requireLive()`; a change wakes pending waits, and a pending wait also re-checks when the last heartbeat would lapse. The old synced
+  `meta.aiPaused` is ignored (removed from `NotebookMeta`).
 
 ## 5. App (`apps/app`, Expo, New Architecture, expo-router)
 
@@ -431,8 +436,9 @@ from the region images with its own vision. That keeps the app about 20 MB light
   - Library
   - New notebook sheet
   - Editor: a virtualized vertical list of pages, each a `PageCanvas` with an `InkOverlay`, plus the floating toolbar, comments panel, Ask button, pinch zoom, and undo/redo.
-    Live agent: a presence pill ("Claude is following along", "… is thinking…" after an Ask until an agent entry arrives or 90 s;
-    tap for what it can do, Pause sharing, Stop), open threads as cards in the margin beside the page when the gutter is ≥ 200 px
+    Live agent: the Play / Pause AI control in the header (only with AI access on and signed in; starts "AI paused"; "AI live",
+    "AI live · Claude" with a following agent, "… is thinking…" after an Ask until an agent entry arrives or 90 s; tap to play or
+    pause; `useAiLive` / `src/editor/aiLive.ts`, stopped on background, close, AI off and outages over 40 s), open threads as cards in the margin beside the page when the gutter is ≥ 200 px
     (pins on the page otherwise, plus a toast when an agent writes where its card isn't in view), and an unread badge on Comments (per device,
     `seen:{notebookId}` in kv: a thread is read once it's opened, or its margin card or panel card has been on screen for 1.5 s).
     The comments panel lists every thread in the notebook (§2, thread index)

@@ -130,6 +130,10 @@ apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Objec
     per-agent notebook choice: the consent page has no picker, and `PATCH /ai/grants` ignores `notebookIds`/`folderIds`
     from older apps. `grants.notebook_ids`/`folder_ids` stay in D1 but are unused, so grants made before this became
     "all AI-enabled notebooks" with no migration (and an older Worker can still read the rows).
+  - **Play / Pause AI:** an agent gets a notebook's data only while one of the owner's devices is playing it: an
+    `ai:live` heartbeat on the notebook's sync socket every 15 s, live for 40 s after the last one or until the socket
+    closes (`DocRoom.liveUntil`, `AgentHub.isLive()`, the one gate for every MCP path; Lecture mode must use it too).
+    Opening a notebook starts paused. Details in `docs/qink-live.md` §4. The old synced `meta.aiPaused` is ignored.
 
 ## 5. Status: what exists and what's verified
 
@@ -156,7 +160,7 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
   harness in the repo (300-page notebook).
 - **Pages:** page navigator (thumbnails, reorder, duplicate, delete, bookmarks, Ctrl+G; #10); Paper… and Cover… (#24).
 - **AI** (protocol in `docs/qink-live.md` v0.4): threads both ways (`note`, `re`, `comment` with `thread`/`resolve`),
-  Ask about a selection with a crop row (#1, #7); presence pill with Pause sharing / Stop, "Thinking…", margin comment
+  Ask about a selection with a crop row (#1, #7); presence pill (now the Play / Pause AI control), "Thinking…", margin comment
   cards that follow their ink (#7, #8); robust malformed Asks and open-threads-only for a new agent, `read("C5")` (#15);
   Readings: view and edit a line's text, agent names on transcriptions (#22); notebook-wide thread index for the panel,
   badge and toasts (#23); accessible comments panel and real read state (#21).
@@ -182,7 +186,7 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
   - **AI:** the comments panel (starts closed at every width; docked at ≥ 1100 px, floating below that, closed when the
     window narrows), Ask, and Reading (what an agent read in the selected ink, with a "stale" badge; editable).
   - **AI only where it's on:** with the notebook's AI access off, the editor shows no AI UI: no comments button, panel,
-    unread badge, margin cards or pins, no Ask (header or selection bar), no "Comment on selection", no presence pill and
+    unread badge, margin cards or pins, no Ask (header or selection bar), no "Comment on selection", no Play / Pause AI and
     no new-comment toasts (`aiUi` in `src/editor/ai.logic.ts`). Threads and readings stay in the notebook and come back
     when AI access is turned on. The switch itself stays in the notebook's "…" menu and its settings. **Reading stays**:
     students can type their own reading of ink (`setReading(…, 'user')`), so it's a user feature; with AI off the sheet
@@ -190,7 +194,8 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
 - **Settings:**
   - Account and pen/palm settings with a test area.
   - AI access: connect URL, pending requests, per-agent comment and transcribe switches, disconnect, and an activity
-    log. No notebook picker: every approved agent sees the notebooks with AI access on (each card says how many).
+    log. No notebook picker: every approved agent sees the notebooks with AI access on (each card says how many),
+    and only while the student presses Play AI in one (the page explains this in two lines).
   - Appearance: system, light or dark.
 - **Desktop:**
   - **Security:** sandboxed with context isolation; IPC checks the sender and validates its arguments.
