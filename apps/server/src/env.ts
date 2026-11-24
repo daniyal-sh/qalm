@@ -33,6 +33,17 @@ export interface Env {
   WAIT_TIMEOUT_MS?: string;
   /** How long one Play heartbeat keeps a notebook live (ms). Default AI_LIVE_TTL_MS (40000). Tests shorten it. */
   AI_LIVE_TTL_MS?: string;
+  /** Workers AI (lecture cloud transcription, Whisper). Missing: POST /lectures/transcribe answers 503. */
+  AI?: Ai;
+  /** Cloud transcription limits per user: requests per minute (default 6) and audio minutes per month (default 600). */
+  TRANSCRIBE_PER_MINUTE?: string;
+  TRANSCRIBE_MINUTES_PER_MONTH?: string;
+  /** Local end-to-end tests only: '1' answers transcription with a canned transcript (never set in deployments). */
+  WHISPER_FAKE?: string;
+  /** Tests only: how long a live lecture session may report nothing before it is expired (default 15 min / 6 h paused). */
+  LECTURE_SILENT_MS?: string;
+  /** Tests only: the first lecture crop retry delay (default 15000 ms, doubling). */
+  LECTURE_CROP_BACKOFF_MS?: string;
 }
 
 /** What completeAuthorization() stores; reaches the MCP handler as ctx.props. */

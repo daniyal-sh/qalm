@@ -91,7 +91,7 @@ describe('Play / Pause AI (server-verified liveness)', () => {
     const token = await connectAgent('expiry@example.com', { comment: true, transcribe: true }, 'Claude');
     const s = sessionOf('exnb');
     expect((await tool(token, 'read', { ref: 'outline', s })).isError).toBeFalsy();
-    // Heartbeats stop without a Pause: a pending wait ends as paused once the 2.5 s test window lapses (the test long-poll is 4 s).
+    // Heartbeats stop without a Pause: a pending wait ends as paused once the 3.5 s test window lapses (the test long-poll is 4 s).
     const waiting = tool(token, 'wait', { s });
     await pause(100);
     const t0 = Date.now();
@@ -119,7 +119,7 @@ describe('Play / Pause AI (server-verified liveness)', () => {
     await until(live);
     // One device closes (say a second tab): the other keeps it live, past the TTL, on its own heartbeats.
     n.nbc.close();
-    await pause(3000);
+    await pause(4000);
     expect(await live()).toBe(true);
     // A reconnect is a new socket that plays on its own heartbeat. One device stopping alone (backgrounded) leaves
     // the other playing; Pause on the tablet pauses the laptop too.

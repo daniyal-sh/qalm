@@ -1,6 +1,7 @@
 import type { Env } from './env';
 import { num } from './env';
 import { handleAccount } from './account';
+import { handleLectures, lectureDeleted, recordLectureAssets } from './lecture';
 import { handleAuth, requireUser, TooManyRequests } from './auth';
 import { handleAuthorize, messagePage } from './consent';
 import { canAccess, deleteNotebook, nbDocId, parseDocId, room } from './docs';
@@ -12,11 +13,11 @@ const TICKET_TTL_MS = 30_000;
 const SHA = /^[0-9a-f]{64}$/;
 
 /** Paths the app calls cross-origin (web build on another origin, Electron from file://). Bearer auth only, no cookies. */
-const CORS_PATHS = /^\/(auth\/(email\/start|email\/lookup|email\/verify|refresh|logout)|account\/delete(\/start)?|me\/storage|sync\/ticket|notebooks\/[^/]+|assets\/[^/]+|ai\/.*|health)$/;
+const CORS_PATHS = /^\/(auth\/(email\/start|email\/lookup|email\/verify|refresh|logout)|account\/delete(\/start)?|me\/storage|sync\/ticket|notebooks\/[^/]+|assets\/[^/]+|ai\/.*|lectures\/.*|health)$/;
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Audio-Duration-Ms, X-Qalm-Lecture',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -41,7 +42,7 @@ async function handle(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
     try {
-      const res = (await handleAuth(req, env, path)) ?? (await handleAccount(req, env, path)) ?? (await handleAuthorize(req, env, path)) ?? (await route(req, env, url));
+      const res = (await handleAuth(req, env, path)) ?? (await handleAccount(req, env, path)) ?? (await handleLectures(req, env, path)) ?? (await handleAuthorize(req, env, path)) ?? (await route(req, env, url));
       return res ?? error(404, 'Not found');
     } catch (e) {
       if (e instanceof HttpError) {
@@ -67,6 +68,8 @@ async function route(req: Request, env: Env, url: URL): Promise<Response | null>
     const doc = parseDocId(docId ?? '');
     if (!doc) throw new HttpError(400, 'Invalid docId');
     if (!(await canAccess(env, userId, doc))) throw new HttpError(403, 'Forbidden');
+    // A deleted lecture session stays deleted: a device that still has it (or a queued transcript) can't recreate it.
+    if (doc.kind === 'lec' && (await lectureDeleted(env, doc.id))) throw new HttpError(410, 'This lecture was deleted');
     const ticket = randomToken();
     const expiresAt = now() + TICKET_TTL_MS;
     await env.DB.prepare('INSERT INTO sync_tickets (ticket_hash, user_id, doc_id, expires_at) VALUES (?1, ?2, ?3, ?4)')
@@ -150,8 +153,20 @@ async function putAsset(req: Request, env: Env, userId: string, sha: string): Pr
   const max = num(env.MAX_ASSET_BYTES, 50 * 1024 * 1024);
   const len = Number(req.headers.get('Content-Length') ?? NaN);
   if (Number.isFinite(len) && len > max) throw new HttpError(413, `Asset larger than ${max} bytes`);
+  // Lecture audio says which session it is for (`X-Qalm-Lecture: lec:{nb}:{sid}`): an upload that lands after the
+  // session was deleted is refused (it would count against storage with nothing referencing it), and a live one's
+  // reference is recorded now, before its session doc syncs.
+  const lecHeader = req.headers.get('X-Qalm-Lecture');
+  const lec = lecHeader ? parseDocId(lecHeader) : null;
+  if (lec && lec.kind === 'lec') {
+    if (!(await canAccess(env, userId, lec))) throw new HttpError(403, 'Forbidden');
+    if (await lectureDeleted(env, lec.id)) throw new HttpError(410, 'This lecture was deleted');
+  }
   const mine = await env.DB.prepare('SELECT bytes FROM user_assets WHERE user_id = ?1 AND sha256 = ?2').bind(userId, sha).first<{ bytes: number }>();
-  if (mine) return json({ sha256: sha, bytes: mine.bytes, existed: true });
+  if (mine) {
+    if (lec?.kind === 'lec') await recordLectureAssets(env, lec.id, userId, [sha]);
+    return json({ sha256: sha, bytes: mine.bytes, existed: true });
+  }
   // Refuse early when the declared size can't fit (before reading the body).
   const before = await storageUsage(env, userId);
   if (before.usedBytes + (Number.isFinite(len) ? len : 1) > before.limitBytes) return storageFull(before);
@@ -168,6 +183,7 @@ async function putAsset(req: Request, env: Env, userId: string, sha: string): Pr
   await env.DB.prepare('INSERT INTO user_assets (user_id, sha256, bytes, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT DO NOTHING')
     .bind(userId, sha, body.byteLength, now())
     .run();
+  if (lec?.kind === 'lec') await recordLectureAssets(env, lec.id, userId, [sha]);
   return json({ sha256: sha, bytes: body.byteLength, existed: !!existing }, existing ? 200 : 201);
 }
 

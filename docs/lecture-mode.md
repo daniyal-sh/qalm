@@ -83,7 +83,21 @@ same engine (`encodeQinkUpdate`), the same notebook-wide region registry (real `
 
 - They are made **on the server**, by the notebook's DocRoom, which follows a recording session as a virtual agent
   (`lecture:{sessionId}`) with the agent wake rules: pen idle ≥ 6 s, something changed, ≥ 20 s since the last crop. A
-  pause or stop flushes at once. The first crop of each page is that page's first look.
+  pause or stop flushes at once. The first crop of a page shows only what the session wrote there: the page's ink at
+  the session start (its `base` event, with base ink the session later moved or erased taken as it was) counts as
+  already seen. A page the session has no `base` for is a first look.
+- Crops cover only ink written **since the session started** (`startedAt`, or the time the server first heard of it if
+  that is earlier). A session that arrives already `stopped` (an import, or one recorded offline and finished) gets no
+  crops. A stopped session gets one last crop as it stops, never later ones.
+- A crop's region labels, ink-seen state and the crop itself (as pending) are saved together, with no await in
+  between; rendering the PNG, storing it and adding it to the session doc come after. If that fails, only the storage
+  is retried, so a failure never loses the crop.
+- A crop that fails **backs off** (15 s, 30 s, 1, 2, 4, 8, then 10 min; about 26 minutes in all) instead of retrying
+  on every pen-up; after 8 failures those changes are skipped (the timeline still has every stroke). A session stopped
+  during a back-off keeps its last crop: the retry makes it.
+- A live session that reports nothing for 15 minutes while recording (no stroke, no 2-minute audio chunk), or 6 hours
+  while paused, is **expired**: a crashed app or a closed tab. It reads as `stopped` to agents and takes no more crops;
+  if the device comes back and reports again, it is live again. On start, the app stops any session it left live.
 - Each crop is saved as a PNG (rendered with resvg, as for agents) in R2 as a content-addressed asset of the notebook's
   owner (counted in `user_assets`), and listed in the session doc: `{t, sha, w, h, text, regions}` where `text` is the
   Q-ink update text and `regions` is `[{label, page, box: [x, y, w, h] on the grid, add, erase}]`.
@@ -116,8 +130,14 @@ timeline (ms).
 **Server endpoint** `POST /lectures/transcribe?lang=xx` (Bearer, live user), body = one audio chunk (`audio/webm`,
 `audio/ogg`, `audio/mp4`, `audio/mpeg` or `audio/wav`, ≤ 8 MB) → `{segments, durationMs, usedMinutes, limitMinutes}`.
 - Rate limit: `TRANSCRIBE_PER_MINUTE` requests per user per minute (default 6) → 429 with `Retry-After`.
-- Monthly cap: `TRANSCRIBE_MINUTES_PER_MONTH` per user (default 600) → 402 `{code: 'transcribe_quota'}`. Usage is the
-  audio length Whisper reports (at least the client's declared length), in D1 `transcribe_usage`.
+- Monthly cap: `TRANSCRIBE_MINUTES_PER_MONTH` per user (default 600) → 402 `{code: 'transcribe_quota'}`. A request
+  is charged the audio length Whisper reports, in full (a 30-minute chunk is 30 minutes), in D1 `transcribe_usage`.
+- **Concurrency:** each request first reserves an upper bound (its bytes at a 6 kbps floor, or the client's claim if
+  larger), clamped to what is left of the month, then counts only the rows before it (by id). Parallel requests are
+  ordered: at most N pass the per-minute limit, and once the reservations fill the month the rest get 402, so the cap
+  is passed by at most the one request that took what was left. A rejected request takes its reservation back; a
+  failed Whisper run stays as a 0 ms row, which charges nothing but still counts per minute.
+- The 8 MB limit holds while the body streams in, with or without a `Content-Length`.
 - Binding `AI` (Workers AI) in `wrangler.jsonc` for local, staging and production. No binding → 503.
 
 ## 5. Storage and sync
@@ -138,11 +158,21 @@ lib:{userId}
 - **Cap:** the session doc counts in `doc_sizes` (owner = the notebook's owner), audio and crops in `user_assets`, so
   `GET /me/storage` covers all of it. Like ink, recording is never refused when full; an audio upload that doesn't fit
   stays queued (413) and the app shows the storage-full message.
-- **Delete a session** (Lectures → Delete): `DELETE /lectures/{notebookId}/{sessionId}` purges the session room and its
-  `doc_sizes` row, deletes its audio and crop rows from `user_assets` (and the R2 objects no one else holds), and the app
-  removes the library entry and its local copies.
-- **Delete forever** of a notebook purges its `lec:` rooms too. **Account deletion** purges every room in `doc_sizes`
-  (which includes `lec:` rooms), every asset and the `transcribe_usage` rows.
+- **Delete a session** (Lectures → Delete): `DELETE /lectures/{notebookId}/{sessionId}` first **tombstones** it (D1
+  `deleted_lectures`: no sync ticket for it again, 410, so another device's copy or a queued transcript can't bring it
+  back), then purges the session room and its `doc_sizes` row and frees its assets. Assets are content-addressed and
+  can be shared (an export imported again, identical crops): each session room records the shas it references in D1
+  `lecture_assets`, and a sha leaves `user_assets` only when no other session of the user references it (the R2 object
+  goes when no other user holds it either). A page asset (PDF, image) of any of the user's notebooks with the same
+  bytes keeps it too. Lecture audio uploads name their session (`X-Qalm-Lecture: lec:{nb}:{sid}`): the reference is
+  recorded at once, and an upload that lands after the delete gets 410 and is not stored. The app removes the
+  library entry, its local copies, its queued uploads and any queued transcription for it.
+- `GET /lectures/{notebookId}/{sessionId}` → `{deleted}`: a device asks before it touches a session again (e.g. stopping
+  one its crash left live), so a session deleted elsewhere stays deleted.
+- **Delete forever** of a notebook deletes each of its sessions the same way (their audio and crops stop counting
+  against the cap). **Account deletion** purges every room in `doc_sizes` (which includes `lec:` rooms), every asset,
+  and the `transcribe_usage`, `lecture_assets` and `deleted_lectures` rows. On the device, deleting the account or a
+  notebook forever removes the local `lec:` docs too.
 
 Measured sizes per hour are in §9.
 
@@ -164,12 +194,24 @@ Still four tools (`wait`, `read`, `transcribe`, `comment`); lecture data is read
 - **Labels:** sessions get notebook-wide labels `L1`, `L2`, … (assigned by the notebook room, never reused).
 - **Live:** while a session records, `wait` updates also carry its **new transcript lines** with their times, after the
   region lines: `L2 03:12 "so the derivative of x squared"`. Transcript lines alone also wake a `wait` (with the
-  20 s rate limit, not the pen-idle rule). A new agent starts from the current line (no replay).
-- `wait()` with no session lists `lecture L2 recording 12:40` under a session that's recording.
+  20 s rate limit, not the pen-idle rule). A new agent starts from the current line (no replay). At most 30 lines per
+  session go in one update: a longer catch-up ends with `more: read("L2@03:12")` from the earliest line left out. A
+  session that only ever arrived stopped (an import) sends no live lines; `read("L2")` has its transcript.
+- `wait()` with no session lists `lecture L2 recording 12:40` on a playing notebook's line
+  (`s=… "Calculus" live lecture L2 recording 12:40`); a paused notebook's line is only `s=… paused`, with no title and
+  no lecture.
 - **After:** `read("outline")` lists the notebook's sessions (`L2 2026-11-24 47:10 stopped`). `read("L2")` returns
   the transcript and crops **interleaved by time**: text lines `03:12 "…"` and crop lines `03:15 R40 p2 @120,300
   260x80 +5`, with the crops' images as image blocks in the same order. One read covers 10 minutes and at most 8
-  images; it ends with `more: read("L2@10:00")`.
+  images; it ends with `more: read("L2@10:00")` (exact to the ms when a window stops at a crop, e.g.
+  `L2@03:15.250`, so a page of crops never repeats). Only images the notebook's owner holds are sent.
+- **Only while playing:** every lecture output to an agent (live lines, the session list's `lecture L2 …`, outline
+  lines, `read("L2")`) goes through one check, `AgentHub.lectureLive()` in `apps/server/src/agent.ts`, at the moment it
+  goes out (and again after each await). It is the Play / Pause AI gate itself, `isLive()` (AI access on, a device
+  playing, the old `aiPaused` not set); reads that must fail use `requireLive()`. Lecture mode makes no agent writes
+  (crops are the server's own records in the session doc), so nothing goes through `applyAgentEdit`. **Decided:** lines spoken while not live are not dropped: like ink written meanwhile, they
+  go out with the next update once the notebook is live again (capped as above), because while playing an agent can
+  read the whole notebook and lecture anyway.
 
 ## 8. Export
 

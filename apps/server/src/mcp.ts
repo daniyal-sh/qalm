@@ -22,7 +22,8 @@ const INSTRUCTIONS =
   'transcribe(R7, text) and later updates send that text instead of an image. Comment on a region, a box "p6@120,300,260,80" ' +
   'or a page "p6" with comment; the comment follows the ink. "note C5 …", "re C3 …" and "ask C6 R9 …" are the student writing ' +
   'to you: answer with comment(thread). "open C2 …" is a thread from before you joined, with its latest message; read("C2") ' +
-  'shows all of it. You can never change ink. You only get a notebook while the student has pressed Play for AI in qalm; ' +
+  'shows all of it. "L2 03:12 \"…\"" is what the teacher said in lecture recording L2 at 03:12; read("L2") replays a ' +
+  'lecture (outline lists them). You can never change ink. You only get a notebook while the student has pressed Play for AI in qalm; ' +
   'while it is paused every tool says so and wait(s) returns "paused" or parks until they press Play, so keep calling wait.';
 
 const sArg = { type: 'string', description: 'Session (from wait with no arguments). Defaults to the last session you waited on.' };
@@ -38,7 +39,7 @@ const TOOLS = [
     name: 'read',
     description:
       `Reads on demand: "outline", a page "p3" (all its ink as regions), ${REF} (a crop), the PDF behind a page "pdf:p2", ` +
-      'or a whole comment thread "C5". Text plus an image where needed.',
+      'a whole comment thread "C5", or a recorded lecture "L2" (transcript and crops by time; "L2@10:00" from minute 10). Text plus images where needed.',
     inputSchema: { type: 'object', properties: { ref: { type: 'string' }, s: sArg }, required: ['ref'], additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
@@ -180,9 +181,10 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
     // paused notebook goes out, but the agent can park a wait(s) on it until the student presses Play).
     const rows = await grantedNotebooks(env, g);
     // Live ones by last edit; paused ones by session id, so their order says nothing about when they were edited.
+    // A recording lecture shows on live lines only (`lecture L2 recording 12:40`): nothing of a paused notebook goes out.
     const sid = (n: (typeof rows)[number]) => sessionOf(n.id);
     rows.sort((a, b) => Number(b.live) - Number(a.live) || (a.live ? b.at - a.at : sid(a) < sid(b) ? -1 : sid(a) > sid(b) ? 1 : 0));
-    const lines = ['#q sessions', ...rows.map((n) => (n.live ? `s=${sessionOf(n.id)} ${JSON.stringify(n.title)} live` : `s=${sessionOf(n.id)} paused`))];
+    const lines = ['#q sessions', ...rows.map((n) => (n.live ? `s=${sessionOf(n.id)} ${JSON.stringify(n.title)} live${n.lecture ? ` ${n.lecture}` : ''}` : `s=${sessionOf(n.id)} paused`))];
     const text = lines.join('\n');
     await log(env, g, 'wait', 'sessions', text, null);
     return { content: [{ type: 'text', text }] };
@@ -238,6 +240,38 @@ async function edited(p: Promise<{ ok: boolean; text: string }>): Promise<string
 
 async function result(env: Env, g: GrantRow, tool: string, targetLabel: string, r: AgentResult): Promise<ToolResult> {
   if (r.error) throw new ToolError(r.text);
+  if (r.parts) {
+    // A lecture read: text and the crops' stored PNGs, interleaved by time. Only assets the notebook's owner (the
+    // grant's user) holds are fetched: a sha in a client-written session doc is not a way to read anyone else's.
+    const content: Content[] = [];
+    let area = 0;
+    const wanted = [...new Set(r.parts.flatMap((p) => ('image' in p && /^[0-9a-f]{64}$/.test(p.image) ? [p.image] : [])))];
+    const owned = new Set(
+      wanted.length
+        ? (
+            await env.DB.prepare(`SELECT sha256 FROM user_assets WHERE user_id = ?1 AND sha256 IN (${wanted.map((_, i) => `?${i + 2}`).join(',')})`)
+              .bind(g.user_id, ...wanted)
+              .all<{ sha256: string }>()
+          ).results.map((x) => x.sha256)
+        : [],
+    );
+    for (const p of r.parts) {
+      if ('text' in p) {
+        content.push({ type: 'text', text: p.text });
+        continue;
+      }
+      const obj = owned.has(p.image) ? await env.ASSETS.get(p.image) : null;
+      if (!obj) {
+        content.push({ type: 'text', text: '(image missing)' });
+        continue;
+      }
+      const png = new Uint8Array(await obj.arrayBuffer());
+      area += pngArea(png);
+      content.push({ type: 'image', data: b64(png), mimeType: 'image/png' });
+    }
+    await log(env, g, tool, targetLabel, r.text, area ? { width: area, height: 1 } : null);
+    return { content };
+  }
   const content: Content[] = [{ type: 'text', text: r.text }];
   let img: { width: number; height: number } | null = null;
   if (r.svg) {
@@ -247,6 +281,13 @@ async function result(env: Env, g: GrantRow, tool: string, targetLabel: string, 
   }
   await log(env, g, tool, targetLabel, r.text, img);
   return { content };
+}
+
+/** Width × height of a PNG, from its IHDR (0 if it isn't one). */
+function pngArea(png: Uint8Array): number {
+  if (png.length < 24) return 0;
+  const dv = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  return dv.getUint32(16) * dv.getUint32(20);
 }
 
 /** Activity log with a rough token estimate: ~4 characters per token, images at width × height / 750. */
