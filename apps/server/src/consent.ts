@@ -2,7 +2,6 @@ import { AuthorizationError, CimdFetchError, type ConsentDescription } from '@cl
 import type { Env, McpProps } from './env';
 import { startMagicLink, TooManyRequests, webUser } from './auth';
 import { GRANT_TTL_MS, userNotebooks, type NotebookChoice } from './grants';
-import type { Folder } from '@qalm/core';
 import { BRAND_FONT_STACK, D, MARK_SVG, T, TILE } from './brand';
 import { escapeHtml as e, HttpError, now } from './util';
 
@@ -27,10 +26,6 @@ h1{margin:0 0 4px;font-size:20px;font-weight:600;letter-spacing:-.02em;text-alig
 .err{background:var(--bad-soft);color:var(--bad);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
 .detail{font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;color:var(--faint);text-align:center;margin:-8px 0 0}
 .label{font-size:12px;color:var(--muted);margin:12px 0 4px}
-.list{max-height:260px;overflow:auto;margin:0 -4px;padding:0 4px}
-.ck{display:flex;align-items:center;gap:10px;min-height:44px;padding:4px 2px;cursor:pointer}
-.ck input{width:18px;height:18px;margin:0;accent-color:var(--accent);flex:none}
-.ck .m{color:var(--muted);font-size:13px}
 .tgl{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px;padding:6px 0;border-top:1px solid var(--line-2);cursor:pointer}
 .tgl small{display:block;color:var(--muted);font-size:12px}
 .sw{position:relative;width:40px;height:24px;flex:none}
@@ -39,7 +34,7 @@ h1{margin:0 0 4px;font-size:20px;font-weight:600;letter-spacing:-.02em;text-alig
 .sw span::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.2);transition:left .15s}
 .sw input:checked+span{background:var(--accent);border-color:var(--accent)}
 .sw input:checked+span::after{left:18px}
-.sw input:focus-visible+span,.ck input:focus-visible,button:focus-visible,input[type=email]:focus-visible{outline:2px solid var(--accent-line);outline-offset:1px}
+.sw input:focus-visible+span,button:focus-visible,input[type=email]:focus-visible{outline:2px solid var(--accent-line);outline-offset:1px}
 .info{display:flex;justify-content:space-between;align-items:center;min-height:52px;border-top:1px solid var(--line-2)}
 .info small{display:block;color:var(--muted);font-size:12px}
 .foot{display:flex;gap:8px;margin-top:16px}
@@ -135,40 +130,29 @@ ${error ? `<div class="err">${e(error)}</div>` : ''}
   );
 }
 
-function consentPage(d: ConsentDescription, handle: string, rid: string, email: string | null, folders: Folder[], nbs: NotebookChoice[]): string {
-  const counts = new Map<string, number>();
-  for (const n of nbs) if (n.folderId) counts.set(n.folderId, (counts.get(n.folderId) ?? 0) + 1);
-  const folderRows = folders
-    .map((f) => {
-      const c = counts.get(f.id) ?? 0;
-      return `<label class="ck"><input type="checkbox" name="folder" value="${e(f.id)}">Folder · ${e(f.name)} <span class="m">(${c} notebook${c === 1 ? '' : 's'})</span></label>`;
-    })
-    .join('');
-  // Notebooks with AI access off can be granted, but stay hidden from the agent until the switch is turned on.
-  const nbRows = nbs.map((n) => `<label class="ck"><input type="checkbox" name="notebook" value="${e(n.id)}">${e(n.title)}${n.aiAccess ? '' : ' <span class="m">· AI access off</span>'}</label>`).join('');
+function consentPage(d: ConsentDescription, handle: string, rid: string, email: string | null, nbs: NotebookChoice[]): string {
+  const on = nbs.filter((n) => n.aiAccess);
   const origin = d.clientDomain
     ? `Published by <b>${e(d.clientDomain)}</b>. `
     : '';
+  const scope = on.length
+    ? `Right now that's ${on.length === 1 ? `<b>${e(on[0]!.title)}</b>` : `${on.length} notebooks`}.`
+    : 'No notebook has AI access on yet. Turn it on in a notebook to share it.';
   return `${logos(d.clientName)}
 <h1>${e(d.clientName)} wants to read your notes</h1>
-<p class="sub">Pick what it can see. You can change this at any time.</p>
+<p class="sub">It can read the notebooks you've turned AI access on for, now and later. ${scope} Turning AI access off in a notebook hides it again.</p>
 ${email ? `<p class="who">Signed in as ${e(email)}</p>` : ''}
 ${d.redirectIsLoopback ? '<div class="warn">This sends access to an app on your computer. Continue only if you just started connecting from it.</div>' : ''}
 <form method="post" action="/authorize" id="f">
 <input type="hidden" name="handle" value="${e(handle)}">
 <input type="hidden" name="rid" value="${e(rid)}">
-<div class="list">${folderRows}${nbRows || '<p class="sub">You have no synced notebooks yet.</p>'}</div>
 <label class="tgl"><div>Leave comments<small>Pinned next to your ink. Never changes ink</small></div><span class="sw"><input type="checkbox" name="comment" value="1" checked><span></span></span></label>
 <label class="tgl"><div>Save readings<small>Can store what it reads in your handwriting. You can edit it</small></div><span class="sw"><input type="checkbox" name="transcribe" value="1" checked><span></span></span></label>
 <div class="info"><div>Access expires<small>After 30 days</small></div></div>
-<div class="foot"><button type="submit" name="decision" value="deny" formnovalidate>Deny</button><button class="p" type="submit" name="decision" value="approve" id="allow" disabled>Allow access</button></div>
+<div class="foot"><button type="submit" name="decision" value="deny" formnovalidate>Deny</button><button class="p" type="submit" name="decision" value="approve" id="allow">Allow access</button></div>
 </form>
 <p class="fine">${origin}Access goes to <b>${e(d.redirectHost)}</b>. It can never change your ink.</p>
-<script>
-const f=document.getElementById('f'),a=document.getElementById('allow');
-const sync=()=>{a.disabled=!f.querySelector('input[name=notebook]:checked,input[name=folder]:checked')};
-f.addEventListener('change',sync);sync();
-</script>`;
+`;
 }
 
 async function authError(err: unknown): Promise<Response> {
@@ -207,7 +191,7 @@ export async function handleAuthorize(req: Request, env: Env, path: string): Pro
       const url = new URL(req.url);
       if (!userId) return signInPage(url.pathname + url.search);
       const details = await oauth.describeConsent(authReq);
-      const [{ folders, notebooks }, user] = await Promise.all([
+      const [{ notebooks }, user] = await Promise.all([
         userNotebooks(env, userId),
         env.DB.prepare('SELECT email FROM users WHERE id = ?1').bind(userId).first<{ email: string | null }>(),
       ]);
@@ -216,7 +200,7 @@ export async function handleAuthorize(req: Request, env: Env, path: string): Pro
       await env.DB.prepare('INSERT INTO auth_requests (id, user_id, client_id, client_name, redirect_host, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)')
         .bind(rid, userId, details.clientId, details.clientName, details.redirectHost, 'pending', now())
         .run();
-      return page(`Connect ${details.clientName}`, consentPage(details, consent.handle, rid, user?.email ?? null, folders, notebooks), 200, consent.headers);
+      return page(`Connect ${details.clientName}`, consentPage(details, consent.handle, rid, user?.email ?? null, notebooks), 200, consent.headers);
     } catch (err) {
       return authError(err);
     }
@@ -235,13 +219,6 @@ export async function handleAuthorize(req: Request, env: Env, path: string): Pro
         await env.DB.prepare(`UPDATE auth_requests SET status = 'denied' WHERE id = ?1`).bind(rid).run();
         return new Response(null, { status: 302, headers: denied.headers });
       }
-      const { notebooks, folders } = await userNotebooks(env, userId);
-      const nbSet = new Set(notebooks.map((n) => n.id));
-      const fSet = new Set(folders.map((f) => f.id));
-      const pickedNbs = form.getAll('notebook').map(String).filter((id) => nbSet.has(id));
-      const pickedFolders = form.getAll('folder').map(String).filter((id) => fSet.has(id));
-      if (!pickedNbs.length && !pickedFolders.length) return messagePage('Pick something to share', 'Go back and choose at least one notebook or folder.', 400);
-
       const approved = await oauth.approveConsent(req, handle);
       const client = await oauth.lookupClient(approved.request.clientId);
       const clientName = client?.clientName || approved.request.clientId;
@@ -250,9 +227,9 @@ export async function handleAuthorize(req: Request, env: Env, path: string): Pro
       await env.DB.batch([
         env.DB.prepare(`UPDATE grants SET revoked_at = ?3 WHERE user_id = ?1 AND client_id = ?2 AND revoked_at IS NULL`).bind(userId, approved.request.clientId, t),
         env.DB.prepare(
-          `INSERT INTO grants (id, client_id, client_name, user_id, notebook_ids, folder_ids, can_comment, can_transcribe, created_at, expires_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
-        ).bind(grantId, approved.request.clientId, clientName, userId, JSON.stringify(pickedNbs), JSON.stringify(pickedFolders), form.get('comment') ? 1 : 0, form.get('transcribe') ? 1 : 0, t, t + GRANT_TTL_MS),
+          `INSERT INTO grants (id, client_id, client_name, user_id, can_comment, can_transcribe, created_at, expires_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+        ).bind(grantId, approved.request.clientId, clientName, userId, form.get('comment') ? 1 : 0, form.get('transcribe') ? 1 : 0, t, t + GRANT_TTL_MS),
         env.DB.prepare(`UPDATE auth_requests SET status = 'approved' WHERE id = ?1`).bind(rid),
       ]);
       const props: McpProps = { userId, grantId, clientId: approved.request.clientId, clientName };

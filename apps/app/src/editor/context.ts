@@ -62,6 +62,8 @@ export interface EditorCtx {
   editingText: EditingText | null;
   setEditingText(e: EditingText | null): void;
   activeCommentId: string | null;
+  /** False while the notebook's AI access is off: comment pins and cards are hidden (the threads stay). */
+  showComments: boolean;
   setActiveComment(id: string | null): void;
   reportPage(pageId: string, data: PageData | null): void;
   /** Tells the editor which page was last written on (Ask, image insert). */

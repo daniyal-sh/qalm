@@ -22,7 +22,7 @@ describe('agent presence and pause', () => {
     expect((await call('/ai/presence?nb=presnb', { token: other.accessToken })).status).toBe(404);
     expect((await call('/ai/presence?nb=presnb')).status).toBe(401);
 
-    const token = await connectAgent('presence@example.com', { notebooks: ['presnb'], comment: true, transcribe: false }, 'Claude');
+    const token = await connectAgent('presence@example.com', { comment: true, transcribe: false }, 'Claude');
     const s = sessionOf('presnb');
     const waiting = tool(token, 'wait', { s });
     await pause(100);

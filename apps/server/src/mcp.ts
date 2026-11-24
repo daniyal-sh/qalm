@@ -1,7 +1,7 @@
 import type { Env, McpProps } from './env';
 import { num } from './env';
 import { nbDocId, room } from './docs';
-import { activeGrant, grantedNotebooks, sessionOf, type GrantRow, type NotebookChoice } from './grants';
+import { activeGrant, grantedNotebooks, sessionOf, userNotebooks, type GrantRow, type NotebookChoice } from './grants';
 import { svgToPng } from './png';
 import { b64, json, now } from './util';
 import type { AgentResult } from './agent';
@@ -148,16 +148,21 @@ function agentCfg(env: Env) {
   };
 }
 
-/** Picks the notebook a call is about, and checks it is inside the grant. */
+/**
+ * Picks the notebook a call is about. A grant covers the user's notebooks with AI access on; an explicit session is
+ * looked up among all of them and its room checks the live switch on every call (a notebook with AI access off fails
+ * with a message saying so).
+ */
 async function target(env: Env, g: GrantRow, s: unknown): Promise<NotebookChoice> {
-  const nbs = await grantedNotebooks(env, g);
   const want = typeof s === 'string' && s ? s.toLowerCase() : g.last_session;
   if (!want) {
+    const nbs = await grantedNotebooks(env, g);
     if (nbs.length === 1) return nbs[0]!;
     throw new ToolError('Pass s (call wait with no arguments to list sessions)');
   }
-  const hit = nbs.find((n) => sessionOf(n.id) === want || n.id === want);
-  if (!hit) throw new ToolError(`No session ${want} in this grant`);
+  const { notebooks } = await userNotebooks(env, g.user_id);
+  const hit = notebooks.find((n) => sessionOf(n.id) === want || n.id === want);
+  if (!hit) throw new ToolError(`No session ${want}. Call wait with no arguments to list sessions.`);
   return hit;
 }
 
@@ -166,13 +171,10 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
   if (!g || g.user_id !== props.userId) throw new ToolError('Access to qalm has expired or was revoked. Reconnect to continue.');
 
   if (name === 'wait' && (args.s === undefined || args.s === '')) {
-    const nbs = await grantedNotebooks(env, g);
+    const rows = await grantedNotebooks(env, g);
     const t = now();
-    const infos = await Promise.all(nbs.map(async (n) => ({ n, ...(await room(env, nbDocId(n.id)).agentInfo(nbDocId(n.id))) })));
-    // Only notebooks whose AI access is on right now.
-    const rows = infos.filter((r) => r.aiAccess);
     rows.sort((a, b) => b.at - a.at);
-    const lines = ['#q sessions', ...rows.map(({ n, at, paused }) => `s=${sessionOf(n.id)} ${JSON.stringify(n.title)}${t - at < LIVE_MS ? ' live' : ''}${paused ? ' paused' : ''}`)];
+    const lines = ['#q sessions', ...rows.map((n) => `s=${sessionOf(n.id)} ${JSON.stringify(n.title)}${t - n.at < LIVE_MS ? ' live' : ''}${n.paused ? ' paused' : ''}`)];
     const text = lines.join('\n');
     await log(env, g, 'wait', 'sessions', text, null);
     return { content: [{ type: 'text', text }] };

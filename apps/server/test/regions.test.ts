@@ -12,7 +12,7 @@ describe('regions end to end', () => {
   it('wait → regions → transcribe → text instead of an image → a stroke makes it stale → a comment on R# follows the ink', async () => {
     const t = await signIn('regions@example.com');
     const n = await notebook(t, 'regnb', 'Regions');
-    const token = await connectAgent('regions@example.com', { notebooks: ['regnb'], comment: true, transcribe: true });
+    const token = await connectAgent('regions@example.com', { comment: true, transcribe: true });
     const s = sessionOf('regnb');
 
     // The student writes one expression; the agent's first look has it as one region.
@@ -93,7 +93,7 @@ describe('regions end to end', () => {
       e.set('textSrc', 'user');
     });
     await until(async () => (await serverDoc(`pg:legnb:${n.pageId}`)).getMap('lines').size === 1);
-    const token = await connectAgent('legacy@example.com', { notebooks: ['legnb'], comment: true, transcribe: true });
+    const token = await connectAgent('legacy@example.com', { comment: true, transcribe: true });
     const s = sessionOf('legnb');
     // The student's line text is a reading of its strokes: the agent gets it as text.
     expect(textOf(await tool(token, 'read', { ref: 'p1', s }))).toBe('#q p1 1000x1415\nR1 p1 @84,168 169x34 "x+1"');

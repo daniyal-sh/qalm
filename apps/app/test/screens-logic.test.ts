@@ -2,7 +2,7 @@ import { Library, Notebook, Page, summarizeThreads, type Comment } from '@qalm/c
 import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 
-import { grantSummary, getAiOverview, toggleId, updateGrant } from '../src/api/ai';
+import { aiScope, grantSummary, getAiOverview, updateGrant } from '../src/api/ai';
 import { extractMagicToken } from '../src/auth/magicLink';
 import { filterFor, filterRows, rowsInView, threadRows } from '../src/editor/CommentsPanel.logic';
 import {
@@ -55,12 +55,13 @@ describe('AI access API', () => {
     expect(calls).toContain('PATCH /ai/grants/g1');
   });
 
-  it('summarizes and toggles', () => {
+  it('summarizes a grant and what it can see', () => {
     expect(grantSummary({ canComment: true, canTranscribe: false })).toBe('Read and comment');
     expect(grantSummary({ canComment: false, canTranscribe: false })).toBe('Read only');
-    expect(toggleId(['a'], 'b', true)).toEqual(['a', 'b']);
-    expect(toggleId(['a', 'b'], 'a', false)).toEqual(['b']);
-    expect(toggleId(['a'], 'a', true)).toEqual(['a']);
+    // Every approved agent sees the notebooks with AI access on (no per-agent picker).
+    expect(aiScope([])).toBe('No notebook has AI access on');
+    expect(aiScope([{ aiAccess: true, deletedAt: null }, { aiAccess: false, deletedAt: null }, { aiAccess: true, deletedAt: 5 }])).toBe('1 notebook with AI access on');
+    expect(aiScope([{ aiAccess: true, deletedAt: null }, { aiAccess: true, deletedAt: null }])).toBe('2 notebooks with AI access on');
   });
 });
 

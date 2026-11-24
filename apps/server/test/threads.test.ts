@@ -10,7 +10,7 @@ describe('comment threads and selection asks', () => {
   it('threads go both ways: notes and replies reach the agent at once; the agent replies in-thread', async () => {
     const t = await signIn('threads@example.com');
     const n = await notebook(t, 'thrnb', 'Threads');
-    const token = await connectAgent('threads@example.com', { notebooks: ['thrnb'], comment: true, transcribe: false });
+    const token = await connectAgent('threads@example.com', { comment: true, transcribe: false });
     const s = sessionOf('thrnb');
 
     const first = tool(token, 'wait', { s });
@@ -77,7 +77,7 @@ describe('comment threads and selection asks', () => {
   it('mirrors every thread into the notebook index doc (agent comments and replies, student notes and replies)', async () => {
     const t = await signIn('threadindex@example.com');
     const n = await notebook(t, 'idxnb', 'Index');
-    const token = await connectAgent('threadindex@example.com', { notebooks: ['idxnb'], comment: true, transcribe: false });
+    const token = await connectAgent('threadindex@example.com', { comment: true, transcribe: false });
     const s = sessionOf('idxnb');
     const first = tool(token, 'wait', { s });
     await pause(50);
@@ -108,7 +108,7 @@ describe('comment threads and selection asks', () => {
   it('an Ask about a selection sends it as a region row (even read ink) and is answered in its thread', async () => {
     const t = await signIn('selask@example.com');
     const n = await notebook(t, 'selnb', 'Selection');
-    const token = await connectAgent('selask@example.com', { notebooks: ['selnb'], comment: true, transcribe: true });
+    const token = await connectAgent('selask@example.com', { comment: true, transcribe: true });
     const s = sessionOf('selnb');
 
     const first = tool(token, 'wait', { s });
@@ -151,7 +151,7 @@ describe('comment threads and selection asks', () => {
   it('a malformed selection ask is skipped: wait keeps delivering, to every agent', async () => {
     const t = await signIn('badask@example.com');
     const n = await notebook(t, 'badnb', 'Bad ask');
-    const token = await connectAgent('badask@example.com', { notebooks: ['badnb'], comment: true, transcribe: false });
+    const token = await connectAgent('badask@example.com', { comment: true, transcribe: false });
     const s = sessionOf('badnb');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -173,7 +173,7 @@ describe('comment threads and selection asks', () => {
     await pause(50);
     n.page.addItem(stroke('m2', 50, 200, 200, 220));
     expect(textOf(await next)).toMatch(/^R2 \[1\] p1 @84,336 253x34 \+1$/m);
-    const other = await connectAgent('badask@example.com', { notebooks: ['badnb'], comment: false, transcribe: false });
+    const other = await connectAgent('badask@example.com', { comment: false, transcribe: false });
     const w2 = tool(other, 'wait', { s });
     await pause(50);
     n.nbc.doc.transact(() => {
@@ -200,7 +200,7 @@ describe('comment threads and selection asks', () => {
     n.page.replyToComment(open, you, 'which sign?');
     await pause(100);
 
-    const token = await connectAgent('history@example.com', { notebooks: ['histnb'], comment: true, transcribe: false });
+    const token = await connectAgent('history@example.com', { comment: true, transcribe: false });
     const s = sessionOf('histnb');
     const first = tool(token, 'wait', { s });
     await pause(50);

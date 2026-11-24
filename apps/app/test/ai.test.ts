@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 
 import { getPresence, presenceCan, presenceNames } from '../src/api/ai';
-import { agentEntryCount, marginCards, markSeen, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, unreadIds } from '../src/editor/ai.logic';
+import { agentEntryCount, aiUi, COMMENTS_START_OPEN, marginCards, markSeen, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, unreadIds } from '../src/editor/ai.logic';
 import type { PageData } from '../src/editor/context';
 
 const agent = { kind: 'agent' as const, name: 'Claude' };
@@ -142,5 +142,21 @@ describe('selection threads', () => {
     expect(pins()).toEqual([]);
     expect(marginCards(page.comments(), 1, 64, 8, null, undefined, page.items())).toEqual([]);
     expect(anchorInkRemoved(page.comments()[0]!, page.items())).toBe(true);
+  });
+});
+
+describe('AI parts of the editor', () => {
+  it('are all hidden while the notebook has AI access off, even with unread agent comments', () => {
+    expect(aiUi(false, 3)).toEqual({ comments: false, ask: false, presence: false, badge: false });
+    expect(aiUi(undefined, 0)).toEqual({ comments: false, ask: false, presence: false, badge: false });
+  });
+
+  it('come back when AI access is turned on; the badge shows only with unread comments', () => {
+    expect(aiUi(true, 2)).toEqual({ comments: true, ask: true, presence: true, badge: true });
+    expect(aiUi(true, 0).badge).toBe(false);
+  });
+
+  it('the comments panel starts closed on every screen size', () => {
+    expect(COMMENTS_START_OPEN).toBe(false);
   });
 });

@@ -12,9 +12,10 @@ const PILL: Record<ReadingTone, PillTone> = { user: 'accent', agent: 'assistant'
 /**
  * What an agent read in the selected ink (or what the student wrote for it): each reading with who it's from and a
  * "stale" badge once the ink changed since. Editing makes a reading the student's own, which agents can't overwrite.
- * With no reading yet, the student can write one.
+ * With no reading yet, the student can write one. That works with AI access off too (`ai` false): then the sheet
+ * doesn't talk about agents.
  */
-export function ReadingSheet({ page, ink, onClose, onDone }: { page: Page; ink: string[]; onClose(): void; onDone(msg: string | null): void }) {
+export function ReadingSheet({ page, ink, ai, onClose, onDone }: { page: Page; ink: string[]; ai: boolean; onClose(): void; onDone(msg: string | null): void }) {
   const readings = React.useMemo(() => selectionReadings(page.readings(), page.items(), ink), [page, ink]);
   const [drafts, setDrafts] = React.useState(() => readings.map((r) => r.text));
   const [own, setOwn] = React.useState('');
@@ -51,16 +52,19 @@ export function ReadingSheet({ page, ink, onClose, onDone }: { page: Page; ink: 
     >
       {readings.length ? (
         <Text tone="muted">
-          What your agent read in this ink. Fix it if it's wrong: your text is yours, and agents can't change it. Leave it
-          empty to remove it.
+          {ai
+            ? "What your agent read in this ink. Fix it if it's wrong: your text is yours, and agents can't change it. Leave it empty to remove it."
+            : 'What this ink says. Leave it empty to remove it.'}
         </Text>
       ) : (
         <>
-          <Text tone="muted">No agent has read this yet. Agents see your handwriting as an image and can save what they read here.</Text>
+          <Text tone="muted">
+            {ai ? 'No agent has read this yet. Agents see your handwriting as an image and can save what they read here.' : 'Type what this ink says.'}
+          </Text>
           <TextField
             value={own}
             onChangeText={setOwn}
-            placeholder="Or type what it says"
+            placeholder={ai ? 'Or type what it says' : 'Type what it says'}
             accessibilityLabel="Your reading"
             autoFocus
             onSubmitEditing={save}
@@ -83,7 +87,7 @@ export function ReadingSheet({ page, ink, onClose, onDone }: { page: Page; ink: 
               autoFocus={i === 0}
               onSubmitEditing={many ? undefined : save}
             />
-            {r.stale ? (
+            {r.stale && ai ? (
               <Text variant="meta" tone="faint">
                 The ink changed since this was read. Agents see it as an image again until it's read again.
               </Text>

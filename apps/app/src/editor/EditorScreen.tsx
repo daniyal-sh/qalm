@@ -31,7 +31,7 @@ import { threadRows } from './CommentsPanel.logic';
 import { mirrorLoadedThreads, useThreadBackfill, useThreadIndex } from './threadIndex';
 import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence, useReadAfterDwell } from './ai';
 import { fitColumn, MARGIN_CARD_GAP, marginColumn } from './margin.logic';
-import { marginCards, markSeen, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, unreadIds, type SeenThreads, type Thinking } from './ai.logic';
+import { aiUi, COMMENTS_START_OPEN, marginCards, markSeen, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, unreadIds, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditingText, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
 import { clipSetAt, getClip, pasteItems, setClip, useClip } from './clipboard';
 import { pastedImage, pastedText, pasteSource, readPaste, systemChangedAt, viewCentre, watchSystemClipboard } from './systemPaste';
@@ -190,6 +190,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     return () => clearTimeout(t);
   }, [thinking, isThinking]);
   const unread = unreadCount(summaries, seen);
+  // With AI access off, every AI part of the editor is hidden (threads and readings stay in the notebook).
+  const ui = aiUi(meta?.aiAccess, unread);
 
   const lastPage = React.useRef<string | null>(null);
   const touchTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -228,7 +230,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   // Dock the comments panel beside the page only on wide windows; below that it floats over the page.
   // Decided by window width (not the page viewport, which itself shrinks when the panel docks).
   const dockComments = win.width >= 1100;
-  const [commentsOpen, setCommentsOpen] = React.useState(dockComments);
+  const [commentsOpen, setCommentsOpen] = React.useState(COMMENTS_START_OPEN);
+  const panelShown = commentsOpen && ui.comments;
   // Rotating to portrait (or narrowing the window) turns a docked panel into one covering the page: close it.
   React.useEffect(() => {
     if (!dockComments) setCommentsOpen(false);
@@ -249,7 +252,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   shownKey.current = viewKey(slots, scrollY, viewport.h);
   // Comment cards sit in a column beside the page when there's room and the panel is closed; otherwise pins on the page
   // (and the panel, which lists every thread).
-  const column = marginColumn(contentW, widestPx, commentsOpen);
+  const column = ui.comments ? marginColumn(contentW, widestPx, panelShown) : null;
   const wideMargin = column !== null;
   const current = currentPageIndex(slots, scrollY, viewport.h);
   const currentPageId = pages[current]?.id ?? null;
@@ -737,7 +740,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     ...(clip ? [{ label: 'Paste', icon: 'clipboard' as const, onPress: () => sel.paste() }] : []),
     { label: 'Bring to front', icon: 'chevrons-up', onPress: () => sel.order('front') },
     { label: 'Send to back', icon: 'chevrons-down', onPress: () => sel.order('back') },
-    { label: 'Comment on selection', icon: 'message-square', onPress: () => openSelection('comment') },
+    ...(ui.comments ? [{ label: 'Comment on selection', icon: 'message-square' as const, onPress: () => openSelection('comment') }] : []),
   ];
 
   const moreMenu = (anchor: { x: number; y: number }) =>
@@ -864,9 +867,9 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   };
   const unreadSet = unreadIds(summaries, seen);
   const onScreen = [...marginTops.keys()].filter(marginOnScreen);
-  if (commentsOpen) onScreen.push(...panelVisible);
+  if (panelShown) onScreen.push(...panelVisible);
   const panelVisibleRef = React.useRef(panelVisible);
-  panelVisibleRef.current = commentsOpen ? panelVisible : [];
+  panelVisibleRef.current = panelShown ? panelVisible : [];
   useReadAfterDwell(
     onScreen.filter((id) => unreadSet.has(id)),
     1500,
@@ -880,7 +883,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     if (!newestAgent || newestAgent.at <= notifiedAt.current) return;
     notifiedAt.current = newestAgent.at;
     const i = pages.findIndex((p) => p.id === newestAgent.pageId);
-    if (commentsOpen || (wideMargin && i >= visFirst && i <= visLast)) return;
+    if (!ui.comments || panelShown || (wideMargin && i >= visFirst && i <= visLast)) return;
     showToast(i >= 0 && i !== current ? `${newestAgent.name} commented on page ${i + 1}. Open comments to read it.` : `${newestAgent.name} commented. Open comments to read it.`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newestAgent?.at]);
@@ -903,6 +906,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             editingText,
             setEditingText,
             activeCommentId,
+            showComments: ui.comments,
             setActiveComment: (id: string | null) => {
               selectThread(id);
               if (id) setCommentsOpen(true);
@@ -911,7 +915,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             touchPage,
           }
         : null,
-    [notebook, notebookId, tools, setTool, onPenButton, input, notePenSeen, undo, registry, selection, editingText, activeCommentId, selectThread, reportPage, touchPage],
+    [notebook, notebookId, tools, setTool, onPenButton, input, notePenSeen, undo, registry, selection, editingText, activeCommentId, ui.comments, selectThread, reportPage, touchPage],
   );
 
   if (!h || !notebook || !meta || !edCtx) {
@@ -968,17 +972,18 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                 Page {current + 1} of {pages.length}
               </Text>
               {!narrow ? syncPill : null}
-              {meta.aiAccess && (agents.length || meta.aiPaused) ? (
+              {ui.presence && (agents.length || meta.aiPaused) ? (
                 <PresencePill agents={agents} notebook={notebook} paused={!!meta.aiPaused} thinking={isThinking} compact={narrow} />
-              ) : !narrow && meta.aiAccess ? (
+              ) : !narrow && ui.presence ? (
                 <Pill label="AI can read" tone="assistant" />
               ) : null}
             </View>
           </View>
           {phone ? null : undoRedo}
+          {ui.comments ? (
           <View>
-            <IconButton icon="message-square" label={unread ? `Comments, ${unread} unread` : 'Comments'} size={hb} selected={commentsOpen} onPress={() => setCommentsOpen((x) => !x)} />
-            {unread > 0 ? (
+            <IconButton icon="message-square" label={unread ? `Comments, ${unread} unread` : 'Comments'} size={hb} selected={panelShown} onPress={() => setCommentsOpen((x) => !x)} />
+            {ui.badge ? (
               <View pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden style={[styles.badge, { backgroundColor: c.assistant }]}>
                 <Text variant="meta" style={{ fontSize: 10, lineHeight: 14, color: c.onAssistant, fontWeight: '600' }}>
                   {unread}
@@ -986,7 +991,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               </View>
             ) : null}
           </View>
-          {win.width < 480 ? (
+          ) : null}
+          {!ui.ask ? null : win.width < 480 ? (
             <IconButton icon="message-circle" label="Ask" tone="assistant" size={hb} onPress={() => openAsk()} />
           ) : (
             <Button label="Ask" icon="message-circle" variant="assistant" size="sm" onPress={() => openAsk()} />
@@ -1168,7 +1174,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                       )}
                       {/* Reading stays on the bar at every width (F6). */}
                       {selInk.length ? <IconButton icon="type" label="Reading" size={hb} onPress={openReading} /> : null}
-                      {phone ? (
+                      {!ui.ask ? null : phone ? (
                         <IconButton icon="message-circle" label="Ask about selection" tone="assistant" size={hb} onPress={() => openSelection('ask')} />
                       ) : (
                         <Button label="Ask" accessibilityLabel="Ask about selection" icon="message-circle" variant="assistant" size="sm" onPress={() => openSelection('ask')} />
@@ -1189,7 +1195,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             ) : null}
           </View>
 
-          {commentsOpen ? (
+          {panelShown ? (
             // Docked: a fixed-width column beside the page area (never squeezed by it). Floating: over the page, at the right.
             <View style={dockComments ? { width: PANEL_W, flexShrink: 0 } : [StyleSheet.absoluteFill, { alignItems: 'flex-end' }]} pointerEvents="box-none">
               <View style={dockComments ? { flex: 1 } : [{ flex: 1, maxWidth: '100%' }, shadow2]}>
@@ -1244,6 +1250,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
           <ReadingSheet
             page={reading.page}
             ink={reading.ink}
+            ai={ui.comments}
             onClose={() => setReading(null)}
             onDone={(msg) => {
               touchPage(reading.pageId);
