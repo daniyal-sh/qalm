@@ -1,6 +1,6 @@
-// The legal pages' words, in Apollo's structure and tone (apollo: src/components/apollo/marketing/pages/legal-page.tsx),
-// with every fact rewritten for qalm and checked against qalm's code. When qalm changes (providers, sign-in, storage,
-// retention, AI access), update this file and UPDATED in site.mjs.
+// The legal pages' words, in the structure and tone of Apollo's legal pages, with every fact rewritten for qalm and
+// checked against qalm's code. When qalm changes (providers, sign-in, storage, retention, AI access), update this file
+// and UPDATED in site.mjs.
 //
 // Where each fact comes from:
 // - Hosting: apps/server/wrangler.jsonc (Workers, D1, R2, Durable Objects, KV; no location hint or jurisdiction set).
