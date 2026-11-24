@@ -355,7 +355,18 @@ listed in `apps/server/.dev.vars.example`.
   6. Check: the landing at `/`, `/app` opens the app, a reload of `/app/notebook/<id>` works, an email sign-in link
      opens `/app/auth/email/verify`, and `https://qalm-api.apollolearn.app/health` answers.
 - Client builds for production: `EXPO_PUBLIC_QALM_SERVER_URL=https://qalm-api.apollolearn.app` for the desktop and
-  Android builds (same commands as staging).
+  Android builds (same commands as staging). For phones, tablets and the emulator, build
+  `-PreactNativeArchitectures=arm64-v8a,x86_64`.
+- **Android release signing:** the public APK is signed with the release keystore
+  `C:\Users\daniy\.qalm\android\qalm-release.jks` (alias `qalm`, RSA 4096). Its passwords are in
+  `keystore.properties` next to it, outside the repo; never commit either. `apps/app/plugins/with-release-signing.js`
+  (registered in `app.config.js`) wires the release `signingConfig` on every prebuild when that properties file exists
+  (override the path with `QALM_ANDROID_KEYSTORE_PROPERTIES`), and leaves debug signing otherwise. Check a build with
+  `apksigner verify --print-certs`: it should show `CN=qalm, O=Apollo`, not "Android Debug".
+  **Back up both files** (e.g. a password manager plus an offline copy). Android only installs updates signed with
+  the same key, so losing the keystore means existing installs can never be updated; users would have to uninstall
+  (losing local notebooks) and reinstall. Bump `expo.android.versionCode` in `app.json` for every release after the
+  first (it defaults to 1).
 
 ## 8. Suggested next steps
 
