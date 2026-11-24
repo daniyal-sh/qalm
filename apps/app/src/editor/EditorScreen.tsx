@@ -891,7 +891,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   }
 
   const syncPill =
-    sync === null ? null : sync === 'synced' ? <Pill label="Synced" tone="good" dot /> : sync === 'offline' ? <Pill label="Offline" tone="warn" dot /> : <Pill label="Syncing" tone="neutral" dot />;
+    sync === null ? null : sync === 'synced' ? <Pill label="Synced" tone="good" dot /> : sync === 'offline' ? <Pill label="Offline" tone="warn" dot /> : sync === 'reconnecting' ? <Pill label="Reconnecting…" tone="warn" dot /> : <Pill label="Syncing" tone="neutral" dot />;
   const narrow = win.width < 640;
 
   return (

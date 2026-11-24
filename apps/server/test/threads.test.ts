@@ -15,11 +15,13 @@ describe('comment threads and selection asks', () => {
 
     const first = tool(token, 'wait', { s });
     await pause(50);
-    n.page.addItem(stroke('a1', 50, 100, 200, 120));
-    n.page.addItem(stroke('a2', 50, 200, 200, 220));
-    n.page.addItem(stroke('a3', 50, 300, 200, 320));
+    // One update, so a slow machine can't split the three strokes across two deliveries (R3 would then be R1 of the next).
+    n.pgc.doc.transact(() => {
+      n.page.addItem(stroke('a1', 50, 100, 200, 120));
+      n.page.addItem(stroke('a2', 50, 200, 200, 220));
+      n.page.addItem(stroke('a3', 50, 300, 200, 320));
+    });
     expect(textOf(await first)).toContain('R3 [3] p1 @84,504 253x34');
-    const before = inkOf(n.page);
 
     // The agent starts a thread; the reply names it.
     const cm = await tool(token, 'comment', { ref: 'R1', text: 'Check the sign' });
@@ -28,13 +30,23 @@ describe('comment threads and selection asks', () => {
     const agentThread = n.page.comments()[0]!.id;
 
     // The student replies to it and starts their own thread. Both arrive without waiting for a pen pause or the rate limit.
+    // Proven without a stopwatch: the pen keeps writing (a dot every 50 ms, well inside the 300 ms idle), so ink alone
+    // can never wake the agent while this runs; only the urgent path for comments can.
     const second = tool(token, 'wait', { s });
     await pause(50);
-    const t0 = Date.now();
     n.page.replyToComment(agentThread, you, 'which sign?');
     const mine = n.page.addComment({ anchorIds: ['a2'], anchor: [50, 200, 200, 220], author: you, text: 'is this step ok?' });
+    let writing = true;
+    const writer = (async () => {
+      for (let i = 0; writing; i++) {
+        n.page.addItem(stroke(`w${i}`, 400, 700 + (i % 20), 402, 701 + (i % 20)));
+        await pause(50);
+      }
+    })();
     const up = textOf(await second);
-    expect(Date.now() - t0).toBeLessThan(700); // the test min interval is 800 ms
+    writing = false;
+    await writer;
+    const before = inkOf(n.page);
     expect(up).toContain('re C1 "which sign?"');
     // Both entries may arrive in one update or the first alone; collect until the note shows up.
     let all = up;

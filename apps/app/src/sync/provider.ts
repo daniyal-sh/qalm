@@ -12,7 +12,24 @@ export const MESSAGE_AWARENESS = 1;
 export const MESSAGE_AUTH = 2;
 export const MESSAGE_QUERY_AWARENESS = 3;
 
-export type SyncStatus = 'connecting' | 'connected' | 'synced' | 'offline';
+/**
+ * `reconnecting`: the connection was lost (or didn't come up) and a retry with a fresh ticket is pending.
+ * `offline`: the device is offline, or sync was stopped.
+ */
+export type SyncStatus = 'connecting' | 'connected' | 'synced' | 'reconnecting' | 'offline';
+
+/** Text heartbeat: the server answers `ping` with `pong` without waking its Durable Object (setWebSocketAutoResponse). */
+export const PING = 'ping';
+export const PONG = 'pong';
+
+/** Network and app lifecycle signals (see `network.ts`). */
+export interface NetworkEvents {
+  online(): void;
+  offline(): void;
+  /** The app came back to the foreground: check the connection now. */
+  foreground(): void;
+}
+export type WatchNetwork = (events: NetworkEvents) => () => void;
 
 /** Minimal WebSocket surface (browser / React Native / test fake). */
 export interface SocketLike {
@@ -22,7 +39,7 @@ export interface SocketLike {
   onclose: ((ev: unknown) => void) | null;
   onerror: ((ev: unknown) => void) | null;
   onmessage: ((ev: { data: unknown }) => void) | null;
-  send(data: Uint8Array): void;
+  send(data: Uint8Array | string): void;
   close(): void;
 }
 export type SocketFactory = (url: string) => SocketLike;
@@ -37,6 +54,11 @@ export interface SyncProviderOptions {
   maxBackoffMs?: number;
   /** Connect immediately (default true). */
   connect?: boolean;
+  /** Silence before a ping (default 20 s), and how long to wait for any answer before the socket counts as dead (default 8 s). */
+  heartbeatMs?: number;
+  heartbeatTimeoutMs?: number;
+  /** Subscribes to online/offline and foreground events; unsubscribed on destroy. */
+  watchNetwork?: WatchNetwork;
 }
 
 const OPEN = 1;
@@ -45,6 +67,11 @@ const OPEN = 1;
  * Yjs sync + awareness over a WebSocket, speaking the y-websocket protocol, with the ticket flow
  * from tech-spec §4: every connection attempt first POSTs for a ticket, so access tokens never go in
  * URLs and a reconnect never reuses a spent ticket.
+ *
+ * A connection can die without a close event (Wi-Fi drops, the app is suspended), so after `heartbeatMs` of silence
+ * the provider sends a ping, and if nothing at all arrives within `heartbeatTimeoutMs` it drops the socket and
+ * reconnects. No edit is lost: every (re)connect starts with sync step 1 both ways, which sends whatever the other
+ * side lacks, including updates that went into the dead socket.
  */
 export class SyncProvider {
   readonly awareness: awarenessProtocol.Awareness;
@@ -55,9 +82,12 @@ export class SyncProvider {
   private opening = false;
   private attempts = 0;
   private retry: ReturnType<typeof setTimeout> | null = null;
+  private heartbeat: ReturnType<typeof setTimeout> | null = null;
+  private networkDown = false;
   private listeners = new Set<(s: SyncStatus) => void>();
   private syncedWaiters: (() => void)[] = [];
   private readonly createSocket: SocketFactory;
+  private readonly unwatch: (() => void) | null;
 
   constructor(
     readonly doc: Y.Doc,
@@ -70,6 +100,12 @@ export class SyncProvider {
       ((url) => new (globalThis as unknown as { WebSocket: new (u: string) => SocketLike }).WebSocket(url));
     doc.on('update', this.onDocUpdate);
     this.awareness.on('update', this.onAwarenessUpdate);
+    this.unwatch =
+      opts.watchNetwork?.({
+        online: () => this.setNetwork(true),
+        offline: () => this.setNetwork(false),
+        foreground: () => this.check(),
+      }) ?? null;
     if (opts.connect !== false) this.connect();
   }
 
@@ -95,6 +131,7 @@ export class SyncProvider {
   connect(): void {
     this.wanted = true;
     if (this.socket || this.retry || this.opening) return;
+    if (this.networkDown) return this.setStatus('offline');
     void this.open();
   }
 
@@ -102,6 +139,95 @@ export class SyncProvider {
     this.wanted = false;
     if (this.retry) clearTimeout(this.retry);
     this.retry = null;
+    this.dropSocket();
+    this.setStatus('offline');
+  }
+
+  /**
+   * Is the connection still alive? Pings now when connected (a dead socket is dropped within `heartbeatTimeoutMs`),
+   * or retries at once when waiting to reconnect. Called when the app returns to the foreground.
+   */
+  check(): void {
+    if (!this.wanted || this.networkDown) return;
+    if (this.socket) {
+      if (this.socket.readyState === OPEN) this.ping();
+      return;
+    }
+    this.retryNow();
+  }
+
+  /** The device went offline or came back online. */
+  setNetwork(online: boolean): void {
+    if (online !== this.networkDown) return; // no change
+    this.networkDown = !online;
+    if (!online) {
+      if (this.retry) clearTimeout(this.retry);
+      this.retry = null;
+      this.dropSocket();
+      this.setStatus('offline');
+      return;
+    }
+    if (this.wanted) {
+      this.setStatus('reconnecting');
+      this.retryNow();
+    }
+  }
+
+  destroy(): void {
+    this.unwatch?.();
+    this.disconnect();
+    this.doc.off('update', this.onDocUpdate);
+    this.awareness.off('update', this.onAwarenessUpdate);
+    this.awareness.destroy();
+    this.listeners.clear();
+  }
+
+  private async open(): Promise<void> {
+    this.opening = true;
+    this.setStatus(this.status === 'reconnecting' ? 'reconnecting' : 'connecting');
+    let ticket: string;
+    try {
+      ticket = await this.opts.getTicket(this.docId);
+    } catch {
+      this.opening = false;
+      this.scheduleRetry();
+      return;
+    }
+    this.opening = false;
+    if (!this.wanted || this.socket || this.networkDown) return;
+    const socket = this.createSocket(syncSocketUrl(this.opts.serverUrl, this.docId, ticket));
+    socket.binaryType = 'arraybuffer';
+    this.socket = socket;
+    // A socket that never opens (nor closes) counts as lost too.
+    this.heartbeat = setTimeout(() => {
+      if (this.socket === socket) this.lost();
+    }, 2 * (this.opts.heartbeatTimeoutMs ?? 8_000));
+    socket.onopen = () => {
+      this.attempts = 0;
+      this.setStatus('connected');
+      this.armHeartbeat();
+      const enc = encoding.createEncoder();
+      encoding.writeVarUint(enc, MESSAGE_SYNC);
+      syncProtocol.writeSyncStep1(enc, this.doc);
+      socket.send(encoding.toUint8Array(enc));
+      if (this.awareness.getLocalState() !== null) socket.send(this.awarenessMessage([this.doc.clientID]));
+    };
+    socket.onmessage = (ev) => this.onMessage(socket, ev.data);
+    socket.onerror = () => undefined;
+    socket.onclose = () => {
+      if (this.socket === socket) this.lost();
+    };
+  }
+
+  /** The socket closed or went silent: drop it and reconnect with backoff. */
+  private lost(): void {
+    this.dropSocket();
+    this.scheduleRetry();
+  }
+
+  private dropSocket(): void {
+    if (this.heartbeat) clearTimeout(this.heartbeat);
+    this.heartbeat = null;
     const s = this.socket;
     this.socket = null;
     if (s) {
@@ -115,57 +241,39 @@ export class SyncProvider {
     const others = [...this.awareness.getStates().keys()].filter((c) => c !== this.doc.clientID);
     awarenessProtocol.removeAwarenessStates(this.awareness, others, this);
     this.synced = false;
-    this.setStatus('offline');
   }
 
-  destroy(): void {
-    this.disconnect();
-    this.doc.off('update', this.onDocUpdate);
-    this.awareness.off('update', this.onAwarenessUpdate);
-    this.awareness.destroy();
-    this.listeners.clear();
+  /** After `heartbeatMs` without a message, ping. Every message re-arms it. */
+  private armHeartbeat(): void {
+    if (this.heartbeat) clearTimeout(this.heartbeat);
+    this.heartbeat = setTimeout(() => this.ping(), this.opts.heartbeatMs ?? 20_000);
   }
 
-  private async open(): Promise<void> {
-    this.opening = true;
-    this.setStatus('connecting');
-    let ticket: string;
+  /** Send a ping; if nothing arrives within `heartbeatTimeoutMs`, the connection is dead. */
+  private ping(): void {
+    const s = this.socket;
+    if (!s) return;
+    if (this.heartbeat) clearTimeout(this.heartbeat);
+    this.heartbeat = setTimeout(() => {
+      if (this.socket === s) this.lost();
+    }, this.opts.heartbeatTimeoutMs ?? 8_000);
     try {
-      ticket = await this.opts.getTicket(this.docId);
+      s.send(PING);
     } catch {
-      this.opening = false;
-      this.scheduleRetry();
-      return;
+      this.lost();
     }
-    this.opening = false;
-    if (!this.wanted || this.socket) return;
-    const socket = this.createSocket(syncSocketUrl(this.opts.serverUrl, this.docId, ticket));
-    socket.binaryType = 'arraybuffer';
-    this.socket = socket;
-    socket.onopen = () => {
-      this.attempts = 0;
-      this.setStatus('connected');
-      const enc = encoding.createEncoder();
-      encoding.writeVarUint(enc, MESSAGE_SYNC);
-      syncProtocol.writeSyncStep1(enc, this.doc);
-      socket.send(encoding.toUint8Array(enc));
-      if (this.awareness.getLocalState() !== null) socket.send(this.awarenessMessage([this.doc.clientID]));
-    };
-    socket.onmessage = (ev) => this.onMessage(socket, ev.data);
-    socket.onerror = () => undefined;
-    socket.onclose = () => {
-      if (this.socket !== socket) return;
-      this.socket = null;
-      this.synced = false;
-      const others = [...this.awareness.getStates().keys()].filter((c) => c !== this.doc.clientID);
-      awarenessProtocol.removeAwarenessStates(this.awareness, others, this);
-      this.scheduleRetry();
-    };
+  }
+
+  private retryNow(): void {
+    if (this.retry) clearTimeout(this.retry);
+    this.retry = null;
+    this.attempts = 0;
+    if (!this.socket && !this.opening) void this.open();
   }
 
   private scheduleRetry(): void {
-    this.setStatus('offline');
-    if (!this.wanted) return;
+    if (!this.wanted || this.networkDown) return this.setStatus('offline');
+    this.setStatus('reconnecting');
     const min = this.opts.minBackoffMs ?? 500;
     const max = this.opts.maxBackoffMs ?? 30_000;
     const delay = Math.min(max, min * 2 ** this.attempts);
@@ -177,6 +285,8 @@ export class SyncProvider {
   }
 
   private onMessage(socket: SocketLike, data: unknown): void {
+    if (this.socket === socket) this.armHeartbeat(); // anything counts as a sign of life
+    if (typeof data === 'string') return; // pong
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
     const dec = decoding.createDecoder(bytes);
     const enc = encoding.createEncoder();

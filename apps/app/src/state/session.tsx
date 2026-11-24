@@ -13,6 +13,7 @@ import { config } from '../config';
 import { kvGet, kvSet } from '../lib/kv';
 import { DocManager, docIds, openLoaded, type DocHandle, type RemoteFactory } from '../sync/docs';
 import { openPersistence } from '../sync/persistence';
+import { watchNetwork } from '../sync/network';
 import { SyncProvider, type SyncStatus } from '../sync/provider';
 import { fetchTicket } from '../sync/ticket';
 import { hasLocalLibrary, localToMove, moveLocalLibrary } from './localLibrary';
@@ -59,7 +60,7 @@ const Ctx = React.createContext<Session | null>(null);
 
 function remoteFor(tm: TokenManager, serverUrl: string): RemoteFactory {
   const authed = (p: string, i?: RequestInit) => tm.fetch(p, i);
-  return (docId, doc) => (docId === LOCAL_LIBRARY ? null : new SyncProvider(doc, docId, { serverUrl, getTicket: (id) => fetchTicket(authed, id) }));
+  return (docId, doc) => (docId === LOCAL_LIBRARY ? null : new SyncProvider(doc, docId, { serverUrl, getTicket: (id) => fetchTicket(authed, id), watchNetwork }));
 }
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {

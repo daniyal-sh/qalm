@@ -108,7 +108,8 @@ apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Objec
   On native, the brush-width prop is `strokeWidth`. The name `width` collided with Fabric's layout width.
 - **Server (§4):**
   - **Sync:** one-time 30 s sync tickets (`POST /sync/ticket`, then `/sync/{docId}?ticket=`). DocRoom uses
-    hibernating WebSockets and compacts every 200 updates.
+    hibernating WebSockets and compacts every 200 updates. The client pings after 20 s of silence (the room auto-responds
+    `pong` without waking) and reconnects if nothing comes back within 8 s, on `online` and in the foreground.
   - **Access:** every doc is checked against its owner. Assets in R2 are content-addressed (sha256), readable only by
     their uploader, and capped per user (1 GiB by default).
   - **Agents:** MCP at `/mcp` (Streamable HTTP, OAuth 2.1 with dynamic client registration, via

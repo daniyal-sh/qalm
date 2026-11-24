@@ -6,7 +6,7 @@ import * as Y from 'yjs';
 
 import { TokenManager, type Tokens } from '../src/auth/tokens';
 import { DocManager } from '../src/sync/docs';
-import { MESSAGE_SYNC, SyncProvider, type SocketLike } from '../src/sync/provider';
+import { MESSAGE_SYNC, PING, PONG, SyncProvider, type NetworkEvents, type SocketLike } from '../src/sync/provider';
 import { MemoryStorage, SnapshotPersistence } from '../src/sync/snapshot';
 import { fetchTicket, syncSocketUrl } from '../src/sync/ticket';
 import { flush } from './helpers';
@@ -48,6 +48,9 @@ class FakeSocket implements SocketLike {
   onclose: SocketLike['onclose'] = null;
   onerror: SocketLike['onerror'] = null;
   onmessage: SocketLike['onmessage'] = null;
+  /** The network under this socket is gone: nothing arrives, sends vanish, and no close event fires. */
+  dead = false;
+  pings = 0;
   constructor(private server: FakeServer) {}
   open() {
     this.readyState = 1;
@@ -58,9 +61,18 @@ class FakeSocket implements SocketLike {
     this.deliver(encoding.toUint8Array(enc));
   }
   deliver(bytes: Uint8Array) {
+    if (this.dead) return;
     this.onmessage?.({ data: bytes.slice().buffer });
   }
-  send(data: Uint8Array) {
+  send(data: Uint8Array | string) {
+    if (this.dead) return;
+    if (typeof data === 'string') {
+      if (data === PING) {
+        this.pings++;
+        this.onmessage?.({ data: PONG });
+      }
+      return;
+    }
     const dec = decoding.createDecoder(data);
     if (decoding.readVarUint(dec) !== MESSAGE_SYNC) return;
     const enc = encoding.createEncoder();
@@ -196,7 +208,7 @@ describe('SyncProvider', () => {
 
     // server drops the socket: reconnect with a new ticket
     server.sockets[0]!.drop();
-    expect(p.status).toBe('offline');
+    expect(p.status).toBe('reconnecting');
     await new Promise((r) => setTimeout(r, 20));
     await p.whenSynced();
     expect(server.urls).toEqual(['wss://api.test/sync/nb%3A1?ticket=t1', 'wss://api.test/sync/nb%3A1?ticket=t2']);
@@ -221,6 +233,140 @@ describe('SyncProvider', () => {
     expect(server.urls).toEqual(['wss://api.test/sync/lib%3Au?ticket=ok']);
     p.disconnect();
     expect(p.status).toBe('offline');
+  });
+
+  const heartbeat = { heartbeatMs: 20_000, heartbeatTimeoutMs: 8_000, minBackoffMs: 500 };
+
+  it('pings after 20 s of silence and stays synced while pongs come back', async () => {
+    vi.useFakeTimers();
+    const server = new FakeServer();
+    const p = new SyncProvider(new Y.Doc(), 'nb:hb', { serverUrl: 'https://api.test', getTicket: async () => 't', createSocket: server.create, ...heartbeat });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(p.status).toBe('synced');
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(server.sockets[0]!.pings).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(server.sockets[0]!.pings).toBe(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(server.sockets[0]!.pings).toBe(4);
+    expect(p.status).toBe('synced');
+    expect(server.sockets).toHaveLength(1);
+    p.destroy();
+  });
+
+  it('notices a connection dropped without a close event, reconnects with a fresh ticket and flushes edits', async () => {
+    vi.useFakeTimers();
+    const server = new FakeServer();
+    let t = 0;
+    const doc = new Y.Doc();
+    const p = new SyncProvider(doc, 'nb:drop', { serverUrl: 'https://api.test', getTicket: async () => `t${++t}`, createSocket: server.create, ...heartbeat });
+    const seen: string[] = [];
+    p.onStatus((s) => seen.push(s));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(p.status).toBe('synced');
+
+    server.sockets[0]!.dead = true; // the network is gone, and no close event comes
+    doc.getMap('m').set('whileDead', 1); // sent into the dead socket
+    await vi.advanceTimersByTimeAsync(20_000 + 7_999);
+    expect(p.status).toBe('synced'); // still waiting for an answer to the ping
+    await vi.advanceTimersByTimeAsync(1);
+    expect(p.status).toBe('reconnecting'); // 28 s after the drop at most
+    doc.getMap('m').set('whileReconnecting', 2);
+
+    await vi.advanceTimersByTimeAsync(500); // backoff, then a new ticket and socket
+    expect(p.status).toBe('synced');
+    expect(server.urls.map((u) => u.split('=')[1])).toEqual(['t1', 't2']);
+    expect(server.doc.getMap('m').toJSON()).toEqual({ whileDead: 1, whileReconnecting: 2 });
+    expect(seen).toEqual(['connected', 'synced', 'reconnecting', 'connected', 'synced']);
+    p.destroy();
+  });
+
+  it('gives up on a socket that never opens, and retries', async () => {
+    vi.useFakeTimers();
+    const server = new FakeServer();
+    let hang = true;
+    const create = (url: string) => {
+      const s = server.create(url) as FakeSocket;
+      if (hang) {
+        hang = false;
+        s.dead = true;
+        s.open = () => undefined;
+      }
+      return s;
+    };
+    const p = new SyncProvider(new Y.Doc(), 'nb:hang', { serverUrl: 'https://api.test', getTicket: async () => 't', createSocket: create, ...heartbeat });
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(p.status).toBe('reconnecting');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(p.status).toBe('synced');
+    p.destroy();
+  });
+
+  it('goes offline at once with the network, and reconnects at once when it is back', async () => {
+    vi.useFakeTimers();
+    const server = new FakeServer();
+    let net: NetworkEvents | null = null;
+    let unwatched = false;
+    const watchNetwork = (e: NetworkEvents) => {
+      net = e;
+      return () => {
+        unwatched = true;
+      };
+    };
+    const doc = new Y.Doc();
+    const getTicket = vi.fn(async () => 't');
+    const p = new SyncProvider(doc, 'nb:net', { serverUrl: 'https://api.test', getTicket, createSocket: server.create, watchNetwork, ...heartbeat, minBackoffMs: 60_000 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(p.status).toBe('synced');
+
+    net!.offline();
+    expect(p.status).toBe('offline');
+    doc.getMap('m').set('offline', true);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(getTicket).toHaveBeenCalledTimes(1); // no retries while offline
+    expect(p.status).toBe('offline');
+
+    net!.online();
+    expect(p.status).toBe('reconnecting');
+    await vi.advanceTimersByTimeAsync(0); // no backoff wait
+    expect(p.status).toBe('synced');
+    expect(getTicket).toHaveBeenCalledTimes(2);
+    expect(server.doc.getMap('m').get('offline')).toBe(true);
+    p.destroy();
+    expect(unwatched).toBe(true);
+  });
+
+  it('back in the foreground, checks the connection now instead of waiting for the next ping', async () => {
+    vi.useFakeTimers();
+    const server = new FakeServer();
+    let net: NetworkEvents | null = null;
+    const p = new SyncProvider(new Y.Doc(), 'nb:fg', {
+      serverUrl: 'https://api.test',
+      getTicket: async () => 't',
+      createSocket: server.create,
+      watchNetwork: (e) => {
+        net = e;
+        return () => undefined;
+      },
+      ...heartbeat,
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+    server.sockets[0]!.dead = true; // killed while the app was in the background
+    net!.foreground();
+    expect(server.sockets[0]!.pings).toBe(0); // the ping went into the dead socket
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(p.status).toBe('reconnecting');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(p.status).toBe('synced');
+    expect(server.sockets).toHaveLength(2);
+
+    // A healthy socket answers the foreground ping and stays.
+    net!.foreground();
+    expect(server.sockets[1]!.pings).toBe(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(server.sockets).toHaveLength(2);
+    expect(p.status).toBe('synced');
+    p.destroy();
   });
 });
 
