@@ -1,5 +1,7 @@
 import { createNotebookUndoManager, inkOnPaper, Notebook, Page, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem, type Item } from '@qalm/core';
 import { router } from 'expo-router';
+import { NavigationBar } from 'expo-navigation-bar';
+import { StatusBar } from 'expo-status-bar';
 import { QalmInk, renderThumbnail } from 'qalm-ink';
 import * as React from 'react';
 import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, useWindowDimensions, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
@@ -10,6 +12,8 @@ import { mark } from '../bench/hook';
 import { exportNotebook, updateNotebookMeta } from '../library/ops';
 import { CoverSheet, NameSheet, PaperSheet } from '../library/components';
 import { newId } from '../lib/id';
+import { desktop } from '../lib/desktop';
+import { setFullscreen, toggleFullscreen, useFullscreen } from '../lib/fullscreen';
 import { kvGet, kvSet } from '../lib/kv';
 import { pickFile } from '../lib/files';
 import { docIds, openLoaded, type DocHandle } from '../sync/docs';
@@ -39,6 +43,8 @@ import { selectionInk } from './reading.logic';
 import { ReadingSheet } from './ReadingSheet';
 import { SwatchStrip } from './Swatches';
 import { Toolbar } from './Toolbar';
+import { FocusPill, usePillPlace } from './FocusPill';
+import { enterFocus, fullscreenShortcut, leaveFocus, type Panels } from './focus.logic';
 import { keyTarget, NAV_SIDEBAR_MIN, NAV_SIDEBAR_W, parseGoTo } from './navigator.logic';
 import { PageNavigator } from './PageNavigator';
 import { entryMirror, notebookFound, pendingScrollY, type PendingScroll } from './editor.logic';
@@ -488,7 +494,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       } else if ((k === 'delete' || k === 'backspace') && selection) {
         ev.preventDefault();
         deleteSelection();
-      } else if (k === 'escape') setSelection(null);
+      } else if (k === 'escape') {
+        if (selection) setSelection(null);
+        else if (focusRef.current) setFullscreen(false);
+      }
       else if (mod && k === 'g') {
         ev.preventDefault();
         openGoTo();
@@ -602,6 +611,33 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const [navOpen, setNavOpen] = React.useState(false);
   const [goTo, setGoTo] = React.useState<string | null>(null);
   const openGoTo = () => setGoTo(String(currentRef.current + 1));
+
+  // ---- fullscreen focus layout: the header and toolbar give way to a floating pill; the side panels close ----
+  const focus = useFullscreen();
+  const focusRef = React.useRef(focus);
+  focusRef.current = focus;
+  const [pillPlace, setPillPlace] = usePillPlace();
+  const [pillSize, setPillSize] = React.useState({ w: 0, h: 0 });
+  const savedPanels = React.useRef<Panels | null>(null);
+  const panelsRef = React.useRef<Panels>({ nav: navOpen, comments: commentsOpen });
+  panelsRef.current = { nav: navOpen, comments: commentsOpen };
+  React.useEffect(() => {
+    if (focus) {
+      const r = enterFocus(panelsRef.current);
+      savedPanels.current = r.saved;
+      setNavOpen(r.panels.nav);
+      setCommentsOpen(r.panels.comments);
+    } else if (savedPanels.current) {
+      const p = leaveFocus(savedPanels.current, panelsRef.current);
+      savedPanels.current = null;
+      setNavOpen(p.nav);
+      setCommentsOpen(p.comments);
+    }
+  }, [focus]);
+  // iPad and Android: fullscreen is the editor's own (hidden system bars); leaving the editor leaves it.
+  React.useEffect(() => () => void (Platform.OS !== 'web' && setFullscreen(false)), []);
+  const mac = Platform.OS === 'web' && (desktop()?.platform === 'darwin' || (typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)));
+  const fsKey = Platform.OS === 'web' ? ` (${fullscreenShortcut(mac)})` : '';
   const thumbs = React.useMemo(
     () =>
       notebook
@@ -720,6 +756,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         },
         { label: 'Export PDF', icon: 'file-text', onPress: () => void run('Exporting PDF…', () => exportNotebook(ctx, notebookId, 'pdf')) },
         { label: 'Export .qalm backup', icon: 'archive', onPress: () => void run('Exporting…', () => exportNotebook(ctx, notebookId, 'qalm')) },
+        { label: 'Full screen', icon: 'maximize', onPress: () => setFullscreen(true) },
         { label: 'Settings', icon: 'settings', onPress: () => router.push('/settings') },
       ],
     });
@@ -894,6 +931,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const syncPill =
     sync === null ? null : sync === 'synced' ? <Pill label="Synced" tone="good" dot /> : sync === 'offline' ? <Pill label="Offline" tone="warn" dot /> : sync === 'reconnecting' ? <Pill label="Reconnecting…" tone="warn" dot /> : <Pill label="Syncing" tone="neutral" dot />;
   const narrow = win.width < 640;
+  // The selection bar sits above the focus pill when the pill is on the bottom edge.
+  const selBottom = 20 + insets.bottom + (focus && pillPlace.edge === 'bottom' ? pillSize.h + 12 : 0);
   // A phone: Undo / Redo move into the floating toolbar so the title keeps room, and header buttons are 40 px wide.
   const phone = win.width < 480;
   const hb = phone ? 40 : undefined;
@@ -907,7 +946,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   return (
     <EditorContext.Provider value={edCtx}>
       <View style={{ flex: 1, backgroundColor: c.bg }}>
+        {Platform.OS !== 'web' ? <StatusBar hidden={focus} animated /> : null}
+        {Platform.OS === 'android' ? <NavigationBar hidden={focus} /> : null}
         {/* Header: its surface runs under the status bar and any landscape display cutout; its controls stay in the safe area. */}
+        {focus ? null : (
         <View
           style={[
             styles.header,
@@ -948,8 +990,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
           ) : (
             <Button label="Ask" icon="message-circle" variant="assistant" size="sm" onPress={() => openAsk()} />
           )}
+          {phone ? null : <IconButton icon="maximize" label={`Full screen${fsKey}`} size={hb} onPress={toggleFullscreen} />}
           <IconButton icon="more-vertical" label="More" size={hb} onPress={(e) => moreMenu({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY + 20 })} />
         </View>
+        )}
 
         <View style={{ flex: 1, flexDirection: 'row', marginLeft: insets.left, marginRight: insets.right }}>
           {navOpen && navWide && thumbs ? (
@@ -1058,7 +1102,28 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               </ScrollView>
             </GestureDetector>
 
-            {/* Floating toolbar */}
+            {/* Floating toolbar; in fullscreen, the focus pill */}
+            {focus ? (
+              <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+                <FocusPill
+                  view={viewport}
+                  pad={{ top: insets.top, bottom: insets.bottom, left: 0, right: 0 }}
+                  place={pillPlace}
+                  onPlace={setPillPlace}
+                  onSize={(sz) => setPillSize((x) => (x.w === sz.w && x.h === sz.h ? x : sz))}
+                  tools={tools}
+                  paper={pages[current]?.paperColor}
+                  onTool={setTool}
+                  onChange={changeTools}
+                  canUndo={undo.canUndo}
+                  canRedo={undo.canRedo}
+                  onUndo={() => undo.undo()}
+                  onRedo={() => undo.redo()}
+                  onExit={() => setFullscreen(false)}
+                  exitLabel={`Exit full screen${Platform.OS === 'web' ? ' (Esc)' : ''}`}
+                />
+              </View>
+            ) : (
             <View style={styles.toolbarWrap} pointerEvents="box-none">
               <Toolbar
                 tools={tools}
@@ -1072,9 +1137,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                 leading={phone ? undoRedo : undefined}
               />
             </View>
+            )}
 
             {selection && selectionPage ? (
-              <View style={[styles.selWrap, { bottom: 20 + insets.bottom }]} pointerEvents="box-none">
+              <View style={[styles.selWrap, { bottom: selBottom }]} pointerEvents="box-none">
                 <Appear style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
                   {recoloring ? (
                     <>
@@ -1114,7 +1180,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                 </Appear>
               </View>
             ) : tools.tool === 'lasso' && clip ? (
-              <View style={[styles.selWrap, { bottom: 20 + insets.bottom }]} pointerEvents="box-none">
+              <View style={[styles.selWrap, { bottom: selBottom }]} pointerEvents="box-none">
                 <Appear style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
                   <Button label="Paste" icon="clipboard" size="sm" variant="ghost" onPress={sel.paste} />
                 </Appear>
@@ -1166,7 +1232,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         </View>
 
         {busy ? (
-          <Appear from="top" pointerEvents="none" style={[styles.busy, shadow2, { top: 72 + insets.top, backgroundColor: c.surface, borderColor: c.line }]}>
+          <Appear from="top" pointerEvents="none" style={[styles.busy, shadow2, { top: (focus ? 12 + (pillPlace.edge === 'top' ? pillSize.h + 12 : 0) : 72) + insets.top, backgroundColor: c.surface, borderColor: c.line }]}>
             <ActivityIndicator color={c.accent} size="small" />
             <Text variant="label">{busy}</Text>
           </Appear>

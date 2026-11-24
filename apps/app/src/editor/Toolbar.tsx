@@ -33,7 +33,7 @@ const PEN_STYLE_OPTIONS: { id: PenStyle; icon: ToolIconName; label: string }[] =
 /** A web hover tooltip with the control's name (icon-only controls). */
 const tip = (label: string) => (Platform.OS === 'web' ? ({ title: label } as object) : {});
 
-function ToolButton({ icon, label, selected, onPress }: { icon: ToolIconName; label: string; selected?: boolean; onPress(): void }) {
+export function ToolButton({ icon, label, selected, onPress }: { icon: ToolIconName; label: string; selected?: boolean; onPress(): void }) {
   const { c } = useTheme();
   return (
     <Pressable

@@ -12,6 +12,12 @@ ipcRenderer.on('qalm:deep-link', (_e, p: unknown) => {
   else for (const l of listeners) l(p);
 });
 
+// Window fullscreen changes (F11, the macOS green button, setFullScreen), from main.
+const fullScreenListeners = new Set<(on: boolean) => void>();
+ipcRenderer.on('qalm:fullscreen', (_e, on: unknown) => {
+  if (typeof on === 'boolean') for (const l of fullScreenListeners) l(on);
+});
+
 contextBridge.exposeInMainWorld('qalmDesktop', {
   platform: info.platform,
   version: info.version,
@@ -28,6 +34,19 @@ contextBridge.exposeInMainWorld('qalmDesktop', {
     for (const p of queue.splice(0)) cb(p);
     return () => {
       listeners.delete(cb);
+    };
+  },
+  /** Window fullscreen (BrowserWindow.setFullScreen). Resolves to the new state. */
+  setFullScreen: (on: boolean): Promise<boolean> => ipcRenderer.invoke('qalm:set-fullscreen', on === true),
+  /** Called with the current state, then on every change. Returns an unsubscribe. */
+  onFullScreenChange: (cb: (on: boolean) => void): (() => void) => {
+    if (typeof cb !== 'function') throw new TypeError('onFullScreenChange: callback required');
+    fullScreenListeners.add(cb);
+    void ipcRenderer.invoke('qalm:get-fullscreen').then((on: unknown) => {
+      if (typeof on === 'boolean' && fullScreenListeners.has(cb)) cb(on);
+    });
+    return () => {
+      fullScreenListeners.delete(cb);
     };
   },
 });
