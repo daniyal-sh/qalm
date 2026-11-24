@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_PILL, enterFocus, isFullscreenKey, leaveFocus, parsePill, pillOrigin, PILL_MARGIN, snapPill } from '../src/editor/focus.logic';
+import { DEFAULT_PILL, enterFocus, isFullscreenKey, leaveFocus, parsePill, pillOrigin, pillScale, PILL_MARGIN, PILL_MIN_SCALE, snapPill } from '../src/editor/focus.logic';
 import { bridgeDriver, createFullscreen, documentDriver, type FullscreenDoc } from '../src/lib/fullscreen.logic';
 
 const key = (k: string, m: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) => ({
@@ -156,5 +156,17 @@ describe('the focus pill', () => {
     expect(parsePill({ edge: 'top', along: Number.NaN })).toEqual(DEFAULT_PILL);
     expect(parsePill(null)).toEqual(DEFAULT_PILL);
     expect(parsePill('top')).toEqual(DEFAULT_PILL);
+  });
+});
+
+describe('pill on a narrow screen', () => {
+  it('shrinks to fit along its edge, never below the minimum, and not at all when it fits', () => {
+    const pill = { w: 440, h: 52 };
+    expect(pillScale(DEFAULT_PILL, { w: 1200, h: 800 }, pill)).toBe(1);
+    const s = pillScale(DEFAULT_PILL, { w: 412, h: 900 }, pill);
+    expect(s).toBeCloseTo((412 - 2 * PILL_MARGIN) / 440);
+    expect(pillScale(DEFAULT_PILL, { w: 300, h: 900 }, pill)).toBe(PILL_MIN_SCALE);
+    // On a side edge it's the height that has to fit.
+    expect(pillScale({ edge: 'left', along: 0.5 }, { w: 412, h: 900 }, { w: 52, h: 440 })).toBe(1);
   });
 });
