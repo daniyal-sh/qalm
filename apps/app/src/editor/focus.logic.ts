@@ -69,6 +69,20 @@ export function pillOrigin(place: PillPlace, view: Size, pill: Size, pad: Pad = 
   return { left, top: place.edge === 'top' ? minT : Math.max(minT, maxT) };
 }
 
+/** Smallest scale the pill shrinks to on narrow screens (its 44 px buttons stay about 36 px: still easy to tap). */
+export const PILL_MIN_SCALE = 0.8;
+
+/**
+ * How much the pill shrinks to fit along its edge: 1 when it fits, down to PILL_MIN_SCALE on a phone. Without this a
+ * top or bottom pill ran past the right edge of a portrait phone and cut off the exit button.
+ */
+export function pillScale(place: PillPlace, view: Size, pill: Size, pad: Pad = NO_PAD): number {
+  const along = isVertical(place.edge) ? pill.h : pill.w;
+  const room = isVertical(place.edge) ? view.h - pad.top - pad.bottom : view.w - pad.left - pad.right;
+  if (along <= 0) return 1;
+  return Math.max(PILL_MIN_SCALE, Math.min(1, (room - 2 * PILL_MARGIN) / along));
+}
+
 /** Where a pill dropped with its centre at (x, y) goes: the nearest edge, at that point along it. */
 export function snapPill(x: number, y: number, view: Size): PillPlace {
   const w = Math.max(1, view.w);

@@ -13,7 +13,7 @@ import { IconButton } from '../ui/controls';
 import { Icon } from '../ui/Icon';
 import { contrastRatio } from './colors.logic';
 import type { ToolState } from './context';
-import { DEFAULT_PILL, isVertical, parsePill, pillOrigin, snapPill, type Edge, type Pad, type PillPlace, type Size } from './focus.logic';
+import { DEFAULT_PILL, isVertical, parsePill, pillOrigin, pillScale, snapPill, type Edge, type Pad, type PillPlace, type Size } from './focus.logic';
 import { SwatchStrip } from './Swatches';
 import { ToolButton } from './Toolbar';
 import type { ToolId } from './view';
@@ -65,7 +65,10 @@ export function FocusPill(p: FocusPillProps) {
   const vertical = isVertical(p.place.edge);
   const [size, setSize] = React.useState<Size & { vertical: boolean }>({ w: 0, h: 0, vertical });
   // Right after the pill turns (top ↔ side), its last measured size is the other way round.
-  const pill = size.vertical === vertical ? size : { w: size.h, h: size.w };
+  const full = size.vertical === vertical ? size : { w: size.h, h: size.w };
+  // On a narrow screen the pill shrinks to fit its edge; `pill` and `at` are the box it shows in.
+  const scale = pillScale(p.place, p.view, full, p.pad);
+  const pill = { w: full.w * scale, h: full.h * scale };
   const at = pillOrigin(p.place, p.view, pill, p.pad);
   const [drag, setDrag] = React.useState<{ dx: number; dy: number } | null>(null);
   const [colours, setColours] = React.useState(false);
@@ -116,14 +119,23 @@ export function FocusPill(p: FocusPillProps) {
           styles.pill,
           shadow2,
           vertical ? styles.col : styles.row,
-          { backgroundColor: c.surface, borderColor: c.line, left: at.left + (drag?.dx ?? 0), top: at.top + (drag?.dy ?? 0), opacity: size.w ? 1 : 0 },
+          {
+            backgroundColor: c.surface,
+            borderColor: c.line,
+            // A scale transform shrinks around the centre, so the unscaled box sits offset by half the difference.
+            left: at.left - (full.w - pill.w) / 2 + (drag?.dx ?? 0),
+            top: at.top - (full.h - pill.h) / 2 + (drag?.dy ?? 0),
+            opacity: size.w ? 1 : 0,
+            transform: scale < 1 ? [{ scale }] : undefined,
+          },
         ]}
       >
         <View
           onLayout={(e) => {
             const { width, height } = e.nativeEvent.layout;
             setSize((s) => (s.w === width && s.h === height && s.vertical === vertical ? s : { w: width, h: height, vertical }));
-            p.onSize?.({ w: width, h: height });
+            const s = pillScale(p.place, p.view, { w: width, h: height }, p.pad);
+            p.onSize?.({ w: width * s, h: height * s });
           }}
           style={vertical ? styles.col : styles.row}
         >
