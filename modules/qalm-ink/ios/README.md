@@ -43,14 +43,15 @@ If `s.platforms` stays below 16.1, the code still compiles because `zOffset` and
 - **Lasso:** a dashed indigo (`accent`) closed polygon while dragging. `onLasso` fires on lift, then the polygon clears.
 - **`heldMs`:** the time between the earliest of the trailing points within 2 page units of the lift point and the lift itself.
 - **Palm rejection, in mm with 1 pt ≈ 0.19 mm:**
-  1. Pencil always draws. With `drawWith: 'pen'`, fingers are ignored (`ignore(_:for:)`), so they pass through to the page list's scroll
-     and the RNGH pinch, except a touch that rule 2 or 3 rejects or one landing while the Pencil writes, which is claimed so it never scrolls.
+  1. Pencil always draws. With `drawWith: 'pen'`, fingers reach the recognizer but are ignored (`ignore(_:for:)`), so they pass through
+     to the page list's scroll and the RNGH pinch.
   2. Contact axis = `2 × (majorRadius − majorRadiusTolerance) × 0.19` mm, compared against 9, 7 or 5 mm. I used the lower bound because iOS
      quantizes `majorRadius` (a fingertip is about 20.8 pt, which is 7.9 mm without the tolerance, so a normal finger would fail "standard"). **Tune on device.**
      This is checked on every move too, so a finger stroke that grows into a palm is retracted.
   3. A finger is rejected within 600 ms of pencil activity, which includes Pencil hover where `zOffset > 0`. It's also rejected if it lands below or
      beside (±10 mm) the last pen position on the `hand` side, but only within 3 s of the last pen activity.
-     A palm that's rejected is still claimed, so it doesn't scroll the page.
+     A palm that's rejected is still claimed, so it doesn't scroll the page, with `drawWith: 'pen'` too (as is a finger landing while
+     the Pencil writes).
   4. `touchesCancelled` (or the recognizer resetting mid-stroke) retracts the stroke without emitting. `onRejectedTouch` reasons are `palm-size`,
      `pen-lockout`, `hand-side`, `pen-active`, `pen-took-over`, `multi-touch` and `cancelled`.
 - **`drawWith: 'any'`:** a finger stroke draws at once but only claims the touches after 3 pt of movement or 80 ms. If a second finger lands before
