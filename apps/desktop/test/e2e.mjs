@@ -72,6 +72,9 @@ try {
   win.on('console', (m) => m.type() === 'error' && errors.push(`console: ${m.text()}`));
   win.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   win.on('requestfailed', (r) => errors.push(`requestfailed: ${r.url()} ${r.failure()?.errorText}`));
+  // Every URL the page asked for (lazy chunks: Metro removes their script tag once run, and app:// has no resource timing).
+  const requested = [];
+  win.on('request', (r) => requested.push(r.url()));
 
   // 1. Library, after the sign-in screen when the build has a server.
   const library = win.getByText('All notebooks').first();
@@ -243,6 +246,10 @@ try {
     log('live shape: one undo brought the hand-drawn stroke back; screenshots in', shots);
 
     // 4c. A Markdown text box: type, use the format bar (focus stays in the box), leave it, and it renders formatted.
+    // MathJax is its own chunk, fetched only once maths is drawn.
+    const mathChunk = () => requested.some((u) => /\/mathjax-[^/]*\.js$/.test(u));
+    if (!requested.some((u) => /\/_expo\/static\/js\//.test(u))) throw new Error(`no app bundle requests seen: ${requested.slice(0, 5)}`);
+    if (mathChunk()) throw new Error('the MathJax chunk loaded before any maths was drawn');
     await win.getByLabel('Text box').first().click();
     const tx = box.x + box.width * 0.12;
     const ty = box.y + Math.min(box.height, 600) * 0.75;
@@ -274,6 +281,8 @@ try {
     const want = 'Area **under** is $\\int_0^1 x^2\\,dx$\n- done';
     if (texts.length !== 1 || texts[0].format !== 'md' || texts[0].text !== want) throw new Error(`text box: ${JSON.stringify(texts)}`);
     log('markdown text box: format bar kept focus; stored as format md:', JSON.stringify(texts[0].text));
+    if (!mathChunk()) throw new Error('the MathJax chunk never loaded for the maths in the text box');
+    log('markdown text box: the MathJax chunk loaded once maths was typed');
   }
 
   // 5. Reload on the deep route: the app:// protocol serves index.html for /notebook/<id>.
@@ -332,7 +341,9 @@ try {
     .filter((o) => o instanceof PDFDict && o.get(PDFName.of('Type')) === PDFName.of('Font'))
     .map((d) => String(d.get(PDFName.of('BaseFont'))));
   if (!fontNames.some((n) => n.startsWith('/Figtree-Bold'))) throw new Error(`the exported PDF has no Figtree Bold for the Markdown box: ${fontNames}`);
-  log('exported PDF embeds Figtree Bold for the Markdown text box');
+  // Its maths are outlines: no Geist Mono, which only maths' placeholder (MathJax not loaded) would have used.
+  if (fontNames.some((n) => n.includes('GeistMono'))) throw new Error(`the exported PDF drew maths' placeholder: ${fontNames}`);
+  log('exported PDF embeds Figtree Bold for the Markdown text box, and draws its maths as outlines');
 
   // 7. A qalm:// link opened while running reaches the window (second instance → IPC → router).
   const errCount = errors.length;
