@@ -1,6 +1,6 @@
 import { newIdFallback } from '../lib/id';
 import type { CrossPageUndo } from './undoStack';
-import { adjustShape, detectScribble, emptyPlan, frameBBox, hitTestErase, planPartialErase, inkOnPaper, recognizeShape, shapePolylines, type ShapeItem, type ShapeKind, itemDistance, moveBy, selectionFrame, swatchOfInk, transformItem, type BBox, type InkPoint, type Item, type Page, type PaperColor, type PenStyle, type Smoothing, type StrokeItem, type TextItem } from '@qalm/core';
+import { adjustShape, detectScribble, emptyPlan, EraseSession, frameBBox, hitTestErase, inkOnPaper, recognizeShape, shapePolylines, type ShapeItem, type ShapeKind, itemDistance, moveBy, selectionFrame, swatchOfInk, transformItem, type BBox, type InkPoint, type Item, type Page, type PaperColor, type PenStyle, type Smoothing, type StrokeItem, type TextItem } from '@qalm/core';
 
 /** Text box line height (matches core's TEXT_LINE_HEIGHT). */
 export const TEXT_LINE_HEIGHT = 1.3;
@@ -99,14 +99,13 @@ export function eraseAlong(
   radius: number,
   mode: EraserMode,
   makeId: () => string = newIdFallback,
-  /** Collects the strokes left with a cut, for `bakeErase` when the gesture ends. */
-  cut?: Set<string>,
+  /** Partial: the gesture's session (nothing is written until `commitErase`). */
+  session?: EraseSession,
 ): boolean {
   if (mode === 'partial') {
-    const plan = planPartialErase(page.items(), path, radius, makeId);
-    if (emptyPlan(plan)) return false;
-    undo.merging('erase', () => page.applyErase(plan));
-    if (cut) for (const s of plan.split) if (s.keep) cut.add(s.id);
+    const s = session ?? new EraseSession(makeId);
+    if (!s.apply(page.items(), path, radius)) return false;
+    if (!session) commitErase(page, s); // no session: a one-segment gesture
     return true;
   }
   const ids = hitTestErase(page.items(), path, radius);
@@ -116,14 +115,16 @@ export function eraseAlong(
 }
 
 /**
- * The end of a partial-erase gesture: the strokes it left with a cut get their kept points written once (`bakeCuts`),
- * in the gesture's undo step, so one undo still restores everything and readers without cuts see the right ink.
+ * The end of a partial-erase gesture (the pen lifted, or it stopped): what it did is written once, in one transaction
+ * and one undo step: each touched stroke deleted, its pieces added as new strokes (`splitFrom`), touched shapes
+ * removed. Returns whether anything changed.
  */
-export function bakeErase(page: Page, undo: Pick<CrossPageUndo, 'merging'>, cut: Set<string>): void {
-  if (!cut.size) return;
-  const ids = [...cut];
-  cut.clear();
-  undo.merging('erase', () => page.bakeCuts(ids));
+export function commitErase(page: Page, session: EraseSession): boolean {
+  if (!session.touched) return false;
+  const plan = session.commitPlan(page.items());
+  if (emptyPlan(plan)) return false;
+  page.applyErase(plan);
+  return true;
 }
 
 /**

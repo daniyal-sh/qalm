@@ -1,8 +1,8 @@
-import { createUndoManager, Page, UNITS_PER_MM, type InkPoint, type StrokeItem } from '@qalm/core';
+import { createUndoManager, EraseSession, Page, UNITS_PER_MM, type InkPoint, type StrokeItem } from '@qalm/core';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 
-import { bakeErase, cloneItems, eraseAlong, makeStroke, scribbleErase } from '../src/editor/items';
+import { cloneItems, commitErase, eraseAlong, makeStroke, scribbleErase } from '../src/editor/items';
 import { loadInputPrefs } from '../src/lib/inputPrefs';
 import type { InputPrefs } from '../src/theme/ThemeProvider';
 import { CrossPageUndo } from '../src/editor/undoStack';
@@ -40,52 +40,39 @@ function scribble(x0: number, x1: number, y0: number, y1: number, legs = 10): In
 }
 
 describe('the eraser in the editor', () => {
-  it('partial: a gesture splits a stroke over several segments; one undo restores it as it was', () => {
+  it('partial: a gesture writes nothing until it ends, then commits once (one undo step restores the stroke)', () => {
     const { undo, page, tick } = setup();
     page.addItem(line('s', 0, 200, 100));
+    const before = Y.encodeStateAsUpdate(page.doc);
+    const session = new EraseSession(ids);
     for (const x of [60, 70, 80, 140, 150]) {
-      eraseAlong(page, undo, [{ x, y: 95 }, { x: x + 10, y: 105 }], 6, 'partial', ids);
+      expect(eraseAlong(page, undo, [{ x, y: 95 }, { x: x + 10, y: 105 }], 6, 'partial', ids, session)).toBe(true);
       tick(16);
     }
+    // Mid-gesture the page is untouched (an app killed now loses nothing); the session shows the result.
+    expect(Y.encodeStateAsUpdate(page.doc)).toEqual(before);
+    expect(session.view(page.items())).toHaveLength(3);
+    expect(commitErase(page, session)).toBe(true);
     const strokes = page.items() as StrokeItem[];
     expect(strokes.length).toBe(3);
-    // The longest piece keeps the stroke's id (updated in place); the others are new and say where they came from.
-    expect(strokes.filter((s) => s.id === 's')).toHaveLength(1);
-    expect(strokes.filter((s) => s.id !== 's').every((s) => s.splitFrom === 's')).toBe(true);
-    expect(strokes.every((s) => s.style === 'ball' && s.smoothing === 2)).toBe(true);
-    expect(undo.canUndo).toBe(true);
+    expect(strokes.every((s) => s.id !== 's' && s.splitFrom === 's' && s.style === 'ball' && s.smoothing === 2)).toBe(true);
     undo.undo();
     expect(page.items().map((i) => i.id)).toEqual(['s']);
     expect((page.item('s') as StrokeItem).points).toHaveLength(line('s', 0, 200, 100).points.length);
+    undo.undo(); // the next undo takes back adding the line: the gesture was one step
+    expect(page.items()).toEqual([]);
+    undo.redo();
     undo.redo();
     expect(page.items()).toHaveLength(3);
   });
 
-  it("partial: the pen-up bakes the cut into real points, inside the gesture's one undo step", () => {
-    const { undo, page, tick } = setup();
+  it('partial: a gesture that touched nothing commits nothing', () => {
+    const { undo, page } = setup();
     page.addItem(line('s', 0, 200, 100));
-    const cut = new Set<string>();
-    for (const x of [0, 10, 20]) {
-      eraseAlong(page, undo, [{ x, y: 95 }, { x: x + 10, y: 105 }], 6, 'partial', ids, cut);
-      tick(16);
-    }
-    expect([...cut]).toEqual(['s']);
-    const items = page.doc.getMap<Y.Map<unknown>>('items');
-    expect(items.get('s')!.has('cutFrom')).toBe(true);
-    const kept = (page.item('s') as StrokeItem).points.map((q) => q.x);
-    bakeErase(page, undo, cut);
-    expect(cut.size).toBe(0);
-    expect(items.get('s')!.has('cutFrom')).toBe(false);
-    expect((page.item('s') as StrokeItem).points.map((q) => q.x)).toEqual(kept);
-    undo.undo(); // one undo: the cuts and the bake
-    expect((page.item('s') as StrokeItem).points).toHaveLength(line('s', 0, 200, 100).points.length);
-    // The next undo takes back adding the line: that one undo covered the whole gesture, bake included.
-    undo.undo();
-    expect(page.items()).toEqual([]);
-    undo.redo();
-    undo.redo();
-    expect((page.item('s') as StrokeItem).points.map((q) => q.x)).toEqual(kept);
-    expect(items.get('s')!.has('cutFrom')).toBe(false);
+    const session = new EraseSession(ids);
+    expect(eraseAlong(page, undo, [{ x: 50, y: 300 }], 6, 'partial', ids, session)).toBe(false);
+    expect(commitErase(page, session)).toBe(false);
+    expect(page.items().map((i) => i.id)).toEqual(['s']);
   });
 
   it('copies of a piece are new ink (no splitFrom)', () => {

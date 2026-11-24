@@ -1,4 +1,4 @@
-import { boxSelect, inkOnPaper, textHeight, hitTestPoint, isIdentity, lassoSelect, Page, type Item, type PageInfo, type TextItem } from '@qalm/core';
+import { boxSelect, EraseSession, inkOnPaper, textHeight, hitTestPoint, isIdentity, lassoSelect, Page, type Item, type PageInfo, type TextItem } from '@qalm/core';
 import { InkOverlay, PageCanvas, QalmInk, type InkOverlayProps } from 'qalm-ink';
 import * as React from 'react';
 import { PixelRatio, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -10,7 +10,7 @@ import { useSession, useVersion } from '../state/session';
 import { smoothingLevel } from '../theme/ThemeProvider';
 import { font } from '../theme/tokens';
 import { useEditor } from './context';
-import { adjustLiveShape, bakeErase, commitSnapped, eraseAlong, scribbleErase, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, dropEmptyText, TEXT_LINE_HEIGHT, hitText, typeText, liveShape, makeStroke, pointsBBox } from './items';
+import { adjustLiveShape, commitErase, commitSnapped, eraseAlong, scribbleErase, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, dropEmptyText, TEXT_LINE_HEIGHT, hitText, typeText, liveShape, makeStroke, pointsBBox } from './items';
 import { EraseFade, type Fading } from './EraseFade';
 import { isAdditive } from './modifiers';
 import { PAPER_ACCENT, SelectionFrame, type LiveEdit } from './SelectionFrame';
@@ -19,8 +19,8 @@ import { commentAnchors, pdfRenderWidth } from './view';
 
 /** A lasso that moved less than this (px) is a tap. */
 const TAP_SLOP_PX = 6;
-/** A partial erase is baked this long after its last segment if the pen-up never arrives (within the undo merge). */
-const BAKE_AFTER_MS = 400;
+/** A partial erase is committed this long after its last segment if the pen-up never arrives. */
+const COMMIT_AFTER_MS = 400;
 /** A tap selects the nearest item within this many px. */
 const TAP_TOLERANCE_PX = 10;
 const DOUBLE_TAP_MS = 450;
@@ -245,30 +245,36 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   const selItems = React.useMemo(() => (sel ? items.filter((it) => selSet.has(it.id)) : []), [items, sel, selSet]);
   const editing = ed.editingText?.pageId === info.id ? ed.editingText.itemId : null;
   const draft = ed.editingText?.pageId === info.id ? ed.editingText.draft : undefined;
+  // Partial erase: the gesture so far, kept here (nothing is written until the pen lifts); the page shows it.
+  const eraseRef = React.useRef<EraseSession | null>(null);
+  const [eraseTick, setEraseTick] = React.useState(0);
   const shown = React.useMemo(() => {
-    let out: Item[] = items;
+    let out: Item[] = eraseRef.current ? eraseRef.current.view(items) : items;
     if (live?.kind === 'text') out = out.map((it) => (it.id === live.id ? ({ ...it, ...live.patch } as Item) : it));
     if (editing) out = out.filter((it) => it.id !== editing);
     return out;
-  }, [items, live, editing]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, live, editing, eraseTick]);
   const liveCanvas = React.useMemo(() => (live?.kind === 'sim' && sel ? { ids: sel, transform: live.sim } : undefined), [live, sel]);
 
   const drawn = React.useMemo(createDrawnIds, []);
   // Ink a scribble just deleted, fading out where it was.
   const [fading, setFading] = React.useState<Fading[]>([]);
   const fadeKey = React.useRef(0);
-  // Partial erase: strokes this gesture cut, baked when the pen lifts (the overlay's last onErase), or soon after the
-  // last segment if that never comes (a cancelled touch), within the gesture's undo step.
-  const cutIds = React.useRef(new Set<string>());
-  const bakeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Partial erase: committed once when the pen lifts (the overlay's last onErase), or soon after the last segment if that
+  // never comes (a cancelled touch), or when the page goes away.
+  const commitTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const pageRef = React.useRef(page);
   pageRef.current = page;
-  const bakeNow = React.useCallback(() => {
-    if (bakeTimer.current) clearTimeout(bakeTimer.current);
-    bakeTimer.current = null;
-    if (pageRef.current) bakeErase(pageRef.current, ed.undo, cutIds.current);
-  }, [ed.undo]);
-  React.useEffect(() => () => bakeNow(), [bakeNow]);
+  const commitNow = React.useCallback(() => {
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+    commitTimer.current = null;
+    const session = eraseRef.current;
+    eraseRef.current = null;
+    if (session && pageRef.current) commitErase(pageRef.current, session);
+    setEraseTick((x) => x + 1);
+  }, []);
+  React.useEffect(() => () => commitNow(), [commitNow]);
   const fadeDone = React.useCallback((key: number) => setFading((f) => f.filter((x) => x.key !== key)), []);
   const rootRef = React.useRef<React.ComponentRef<typeof View>>(null);
   const lastTap = React.useRef<{ id: string; at: number } | null>(null);
@@ -401,12 +407,18 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
           else page.addItem(stroke);
         }}
         onErase={({ nativeEvent: e }) => {
-          if (eraseAlong(page, ed.undo, e.path, t.eraserRadius, t.eraserMode, newId, cutIds.current)) ed.touchPage(info.id);
-          if (e.final) bakeNow();
-          else if (cutIds.current.size) {
-            if (bakeTimer.current) clearTimeout(bakeTimer.current);
-            bakeTimer.current = setTimeout(bakeNow, BAKE_AFTER_MS);
-          }
+          if (t.eraserMode === 'partial') {
+            const session = (eraseRef.current ??= new EraseSession(newId));
+            if (eraseAlong(page, ed.undo, e.path, t.eraserRadius, 'partial', newId, session)) {
+              ed.touchPage(info.id);
+              setEraseTick((x) => x + 1); // shows the gesture so far
+            }
+            if (e.final) commitNow();
+            else {
+              if (commitTimer.current) clearTimeout(commitTimer.current);
+              commitTimer.current = setTimeout(commitNow, COMMIT_AFTER_MS);
+            }
+          } else if (eraseAlong(page, ed.undo, e.path, t.eraserRadius, t.eraserMode, newId)) ed.touchPage(info.id);
         }}
         lassoMode={t.lassoMode}
         eraserMode={t.eraserMode}

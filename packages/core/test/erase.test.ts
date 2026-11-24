@@ -39,12 +39,9 @@ describe('splitStroke', () => {
     expect(Math.min(...xs(r))).toBeCloseTo(61, 1);
     // Visible gap (between the ends' outer edges) = 2 × radius.
     expect(Math.min(...xs(r)) - 1 - (Math.max(...xs(l)) + 1)).toBeCloseTo(20, 1);
-    // The longest piece (the first, on a tie) keeps the stroke's id; the other is new and says where it came from.
-    expect(l.id).toBe('a');
-    expect(l.splitFrom).toBeUndefined();
-    expect(r.id).not.toBe('a');
-    expect(r.splitFrom).toBe('a');
     for (const p of pieces) {
+      expect(p.id).not.toBe('a');
+      expect(p.splitFrom).toBe('a'); // new strokes that say where they came from
       expect(p).toMatchObject({ type: 'stroke', tool: 'pen', color: '#4338ca', width: 2, style: 'brush', smoothing: 2, createdAt: 5 });
       expect(p.bbox).toEqual(pointsBBox(p.points, 1));
     }
@@ -177,11 +174,10 @@ describe('Page.applyErase', () => {
     const plan = planPartialErase(page.items(), [{ x: 50, y: 50 }], 10, ids);
     page.applyErase(plan);
     const c = page.comments().find((x) => x.id === cid)!;
-    // 's' is still a piece (the longest keeps the id); the thread follows the new piece too.
-    expect(c.anchorIds).toEqual(['s', ...plan.split[0]!.pieces.filter((p) => p.id !== 's').map((p) => p.id)]);
+    expect(c.anchorIds).toEqual(['s', ...plan.split[0]!.pieces.map((p) => p.id)]);
   });
 
-  it('agents see the split as the old stroke erased and its pieces added (the one that kept the id too), in a region that replaces the old one', () => {
+  it('agents see the split as the old stroke erased and the pieces added, in a region that replaces the old one', () => {
     const nb = newNotebook();
     const pid = nb.pages()[0]!.id;
     const page = newPage();

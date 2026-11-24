@@ -1,19 +1,16 @@
 import * as Y from 'yjs';
 import { LOCAL_ORIGIN } from '../origin';
 import { encodePoints, decodePoints } from '../points';
-import { itemBBox, pointsBBox, unionBBox } from '../geometry/bbox';
-import { composeCut, cutPoints, type Cut } from '../geometry/cut';
+import { itemBBox, unionBBox } from '../geometry/bbox';
 import { boxGap, NEAR, pageUnit, ROW_GAP, ROW_OVERLAP } from '../geometry/regions';
 import type { ErasePlan } from '../geometry/erase';
-import { transformItem, transformPatch, type Sim } from '../geometry/transform';
+import { transformPatch, type Sim } from '../geometry/transform';
 import { newId } from '../ids';
-import type { Author, BBox, Comment, InkPoint, Item, Reading, ReadingSrc, StrokeItem } from '../types';
+import type { Author, BBox, Comment, InkPoint, Item, Reading, ReadingSrc } from '../types';
 
 type YItem = Y.Map<unknown>;
 
-const GEOMETRY_KEYS = new Set(['points', 'bbox', 'x', 'y', 'w', 'h', 'pts', 'cutFrom', 'cutTo']);
-/** Stored next to a stroke's points, never part of an `Item` (see `cutEnds`). */
-const CUT_KEYS = new Set(['cutFrom', 'cutTo', 'pv']);
+const GEOMETRY_KEYS = new Set(['points', 'bbox', 'x', 'y', 'w', 'h', 'pts']);
 const isInkType = (t: unknown) => t === 'stroke' || t === 'shape';
 
 /** A fresh reading as a transaction found it, kept up to date as its strokes move (see `InkChanges`). */
@@ -67,66 +64,26 @@ function union(boxes: Iterable<BBox>): BBox {
   return bb ?? [0, 0, 0, 0];
 }
 
-/*
- * A partly erased stroke that kept its id (tech-spec §7, Erasing): while the eraser is still down, the kept range of
- * its stored points is two keys, `cutFrom` and `cutTo` (fractional point indexes, geometry/cut.ts), each written only
- * when that end moves, so two devices rubbing different ends of one stroke both apply. Each end is tagged with the
- * stroke's points version `pv`, which changes whenever its points are replaced (not when they are moved or turned,
- * which keeps every index): an end written against older points is ignored rather than cutting the wrong ink. When the
- * gesture ends the app bakes the cut (`bakeCuts`): the kept points are written once and the keys go, so builds that
- * don't know about cuts see the right ink and box.
- */
-type CutEnd = [index: number, pv: string];
-const pvOf = (m: YItem) => (typeof m.get('pv') === 'string' ? (m.get('pv') as string) : '');
-function cutEnd(m: YItem, key: 'cutFrom' | 'cutTo'): number | null {
-  const c = m.get(key);
-  return Array.isArray(c) && typeof c[0] === 'number' && c[1] === pvOf(m) ? c[0] : null;
-}
-/** The stroke's kept range of its `n` stored points, or null when it has no (current) cut. */
-function cutEnds(m: YItem, n: number): Cut | null {
-  const a = cutEnd(m, 'cutFrom');
-  const b = cutEnd(m, 'cutTo');
-  if (a === null && b === null) return null;
-  return [a ?? 0, b ?? Math.max(0, n - 1)];
-}
-const newPv = () => Math.random().toString(36).slice(2, 10);
-
 function readItem(m: YItem): Item {
   const o: Record<string, unknown> = {};
   m.forEach((v, k) => {
-    if (k === 'line' || CUT_KEYS.has(k)) return; // `line`: left by notebooks from before regions (see migratePage)
+    if (k === 'line') return; // left by notebooks from before regions (see migratePage)
     o[k] = k === 'points' && v instanceof Uint8Array ? decodePoints(v) : v;
   });
-  // Partly erased: only its kept range of points, and the box of those.
-  if (o.type === 'stroke' && Array.isArray(o.points)) {
-    const cut = cutEnds(m, (o.points as InkPoint[]).length);
-    if (cut) {
-      o.points = cutPoints(o.points as InkPoint[], cut).points;
-      o.bbox = pointsBBox(o.points as InkPoint[], (Number(o.width) || 0) / 2);
-    }
-  }
   return o as unknown as Item;
 }
 
-const hasCut = (m: YItem) => m.has('cutFrom') || m.has('cutTo');
+/** Reads only what `itemBBox` needs (no points decoding). */
+function readGeometry(m: YItem): Item {
+  if (m.get('type') === 'stroke') return { type: 'stroke', bbox: m.get('bbox') } as Item;
+  return readItem(m);
+}
 
-/**
- * Writes an item's fields. New `points` replace the stroke's points: any cut is done (the item was read with it
- * applied) and the points version changes, so a cut end another device wrote against the old points is ignored.
- */
 function setFields(m: YItem, fields: Record<string, unknown>): void {
-  const replacing = 'points' in fields && m.has('points') && m.get('type') === 'stroke';
   for (const [k, v] of Object.entries(fields)) {
-    if (k === 'id' || k === 'type' || k === 'line' || CUT_KEYS.has(k)) continue;
+    if (k === 'id' || k === 'type' || k === 'line') continue;
     if (v === undefined) m.delete(k);
     else m.set(k, k === 'points' ? encodePoints(v as InkPoint[]) : v);
-  }
-  if (replacing) {
-    if (hasCut(m)) {
-      m.delete('cutFrom');
-      m.delete('cutTo');
-    }
-    m.set('pv', newPv());
   }
 }
 
@@ -231,10 +188,7 @@ export class Page {
 
   private box(id: string): BBox | null {
     const m = this.itemMap.get(id);
-    if (!m) return null;
-    // A whole stroke's box is stored; a cut one's comes from its kept points (read once, then cached).
-    if (m.get('type') === 'stroke' && !hasCut(m)) return itemBBox({ type: 'stroke', bbox: m.get('bbox') } as Item);
-    return itemBBox(this.read(m));
+    return m ? itemBBox(readGeometry(m)) : null;
   }
 
   addItem(item: Item): void {
@@ -311,122 +265,71 @@ export class Page {
   }
 
   /**
-   * Applies a partial-erase pass (`planPartialErase`) in one transaction: strokes split, shapes removed. A split stroke
-   * keeps its id for its longest piece, updated in place as a `cut` of its points (two numbers, not the points again),
-   * so a delete or move of it on another device still applies; the other pieces are added right after it in the
-   * z-order. Readings of the stroke read its pieces too and go stale; comment threads on it follow the new pieces as
-   * well. A stroke with nothing left is removed.
+   * Replaces items by others in one transaction (one undo step), e.g. a stroke by the pieces a partial erase left
+   * (`with: []` removes it). The new items take the old one's place in the z-order. It goes through the same paths as
+   * `addItem` and `removeItems` (new ids added, old ids removed), so anything that follows the page's items, readings or
+   * an agent's regions sees an erase and new ink. Readings of a replaced stroke read its pieces instead, and go stale
+   * (the ink they read changed); comment threads on it follow its pieces too (and keep the old id, for undo).
+   */
+  replaceItems(replacements: readonly { id: string; with: readonly Item[] }[]): void {
+    const reps = replacements.filter((r) => this.itemMap.has(r.id));
+    if (!reps.length) return;
+    this.tx(() => {
+      const byOld = new Map(reps.map((r) => [r.id, r.with.map((it) => it.id)]));
+      // Readings first, before this transaction notes any ink (see inkChanges): they read the pieces from now on.
+      this.readingMap.forEach((m) => {
+        const ids = m.get('ids');
+        if (!Array.isArray(ids) || !ids.some((id) => byOld.has(id as string))) return;
+        const next = (ids as string[]).flatMap((id) => byOld.get(id) ?? [id]);
+        if (next.length) {
+          m.set('ids', [...new Set(next)]);
+          m.set('stale', true);
+        }
+      });
+      this.commentMap.forEach((m) => {
+        const ids = m.get('anchorIds');
+        if (!Array.isArray(ids) || !ids.some((id) => byOld.has(id as string))) return;
+        m.set('anchorIds', [...new Set((ids as string[]).flatMap((id) => [id, ...(byOld.get(id) ?? [])]))]);
+      });
+      this.dirty();
+      for (const r of reps) {
+        const at = this.order.toArray().indexOf(r.id);
+        for (const item of r.with) {
+          this.noteInk(item.id);
+          const m = new Y.Map<unknown>();
+          this.itemMap.set(item.id, m);
+          m.set('id', item.id);
+          m.set('type', item.type);
+          setFields(m, item as unknown as Record<string, unknown>);
+        }
+        const ids = r.with.map((it) => it.id);
+        if (!ids.length) continue;
+        if (at >= 0) this.order.insert(at, ids);
+        else this.order.push(ids);
+      }
+      this.removeItems(reps.map((r) => r.id));
+    });
+  }
+
+  /** Moves, turns or resizes items about `f`, in one transaction (one undo step). */
+  transformItems(ids: Iterable<string>, f: Sim): void {
+    this.tx(() => {
+      for (const id of ids) {
+        const it = this.item(id);
+        if (it) this.updateItem(id, transformPatch(it, f));
+      }
+    });
+  }
+
+  /**
+   * Commits a partial erase in one transaction (one undo step): strokes replaced by their pieces (in their z-order
+   * slot; none left: removed), shapes removed. The app calls it once per eraser gesture, when the pen lifts.
    */
   applyErase(plan: ErasePlan): void {
     if (!plan.split.length && !plan.remove.length) return;
     this.tx(() => {
-      const gone: string[] = [];
-      const added = new Map<string, string[]>();
-      for (const sp of plan.split) {
-        if (!this.itemMap.has(sp.id)) continue;
-        if (!sp.pieces.length || !sp.keep) gone.push(sp.id);
-        else added.set(sp.id, sp.pieces.filter((p) => p.id !== sp.id).map((p) => p.id));
-      }
-      // Readings first, before this transaction notes any ink (see inkChanges): they read the new pieces too, and the
-      // ink they read changed.
-      this.readingMap.forEach((m) => {
-        const ids = m.get('ids');
-        if (!Array.isArray(ids) || !ids.some((id) => added.has(id as string))) return;
-        m.set('ids', [...new Set((ids as string[]).flatMap((id) => [id, ...(added.get(id) ?? [])]))]);
-        m.set('stale', true);
-      });
-      this.commentMap.forEach((m) => {
-        const ids = m.get('anchorIds');
-        if (!Array.isArray(ids) || !ids.some((id) => added.has(id as string))) return;
-        m.set('anchorIds', [...new Set((ids as string[]).flatMap((id) => [id, ...(added.get(id) ?? [])]))]);
-      });
-      for (const sp of plan.split) {
-        const m = this.itemMap.get(sp.id);
-        if (!m || !added.has(sp.id) || !sp.keep) continue;
-        this.noteInk(sp.id);
-        this.dirty(m);
-        // The kept range, in the stored points' indexes (the stroke may be partly erased already); only an end that
-        // moved is written, so another device rubbing the other end keeps its cut too.
-        const stored = m.get('points');
-        const pts = stored instanceof Uint8Array ? decodePoints(stored) : [];
-        const prev = cutEnds(m, pts.length);
-        const cut = prev ? composeCut(cutPoints(pts, prev).src, sp.keep) : sp.keep;
-        const pv = pvOf(m);
-        const [from0, to0] = prev ?? [0, Math.max(0, pts.length - 1)];
-        if (Math.abs(cut[0] - from0) > 1e-9) m.set('cutFrom', [cut[0], pv] satisfies CutEnd);
-        if (Math.abs(cut[1] - to0) > 1e-9) m.set('cutTo', [cut[1], pv] satisfies CutEnd);
-        const fresh = sp.pieces.filter((p) => p.id !== sp.id);
-        for (const item of fresh) {
-          this.noteInk(item.id);
-          const pm = new Y.Map<unknown>();
-          this.itemMap.set(item.id, pm);
-          pm.set('id', item.id);
-          pm.set('type', item.type);
-          setFields(pm, item as unknown as Record<string, unknown>);
-        }
-        if (fresh.length) {
-          const at = this.order.toArray().indexOf(sp.id);
-          if (at >= 0) this.order.insert(at + 1, fresh.map((p) => p.id));
-          else this.order.push(fresh.map((p) => p.id));
-        }
-      }
-      if (gone.length || plan.remove.length) this.removeItems([...gone, ...plan.remove]);
-    });
-  }
-
-  /**
-   * Bakes the cuts of these strokes (the end of an eraser gesture): each partly erased stroke gets its kept points
-   * written once, the cut keys go, and its points version changes. Readers that don't know about cuts (older builds,
-   * an older server) then see the right ink and box. Strokes without a cut are left alone.
-   */
-  bakeCuts(ids: Iterable<string>): void {
-    const todo = [...ids].filter((id) => {
-      const m = this.itemMap.get(id);
-      return !!m && m.get('type') === 'stroke' && hasCut(m);
-    });
-    if (!todo.length) return;
-    this.tx(() => {
-      for (const id of todo) {
-        const m = this.itemMap.get(id)!;
-        const it = this.read(m) as StrokeItem;
-        this.dirty(m);
-        // The ink doesn't change, so readings stay as they are.
-        m.set('points', encodePoints(it.points));
-        m.set('bbox', it.bbox);
-        m.delete('cutFrom');
-        m.delete('cutTo');
-        m.set('pv', newPv());
-      }
-    });
-  }
-
-  /**
-   * Moves, turns or resizes items about `f` in one transaction (one undo step). A stroke's stored points are
-   * transformed, not the points as read, and keep their indexes and points version: a cut (an eraser gesture still
-   * going on, here or on another device) applies to the moved points.
-   */
-  transformItems(ids: Iterable<string>, f: Sim): void {
-    this.tx(() => {
-      for (const id of ids) {
-        const m = this.itemMap.get(id);
-        if (!m) continue;
-        // Strokes keep their points version: every point stays at its index, so a cut (here or on another device,
-        // maybe still to arrive) still lands on the same ink.
-        if (m.get('type') === 'stroke') {
-          const whole = { ...(this.read(m) as StrokeItem) };
-          const stored = m.get('points');
-          whole.points = stored instanceof Uint8Array ? decodePoints(stored) : whole.points;
-          const t = transformItem(whole, f);
-          this.noteInk(id);
-          this.dirty(m);
-          m.set('points', encodePoints(t.points));
-          m.set('width', t.width);
-          m.set('bbox', t.bbox); // the whole stroke's box, which is what a reader without cuts draws
-          continue;
-        }
-        const it = this.item(id);
-        if (it) this.updateItem(id, transformPatch(it, f));
-      }
+      this.replaceItems(plan.split.map((s) => ({ id: s.id, with: s.pieces })));
+      if (plan.remove.length) this.removeItems(plan.remove);
     });
   }
 

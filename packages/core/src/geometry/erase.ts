@@ -3,24 +3,21 @@
 // time, so it looks exactly like the part of the stroke it was. Shapes are not split: partial erasing over a shape
 // erases the whole shape (as the whole-stroke eraser does). Text boxes and images are never erased.
 //
-// The longest piece keeps the stroke's id (and is stored as a `cut` of its points, see cut.ts); only the other pieces
-// are new strokes, with `splitFrom` naming the stroke they came from. So rubbing along a stroke updates one item instead
-// of re-creating it on every pointer move, and a delete or move of the stroke on another device still applies to it.
+// A gesture writes nothing to the page while the eraser is down: an `EraseSession` keeps what the page would look
+// like (each touched stroke's pieces so far, shapes gone), the app draws that and hit-tests against it, and when the
+// pen lifts `commitPlan` is applied in one transaction (one undo step): each touched stroke deleted, its pieces added
+// as new strokes with `splitFrom` naming the stroke as drawn. Readers without partial erase see ordinary strokes.
 import { newId } from '../ids';
 import type { InkPoint, Item, StrokeItem } from '../types';
 import { pointsBBox } from './bbox';
-import { lerpPoint, type Cut } from './cut';
 import { hitTestErase } from './hit';
 
 type XY = { x: number; y: number };
 
 /** What one eraser pass does to a page: strokes replaced by their pieces (none = erased whole), shapes removed. */
 export interface ErasePlan {
-  /**
-   * Each touched stroke and what is left of it, in stroke order. Empty `pieces`: all gone. Otherwise the longest piece
-   * keeps the stroke's id, and `keep` is its range of the stroke's points (fractional indexes); the others are new.
-   */
-  split: { id: string; pieces: StrokeItem[]; keep?: Cut }[];
+  /** Each touched stroke and the pieces that replace it (in its place in the z-order). Empty `pieces`: all gone. */
+  split: { id: string; pieces: StrokeItem[] }[];
   /** Shapes the eraser touched: erased whole. */
   remove: string[];
 }
@@ -33,20 +30,31 @@ function segDist(px: number, py: number, ax: number, ay: number, bx: number, by:
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
+function lerpAngle(a: number, b: number, t: number): number {
+  let d = b - a;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return a + d * t;
+}
+
+function lerpPoint(a: InkPoint, b: InkPoint, t: number): InkPoint {
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+    p: a.p + (b.p - a.p) * t,
+    tilt: a.tilt + (b.tilt - a.tilt) * t,
+    az: lerpAngle(a.az, b.az, t),
+    t: a.t + (b.t - a.t) * t,
+  };
+}
+
 /**
  * Splits one stroke by the eraser path (page units): the centreline is cut where it comes within `radius` plus half
  * the stroke's width of the path, so the round ends of the pieces just touch the eraser's edge and the gap is as wide
  * as the eraser. Returns null when the eraser misses the stroke, [] when nothing is left, else the pieces (in stroke
  * order). Kept points are the stroke's own (pressure and all); each cut adds one interpolated point at the boundary.
- * The longest piece keeps the stroke's id; the others get new ids and `splitFrom` (the stroke's own `splitFrom`, if it
- * was a piece already, so it always names the stroke as it was drawn).
  */
 export function splitStroke(s: StrokeItem, path: readonly XY[], radius: number, makeId: () => string = newId): StrokeItem[] | null {
-  return splitStrokeKeep(s, path, radius, makeId)?.pieces ?? null;
-}
-
-/** `splitStroke`, with the kept piece's range of `s.points` (fractional indexes), if any piece is left. */
-export function splitStrokeKeep(s: StrokeItem, path: readonly XY[], radius: number, makeId: () => string = newId): { pieces: StrokeItem[]; keep?: Cut } | null {
   const pts = s.points;
   if (!pts.length || !path.length) return null;
   const r = radius + s.width / 2;
@@ -69,19 +77,17 @@ export function splitStrokeKeep(s: StrokeItem, path: readonly XY[], radius: numb
     return m;
   };
 
-  if (pts.length === 1) return dist(pts[0]!.x, pts[0]!.y) <= r ? { pieces: [] } : null;
+  if (pts.length === 1) return dist(pts[0]!.x, pts[0]!.y) <= r ? [] : null;
 
   const ds = pts.map((q) => dist(q.x, q.y));
   const gone = (d: number) => d <= r;
   // Sample each segment finely where it may come within reach (distance is 1-Lipschitz, so a segment whose ends are
   // both far enough can't), and find each cut by bisection.
   const step = Math.max(0.25, r / 3);
-  // Each piece's points and its range of the stroke's points (fractional indexes).
-  const pieces: { pts: InkPoint[]; from: number; to: number }[] = [];
+  const pieces: InkPoint[][] = [];
   let piece: InkPoint[] = gone(ds[0]!) ? [] : [pts[0]!];
-  let from = 0;
   let touched = gone(ds[0]!);
-  const cut = (a: InkPoint, b: InkPoint, t0: number, t1: number): { p: InkPoint; t: number } => {
+  const cut = (a: InkPoint, b: InkPoint, t0: number, t1: number): InkPoint => {
     // t0 is on the kept side, t1 on the erased side (or the other way round): find the boundary.
     const keptAt0 = !gone(dist(a.x + (b.x - a.x) * t0, a.y + (b.y - a.y) * t0));
     let lo = t0;
@@ -92,8 +98,7 @@ export function splitStrokeKeep(s: StrokeItem, path: readonly XY[], radius: numb
       if (kept === keptAt0) lo = m;
       else hi = m;
     }
-    const t = keptAt0 ? lo : hi;
-    return { p: lerpPoint(a, b, t), t };
+    return lerpPoint(a, b, keptAt0 ? lo : hi);
   };
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1]!;
@@ -117,38 +122,27 @@ export function splitStrokeKeep(s: StrokeItem, path: readonly XY[], radius: numb
         const edge = cut(a, b, prevT, t);
         if (g) {
           // Leaving the ink: the piece ends at the cut.
-          piece.push(edge.p);
-          pieces.push({ pts: piece, from, to: i - 1 + edge.t });
+          piece.push(edge);
+          pieces.push(piece);
           piece = [];
-        } else {
-          piece = [edge.p]; // back on the ink: a new piece starts at the cut
-          from = i - 1 + edge.t;
-        }
+        } else piece = [edge]; // back on the ink: a new piece starts at the cut
       }
       prevT = t;
       prevGone = g;
     }
     if (!gone(db)) piece.push(b);
   }
-  if (piece.length) pieces.push({ pts: piece, from, to: pts.length - 1 });
+  if (piece.length) pieces.push(piece);
   if (!touched) return null;
-  // A piece needs some length to be ink (a cut right at a stroke's end leaves a stub of one or two points).
-  const kept = pieces
-    .map((p) => {
-      let len = 0;
-      for (let i = 1; i < p.pts.length; i++) len += Math.hypot(p.pts[i]!.x - p.pts[i - 1]!.x, p.pts[i]!.y - p.pts[i - 1]!.y);
-      return { ...p, len };
-    })
-    .filter((p) => p.pts.length >= 2 && p.len >= Math.min(0.5, s.width / 4));
-  if (!kept.length) return { pieces: [] };
-  const longest = kept.reduce((m, p) => (p.len > m.len ? p : m), kept[0]!);
-  const root = s.splitFrom ?? s.id;
-  const out = kept.map((p): StrokeItem =>
-    p === longest
-      ? { ...s, points: p.pts, bbox: pointsBBox(p.pts, s.width / 2) }
-      : { ...s, id: makeId(), splitFrom: root, points: p.pts, bbox: pointsBBox(p.pts, s.width / 2) },
-  );
-  return { pieces: out, keep: [longest.from, longest.to] };
+  const out: StrokeItem[] = [];
+  for (const p of pieces) {
+    // A piece needs some length to be ink (a cut right at a stroke's end leaves a stub of one or two points).
+    let len = 0;
+    for (let i = 1; i < p.length; i++) len += Math.hypot(p[i]!.x - p[i - 1]!.x, p[i]!.y - p[i - 1]!.y);
+    if (p.length < 2 || len < Math.min(0.5, s.width / 4)) continue;
+    out.push({ ...s, id: makeId(), splitFrom: s.splitFrom ?? s.id, points: p, bbox: pointsBBox(p, s.width / 2) });
+  }
+  return out;
 }
 
 /**
@@ -163,11 +157,72 @@ export function planPartialErase(items: readonly Item[], path: readonly XY[], ra
     if (!hit.has(it.id)) continue;
     if (it.type === 'shape') plan.remove.push(it.id);
     else if (it.type === 'stroke') {
-      const r = splitStrokeKeep(it, path, radius, makeId);
-      if (r) plan.split.push({ id: it.id, ...r });
+      const pieces = splitStroke(it, path, radius, makeId);
+      if (pieces) plan.split.push({ id: it.id, pieces });
     }
   }
   return plan;
 }
 
 export const emptyPlan = (p: ErasePlan) => !p.split.length && !p.remove.length;
+
+/**
+ * One partial-erase gesture, kept locally until the pen lifts. `apply` each eraser segment to it; `view` is the page
+ * as the gesture leaves it (draw it, and hit-test the next segment against it); `commitPlan` is what to write once.
+ */
+export class EraseSession {
+  /** Page items touched so far (by id), and what is left of each: its pieces (none: all gone). */
+  private readonly left = new Map<string, StrokeItem[]>();
+  /** Which page item each piece came from. */
+  private readonly origin = new Map<string, string>();
+  /** Shapes the eraser touched: erased whole. */
+  private readonly gone = new Set<string>();
+
+  constructor(private readonly makeId: () => string = newId) {}
+
+  get touched(): boolean {
+    return this.left.size > 0 || this.gone.size > 0;
+  }
+
+  /** The page's items as this gesture leaves them: touched strokes replaced by their pieces, touched shapes gone. */
+  view(items: readonly Item[]): Item[] {
+    if (!this.touched) return items as Item[];
+    const out: Item[] = [];
+    for (const it of items) {
+      if (this.gone.has(it.id)) continue;
+      const pieces = this.left.get(it.id);
+      if (pieces) out.push(...pieces);
+      else out.push(it);
+    }
+    return out;
+  }
+
+  /** One eraser segment over the page's `items` (as they are now). Returns whether it changed anything. */
+  apply(items: readonly Item[], path: readonly XY[], radius: number): boolean {
+    const plan = planPartialErase(this.view(items), path, radius, this.makeId);
+    if (emptyPlan(plan)) return false;
+    for (const id of plan.remove) this.gone.add(this.origin.get(id) ?? id);
+    for (const sp of plan.split) {
+      const root = this.origin.get(sp.id) ?? sp.id;
+      const before = this.left.get(root) ?? [];
+      const at = before.findIndex((p) => p.id === sp.id);
+      // The page item itself (its first touch), or one of its pieces so far: replaced by what's left of it.
+      let next: StrokeItem[];
+      if (at >= 0) next = [...before.slice(0, at), ...sp.pieces, ...before.slice(at + 1)];
+      else if (!this.left.has(root)) next = sp.pieces;
+      else continue; // not one of its current pieces (view() is current, so this doesn't happen)
+      for (const p of sp.pieces) this.origin.set(p.id, root);
+      this.left.set(root, next);
+    }
+    return true;
+  }
+
+  /** What the gesture does to the page, to apply once (`Page.applyErase`): items gone since are left out. */
+  commitPlan(items: readonly Item[]): ErasePlan {
+    const exists = new Set(items.map((it) => it.id));
+    return {
+      split: [...this.left].filter(([id]) => exists.has(id)).map(([id, pieces]) => ({ id, pieces })),
+      remove: [...this.gone].filter((id) => exists.has(id)),
+    };
+  }
+}

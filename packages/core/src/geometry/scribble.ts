@@ -48,7 +48,7 @@ export const SCRIBBLE = {
    */
   minCrossLegs: 3,
   legTrimMm: 1.2,
-  smallMm: 3,
+  smallMm: 4,
   /**
    * Never a target: a closed outline whose box, grown by `enclosesShare` of its shorter side (kept within
    * `enclosesMm`), holds the whole scribble: it's being filled in, like a checkbox ticked with a zig-zag that overshoots
@@ -64,6 +64,21 @@ export const SCRIBBLE = {
   shadeTurnMm: 1.5,
   shadeShare: 0.6,
   surroundShare: 0.8,
+  /**
+   * …unless the ink inside the outline spans `boxedShare` of it one way and `boxedOther` the other (a word fills a
+   * box's width more than its height): a boxed answer being scribbled out, not the box being shaded.
+   */
+  boxedShare: 0.6,
+  boxedOther: 0.4,
+  /**
+   * A stroke is such an outline only when it is closed and either box-like (`outlineCorners` corners of `cornerDeg`+)
+   * or at least `outlineMm` across: a small round closed stroke is a letter (o, 0, 8, a, e), not something to shade.
+   */
+  outlineCorners: 3,
+  cornerDeg: 60,
+  /** …and fills `boxFill` of its own box (a box ~0.9–1; an o 0.79; an 8 about 0, its loops cancel). */
+  boxFill: 0.85,
+  outlineMm: 8,
 } as const;
 
 const mm = (v: number) => v * UNITS_PER_MM;
@@ -237,7 +252,7 @@ export function scribbleTargets(items: readonly Item[], points: readonly Pick<In
     it.type === 'stroke' ? it.points.map((q): P => [q.x, q.y]) : it.type === 'shape' ? shapePolylines(it).flatMap((pl) => resample(pl, mm(1))) : [];
   // Filling in an outline (its turns along it) is shading: nothing is a target, not even ink written inside it.
   for (const it of items) {
-    if (isOutline(it) && isShadingInside(it, pathOf(it), turns)) return [];
+    if (isOutline(it) && !isBoxedAnswer(it, items) && isShadingInside(it, pathOf(it), turns)) return [];
   }
   // Mostly inside (cheap), and not an outline around the whole scribble.
   const inside: Item[] = [];
@@ -266,8 +281,9 @@ export function scribbleTargets(items: readonly Item[], points: readonly Pick<In
 }
 
 /**
- * A closed outline (a box, a circle, a checkbox; snapped or drawn by hand, its ends meeting): what shading fills in.
- * A digit or a word under a tight scribble may sit just as snugly in the scribble's box, but it isn't one.
+ * An outline shading fills in: a snapped closed shape, or a closed stroke that is box-like (three or more corners: a
+ * box, a checkbox, a triangle) or about 8 mm across or more (a ring drawn around something). A small round closed
+ * stroke (o, 0, 8) is a letter: a scribble over it rubs it out.
  */
 function isOutline(it: Item): boolean {
   if (it.type === 'shape') return it.kind !== 'line' && it.kind !== 'arrow' && it.kind !== 'double-arrow';
@@ -275,7 +291,70 @@ function isOutline(it: Item): boolean {
   const a = it.points[0]!;
   const z = it.points[it.points.length - 1]!;
   const [x0, y0, x1, y1] = itemBBox(it);
-  return Math.hypot(z.x - a.x, z.y - a.y) <= Math.max(mm(1.5), 0.2 * Math.hypot(x1 - x0, y1 - y0));
+  if (Math.hypot(z.x - a.x, z.y - a.y) > Math.max(mm(1.5), 0.2 * Math.hypot(x1 - x0, y1 - y0))) return false;
+  if ((x1 - x0 + (y1 - y0)) / 2 >= mm(SCRIBBLE.outlineMm)) return true;
+  // Small: only a box (sharp corners, and it fills its own box): not an o or 0 (round), nor an 8 (its loops cancel).
+  const pts = it.points.map((q): P => [q.x, q.y]);
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i]!;
+    const b = pts[(i + 1) % pts.length]!;
+    area += a[0] * b[1] - b[0] * a[1];
+  }
+  // Against the points' own extent (the item's box includes the pen's width).
+  const w = Math.max(...pts.map((q) => q[0])) - Math.min(...pts.map((q) => q[0]));
+  const h = Math.max(...pts.map((q) => q[1])) - Math.min(...pts.map((q) => q[1]));
+  const fill = Math.abs(area) / 2 / Math.max(1e-9, w * h);
+  return fill >= SCRIBBLE.boxFill && corners(pts) >= SCRIBBLE.outlineCorners;
+}
+
+/** Sharp corners along a path: turns of SCRIBBLE.cornerDeg or more, measured over 1 mm either side. */
+function corners(raw: readonly P[]): number {
+  const step = mm(0.5);
+  const r = resample(raw, step);
+  const k = Math.max(1, Math.round(mm(1) / step));
+  const min = (SCRIBBLE.cornerDeg * Math.PI) / 180;
+  const turn = r.map((b, i) => {
+    if (i < k || i >= r.length - k) return 0;
+    const a = r[i - k]!;
+    const c = r[i + k]!;
+    const u = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    const v = Math.atan2(c[1] - b[1], c[0] - b[0]);
+    let d = Math.abs(v - u);
+    if (d > Math.PI) d = 2 * Math.PI - d;
+    return d;
+  });
+  let n = 0;
+  for (let i = k; i < r.length - k; i++) {
+    if (turn[i]! < min) continue;
+    let peak = true;
+    for (let j = Math.max(0, i - 2 * k); j <= Math.min(r.length - 1, i + 2 * k); j++) {
+      if (turn[j]! > turn[i]! || (turn[j] === turn[i] && j < i)) {
+        peak = false;
+        break;
+      }
+    }
+    if (peak) n++;
+  }
+  return n;
+}
+
+/** Whether the other ink inside `outline` fills it like a boxed answer (SCRIBBLE.boxedShare / boxedOther). */
+function isBoxedAnswer(outline: Item, items: readonly Item[]): boolean {
+  const o = itemBBox(outline);
+  let box: number[] | null = null;
+  for (const it of items) {
+    if (it === outline || (it.type !== 'stroke' && it.type !== 'shape' && it.type !== 'text')) continue;
+    const b = itemBBox(it);
+    const cx = (b[0] + b[2]) / 2;
+    const cy = (b[1] + b[3]) / 2;
+    if (cx < o[0] || cx > o[2] || cy < o[1] || cy > o[3]) continue;
+    box = box ? [Math.min(box[0]!, b[0]), Math.min(box[1]!, b[1]), Math.max(box[2]!, b[2]), Math.max(box[3]!, b[3])] : [b[0], b[1], b[2], b[3]];
+  }
+  if (!box) return false;
+  const wide = (box[2]! - box[0]!) / Math.max(1e-9, o[2] - o[0]);
+  const tall = (box[3]! - box[1]!) / Math.max(1e-9, o[3] - o[1]);
+  return Math.max(wide, tall) >= SCRIBBLE.boxedShare && Math.min(wide, tall) >= SCRIBBLE.boxedOther;
 }
 
 /** How far beyond its box an outline still holds a scribble (`SCRIBBLE.enclosesShare` of its shorter side). */
