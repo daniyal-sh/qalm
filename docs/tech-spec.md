@@ -359,6 +359,17 @@ from the region images with its own vision. That keeps the app about 20 MB light
 - **Auth (email only):** `POST /auth/email/start` and `POST /auth/email/verify` return `{accessToken (JWT, 1h), refreshToken}`. There is no Apple or
   Google sign-in (removed; `users.apple_sub` / `google_sub` from `0001_init` are unused and left in place, since SQLite can't drop UNIQUE columns),
   `POST /auth/refresh` renews them and `POST /auth/logout` ends the session. In dev, emails are logged to the console.
+  - **Delete account** (Settings → Delete account, `apps/server/src/account.ts`, Bearer): `POST /account/delete/start {email}` (must be the
+    account's address; same rate limits) emails a 6-digit code stored as a `magic_links` row with `purpose = 'delete'` and its own hash
+    prefix; every sign-in query requires `purpose = 'signin'`, so neither code works for the other. `POST /account/delete {code}` (5 wrong
+    tries kill the code) sets `users.deleting_at`, then purges every notebook room (and the page rooms it knows), every room in `doc_sizes`
+    and the library room; deletes the R2 objects no other user has in `user_assets`; revokes every OAuth grant (OAUTH_KV); and deletes the
+    user's rows in `user_assets`, `doc_sizes`, `grants`, `auth_requests`, `activity`, `sessions`, `sync_tickets`, `notebooks`,
+    `magic_links`, `email_sends`, then `users` last. Every step is idempotent: once `deleting_at` is set, the same call with the same
+    access token finishes a partial run without a code, and a call after the user row is gone answers `{deleted: true}`. Sync tickets and
+    uploads require a live (not deleting) user, since access tokens stay valid for up to an hour. The app then stops syncing, removes the
+    account's library and notebook docs from this device (keeping notebooks still in the signed-out library), clears its token and prefs,
+    and shows "Your account was deleted" on the sign-in screen.
   - **Email links are bound to the device that asked.** The app sends `{email, nonceHash}` (sha256 of a random nonce it keeps for 15 min).
     The email has a link to the app's verify route (`MAGIC_LINK_URL`, normally the web app's `/auth/email/verify`; universal link / `qalm://` on native)
     and a 6-digit code. The app consumes it with `POST /auth/email/verify` `{token, nonce}` or `{email, code, nonce}` (5 wrong codes and that code is dead).

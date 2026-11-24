@@ -197,9 +197,12 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
 - **Native snapshot writes:** crash-safe (`.tmp`, `.bak`, fallback reads).
 - **Rate limits:** 5 sign-in emails per address and 20 per IP per hour.
 - **Sign-out:** `POST /auth/logout` ends the server session.
+- **Delete account:** Settings → Delete account (type your email, then an emailed 6-digit deletion code) deletes everything on the
+  server, idempotently (`apps/server/src/account.ts`), and forgets the account on that device. Other devices keep their local copies
+  until they sign out (their refresh fails within an hour).
 - **iOS palm size:** uses `2 × majorRadius`, matching Android and web.
 
-D1 migrations: `0001_init`, `0002_user_assets`, `0003_notebook_deleted`, `0004_auth_hardening`, `0005_storage` (`doc_sizes`). `users.apple_sub` and `google_sub` are unused since
+D1 migrations: `0001_init`, `0002_user_assets`, `0003_notebook_deleted`, `0004_auth_hardening`, `0005_storage` (`doc_sizes`), `0006_account_delete` (`magic_links.purpose`, `users.deleting_at`). `users.apple_sub` and `google_sub` are unused since
 email-only sign-in and stay in place.
 
 ## 6. Not verified, and known gaps
