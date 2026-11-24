@@ -241,6 +241,39 @@ try {
       throw new Error(`after undo: ${JSON.stringify(undone.map((it) => it.kind ?? it.type))}`);
     }
     log('live shape: one undo brought the hand-drawn stroke back; screenshots in', shots);
+
+    // 4c. A Markdown text box: type, use the format bar (focus stays in the box), leave it, and it renders formatted.
+    await win.getByLabel('Text box').first().click();
+    const tx = box.x + box.width * 0.12;
+    const ty = box.y + Math.min(box.height, 600) * 0.75;
+    await win.mouse.click(tx, ty);
+    const editor = win.getByPlaceholder('Type here').first();
+    await editor.waitFor({ timeout: 10_000 });
+    await win.keyboard.type('Area ');
+    const bar = win.getByRole('toolbar', { name: 'Format text' }).first();
+    await bar.waitFor({ timeout: 10_000 });
+    await bar.getByLabel('Bold').click();
+    const focused = await win.evaluate(() => document.activeElement?.getAttribute('placeholder'));
+    if (focused !== 'Type here') throw new Error(`the format bar took the focus (${focused})`);
+    await win.keyboard.type('under');
+    await win.keyboard.press('End');
+    await win.keyboard.type(' is ');
+    await bar.getByLabel('Maths').click();
+    await win.keyboard.type('\\int_0^1 x^2\\,dx');
+    await win.keyboard.press('End');
+    await win.keyboard.type('\n');
+    await bar.getByLabel('Bulleted list').click();
+    await win.keyboard.type('done');
+    await shot('text-1-editing.png');
+    await win.keyboard.press('Escape');
+    await win.waitForTimeout(800);
+    if (await bar.isVisible()) throw new Error('the format bar stayed after typing ended');
+    await shot('text-2-rendered.png');
+    await win.getByLabel('Lasso').first().click();
+    const texts = (await pageItems()).filter((it) => it.type === 'text');
+    const want = 'Area **under** is $\\int_0^1 x^2\\,dx$\n- done';
+    if (texts.length !== 1 || texts[0].format !== 'md' || texts[0].text !== want) throw new Error(`text box: ${JSON.stringify(texts)}`);
+    log('markdown text box: format bar kept focus; stored as format md:', JSON.stringify(texts[0].text));
   }
 
   // 5. Reload on the deep route: the app:// protocol serves index.html for /notebook/<id>.
@@ -290,6 +323,16 @@ try {
   if (!existsSync(pdfOut)) throw new Error('export wrote nothing');
   if (!whole()) throw new Error(`export is not a whole PDF (starts ${JSON.stringify(readFileSync(pdfOut).subarray(0, 5).toString('latin1'))})`);
   log(`exported ${readFileSync(pdfOut).length} bytes of PDF through saveFile`);
+  // The Markdown box went in with its bold font (pdf-lib names subset fonts Figtree-Bold-<n>).
+  const { PDFDict, PDFName } = require('pdf-lib');
+  const exported = await PDFDocument.load(readFileSync(pdfOut));
+  const fontNames = exported.context
+    .enumerateIndirectObjects()
+    .map(([, o]) => o)
+    .filter((o) => o instanceof PDFDict && o.get(PDFName.of('Type')) === PDFName.of('Font'))
+    .map((d) => String(d.get(PDFName.of('BaseFont'))));
+  if (!fontNames.some((n) => n.startsWith('/Figtree-Bold'))) throw new Error(`the exported PDF has no Figtree Bold for the Markdown box: ${fontNames}`);
+  log('exported PDF embeds Figtree Bold for the Markdown text box');
 
   // 7. A qalm:// link opened while running reaches the window (second instance → IPC → router).
   const errCount = errors.length;
