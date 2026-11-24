@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:landing": "node landing/build.mjs",
+    "build:og": "node landing/og.mjs",
     "build:site": "node scripts/build.mjs",
     "preview": "wrangler dev --port 8790",
     "deploy:staging": "node scripts/build.mjs && wrangler deploy --env staging",
@@ -11,6 +13,8 @@
     "test": "node --test test/worker.test.mjs"
   },
   "devDependencies": {
+    "perfect-freehand": "^1.2.3",
+    "playwright-core": "1.65.1",
     "wrangler": "^4.166.0"
   }
 }
