@@ -1,5 +1,6 @@
 import * as React from 'react';
 import {
+  Animated,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -14,8 +15,9 @@ import {
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { hoverTransition, riseStyle, usePresence } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
-import { radius, shadow1, shadow2 } from '../theme/tokens';
+import { motion, radius, shadow1, shadow2, space } from '../theme/tokens';
 import { IconButton } from './controls';
 import { Icon, type IconName } from './Icon';
 import { Text } from './Text';
@@ -40,7 +42,7 @@ export function Panel({ children, style, inset }: { children: React.ReactNode; s
 /** Sentence-case muted 12px section label (brand: no uppercase labels). */
 export function SectionLabel({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
   return (
-    <View style={[{ paddingHorizontal: 4, paddingTop: 16, paddingBottom: 6 }, style]}>
+    <View style={[{ paddingHorizontal: space.xxs, paddingTop: space.lg, paddingBottom: space.xs }, style]}>
       <Text variant="meta" tone="muted">
         {children}
       </Text>
@@ -92,7 +94,11 @@ export function Row({
   );
   if (!onPress) return body;
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => pressed && { backgroundColor: c.soft }}>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={(s) => [hoverTransition, s.pressed ? { backgroundColor: c.soft } : (s as { hovered?: boolean }).hovered ? { backgroundColor: c.surface2 } : null]}
+    >
       {body}
     </Pressable>
   );
@@ -112,18 +118,18 @@ export function EmptyState({
   const { c } = useTheme();
   return (
     <View style={styles.empty}>
-      <View style={[styles.emptyIcon, { backgroundColor: c.surface2, borderColor: c.line }]}>
+      <View style={[styles.emptyIcon, { backgroundColor: c.surface, borderColor: c.line }, shadow1]}>
         <Icon name={icon} size={22} color={c.muted} />
       </View>
       <Text variant="section" style={{ textAlign: 'center' }}>
         {title}
       </Text>
       {body ? (
-        <Text variant="body" tone="muted" style={{ textAlign: 'center', maxWidth: 380 }}>
+        <Text variant="body" tone="muted" style={{ textAlign: 'center', maxWidth: 360 }}>
           {body}
         </Text>
       ) : null}
-      {action ? <View style={{ marginTop: 8 }}>{action}</View> : null}
+      {action ? <View style={{ marginTop: space.md }}>{action}</View> : null}
     </View>
   );
 }
@@ -151,13 +157,19 @@ export function Sheet({
   const win = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const narrow = win.width < 640;
+  // Arrives with a short rise (a bottom sheet slides up a little further) and leaves faster than it came.
+  const { mounted, progress } = usePresence(visible, motion.slow, motion.fast);
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} supportedOrientations={['portrait', 'landscape']}>
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose} supportedOrientations={['portrait', 'landscape']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={[styles.scrimWrap, narrow && { justifyContent: 'flex-end', padding: 0 }]}>
-          <Pressable accessibilityLabel="Close" style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.32)' }]} onPress={onClose} />
-          <View
+          <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: c.scrim, opacity: progress }]}>
+            <Pressable accessibilityLabel="Close" style={StyleSheet.absoluteFill} onPress={onClose} />
+          </Animated.View>
+          <Animated.View
+            accessibilityViewIsModal
             style={[
+              riseStyle(progress, { distance: narrow ? 24 : motion.rise, scale: !narrow }),
               styles.sheet,
               shadow2,
               { backgroundColor: c.surface, borderColor: c.line, maxHeight: win.height * (narrow ? 0.92 : 0.88) },
@@ -167,17 +179,17 @@ export function Sheet({
           >
             {title ? (
               <View style={[styles.sheetHeader, { borderBottomColor: c.line2 }]}>
-                <Text variant="section" style={{ flex: 1 }}>
+                <Text variant="section" accessibilityRole="header" numberOfLines={2} style={{ flex: 1 }}>
                   {title}
                 </Text>
                 <IconButton icon="x" label="Close" size={36} onPress={onClose} />
               </View>
             ) : null}
-            <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }} keyboardShouldPersistTaps="handled">
+            <ScrollView contentContainerStyle={{ padding: space.xl, gap: space.lg }} keyboardShouldPersistTaps="handled">
               {children}
             </ScrollView>
             {footer ? <View style={[styles.sheetFooter, { borderTopColor: c.line2 }]}>{footer}</View> : null}
-          </View>
+          </Animated.View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -191,6 +203,8 @@ export interface MenuItem {
   tone?: 'default' | 'bad' | 'assistant' | 'context';
   onPress(): void;
 }
+
+const MENU_ITEM_H = 44;
 
 /** Popover menu anchored near a point (or centred on narrow screens). */
 export function Menu({
@@ -211,44 +225,74 @@ export function Menu({
   const pos: ViewStyle = anchor
     ? {
         position: 'absolute',
-        top: Math.min(anchor.y, win.height - 60 * items.length - 24),
+        top: Math.max(8, Math.min(anchor.y, win.height - menuHeight(items) - 16)),
         ...(anchor.align === 'right'
           ? { right: Math.min(Math.max(8, win.width - anchor.x), Math.max(8, win.width - width - 8)) } // never past the left edge
           : { left: Math.min(Math.max(8, anchor.x), win.width - width - 8) }),
       }
     : { alignSelf: 'center', marginTop: win.height * 0.25 };
+  // Keep the last items while the menu animates out.
+  const { mounted, progress } = usePresence(visible, motion.fast, motion.fast);
+  const last = React.useRef(items);
+  if (visible) last.current = items;
+  const shown = visible ? items : last.current;
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} supportedOrientations={['portrait', 'landscape']}>
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose} supportedOrientations={['portrait', 'landscape']}>
       <Pressable accessibilityLabel="Close menu" style={StyleSheet.absoluteFill} onPress={onClose} />
-      <View style={[styles.menu, shadow2, pos, { width, backgroundColor: c.surface, borderColor: c.line }]}>
-        {items.map((it, i) => {
+      <Animated.View
+        accessibilityRole="menu"
+        style={[riseStyle(progress, { from: 'top', distance: 4, scale: true }), styles.menu, shadow2, pos, { width, backgroundColor: c.surface, borderColor: c.line }]}
+      >
+        {shown.map((it, i) => {
           const color = it.tone === 'bad' ? c.bad : it.tone === 'assistant' ? c.assistant : it.tone === 'context' ? c.context : c.ink2;
+          // Destructive actions sit apart from the rest, under a hairline.
+          const split = it.tone === 'bad' && i > 0 && shown[i - 1]!.tone !== 'bad';
           return (
-            <Pressable
-              key={`${it.label}-${i}`}
-              accessibilityRole="menuitem"
-              onPress={() => {
-                onClose();
-                it.onPress();
-              }}
-              style={(s) => [styles.menuItem, ((s as { hovered?: boolean }).hovered || s.pressed) && { backgroundColor: c.soft }]}
-            >
-              {it.icon ? <Icon name={it.icon} size={17} color={color} /> : null}
-              <View style={{ flex: 1 }}>
-                <Text variant="label" style={it.tone === 'bad' ? { color: c.bad } : undefined}>
-                  {it.label}
-                </Text>
-                {it.description ? <Text variant="meta">{it.description}</Text> : null}
-              </View>
-            </Pressable>
+            <React.Fragment key={`${it.label}-${i}`}>
+              {split ? <View style={[styles.menuSplit, { backgroundColor: c.line2 }]} /> : null}
+              <Pressable
+                accessibilityRole="menuitem"
+                onPress={() => {
+                  onClose();
+                  it.onPress();
+                }}
+                style={(s) => [
+                  styles.menuItem,
+                  hoverTransition,
+                  s.pressed ? { backgroundColor: c.soft } : (s as { hovered?: boolean }).hovered ? { backgroundColor: it.tone === 'bad' ? c.badSoft : c.surface2 } : null,
+                ]}
+              >
+                {it.icon ? <Icon name={it.icon} size={17} color={color} /> : null}
+                <View style={{ flex: 1 }}>
+                  <Text variant="label" numberOfLines={1} style={it.tone === 'bad' ? { color: c.bad } : undefined}>
+                    {it.label}
+                  </Text>
+                  {it.description ? (
+                    <Text variant="meta" tone="muted" numberOfLines={2}>
+                      {it.description}
+                    </Text>
+                  ) : null}
+                </View>
+              </Pressable>
+            </React.Fragment>
           );
         })}
-      </View>
+      </Animated.View>
     </Modal>
   );
 }
 
-/** Small transient message at the bottom (solid surface). */
+/** A menu's height for placement: items (taller with a description), a split before destructive items, and padding. */
+function menuHeight(items: MenuItem[]): number {
+  let h = 12;
+  items.forEach((it, i) => {
+    h += it.description ? 58 : MENU_ITEM_H;
+    if (it.tone === 'bad' && i > 0 && items[i - 1]!.tone !== 'bad') h += 9;
+  });
+  return h;
+}
+
+/** Small transient message at the bottom (solid surface). It rises in and fades out. */
 export function useToast(): [React.ReactNode, (msg: string) => void] {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
@@ -262,11 +306,16 @@ export function useToast(): [React.ReactNode, (msg: string) => void] {
   React.useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
   }, []);
-  const node = msg ? (
+  const { mounted, progress } = usePresence(!!msg, motion.base, motion.base);
+  const last = React.useRef('');
+  if (msg) last.current = msg;
+  const node = mounted ? (
     <View pointerEvents="none" style={[styles.toastWrap, { bottom: 28 + insets.bottom }]}>
-      <View style={[styles.toast, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
-        <Text variant="label">{msg}</Text>
-      </View>
+      <Animated.View accessibilityRole="alert" accessibilityLiveRegion="polite" style={[riseStyle(progress), styles.toast, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
+        <Text variant="label" numberOfLines={3} style={{ textAlign: 'center' }}>
+          {msg ?? last.current}
+        </Text>
+      </Animated.View>
     </View>
   ) : null;
   return [node, show];
@@ -275,15 +324,15 @@ export function useToast(): [React.ReactNode, (msg: string) => void] {
 const styles = StyleSheet.create({
   panel: { borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, minHeight: 56 },
-  empty: { alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32, flex: 1 },
+  empty: { alignItems: 'center', justifyContent: 'center', gap: space.sm, padding: space.x3, flex: 1 },
   emptyIcon: {
-    width: 52,
-    height: 52,
+    width: 56,
+    height: 56,
     borderRadius: radius.panel,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 4,
+    marginBottom: space.sm,
   },
   scrimWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   sheet: { borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
@@ -304,7 +353,8 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   menu: { borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth, padding: 6 },
-  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44, paddingHorizontal: 10, paddingVertical: 8, borderRadius: radius.control },
-  toastWrap: { position: 'absolute', left: 0, right: 0, bottom: 28, alignItems: 'center' },
-  toast: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: radius.control, borderWidth: StyleSheet.hairlineWidth },
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: MENU_ITEM_H, paddingHorizontal: 10, paddingVertical: space.sm, borderRadius: radius.inner },
+  menuSplit: { height: StyleSheet.hairlineWidth, marginVertical: space.xxs, marginHorizontal: -6 },
+  toastWrap: { position: 'absolute', left: space.lg, right: space.lg, bottom: 28, alignItems: 'center' },
+  toast: { maxWidth: 480, paddingHorizontal: space.lg, paddingVertical: 10, borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth },
 });

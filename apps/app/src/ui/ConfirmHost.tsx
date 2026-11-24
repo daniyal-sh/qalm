@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { Modal, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Animated, Modal, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
+import { riseStyle, usePresence } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
-import { radius, shadow2 } from '../theme/tokens';
+import { motion, radius, shadow2, space } from '../theme/tokens';
 import { pendingConfirm, settleConfirm, subscribeConfirm } from './confirm';
 import { Button } from './controls';
 import { Text } from './Text';
@@ -19,23 +20,30 @@ export function ConfirmHost() {
     const t = setTimeout(() => setReq(pending), 350);
     return () => clearTimeout(t);
   }, [pending]);
+  const { mounted, progress } = usePresence(!!req, motion.base, motion.fast);
+  // Keep the text on screen while the dialog animates out.
+  const lastReq = React.useRef(req);
+  if (req) lastReq.current = req;
+  const shown = req ?? lastReq.current;
   return (
-    <Modal visible={!!req} transparent animationType="fade" onRequestClose={() => settleConfirm(false)} supportedOrientations={['portrait', 'landscape']}>
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={() => settleConfirm(false)} supportedOrientations={['portrait', 'landscape']}>
       <View style={styles.wrap}>
-        <Pressable accessibilityLabel="Cancel" style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.32)' }]} onPress={() => settleConfirm(false)} />
-        {req ? (
-          <View
+        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: c.scrim, opacity: progress }]}>
+          <Pressable accessibilityLabel="Cancel" style={StyleSheet.absoluteFill} onPress={() => settleConfirm(false)} />
+        </Animated.View>
+        {shown ? (
+          <Animated.View
             accessibilityRole="alert"
             accessibilityViewIsModal
-            style={[styles.card, shadow2, { width: Math.min(400, win.width - 32), backgroundColor: c.surface, borderColor: c.line }]}
+            style={[riseStyle(progress, { scale: true }), styles.card, shadow2, { width: Math.min(400, win.width - 32), backgroundColor: c.surface, borderColor: c.line }]}
           >
-            <Text variant="section">{req.title}</Text>
-            {req.body ? <Text tone="muted">{req.body}</Text> : null}
+            <Text variant="section">{shown.title}</Text>
+            {shown.body ? <Text tone="muted">{shown.body}</Text> : null}
             <View style={styles.actions}>
               <Button label="Cancel" onPress={() => settleConfirm(false)} grow={win.width < 420} />
-              <Button label={req.action} variant="destructive" onPress={() => settleConfirm(true)} grow={win.width < 420} />
+              <Button label={shown.action} variant="destructive" onPress={() => settleConfirm(true)} grow={win.width < 420} />
             </View>
-          </View>
+          </Animated.View>
         ) : null}
       </View>
     </Modal>
@@ -44,6 +52,6 @@ export function ConfirmHost() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
-  card: { borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth, padding: 20, gap: 10 },
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 },
+  card: { borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth, padding: space.xl, gap: space.sm },
+  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.sm, marginTop: space.md },
 });

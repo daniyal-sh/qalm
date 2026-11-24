@@ -4,6 +4,7 @@ import { useColorScheme } from 'react-native';
 import { loadInputPrefs } from '../lib/inputPrefs';
 import { kvGet, kvSet } from '../lib/kv';
 import { applyWebScrollbars } from './scrollbars';
+import { applyWebGlobals } from './webCss';
 import { dark, light, type Colors } from './tokens';
 
 export type Appearance = 'system' | 'light' | 'dark';
@@ -65,7 +66,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const scheme = prefs.appearance === 'system' ? (system === 'dark' ? 'dark' : 'light') : prefs.appearance;
   // Web / Electron: slim, theme-aware scrollbars (see scrollbars.ts).
-  React.useEffect(() => applyWebScrollbars(scheme, scheme === 'dark' ? dark : light), [scheme]);
+  React.useEffect(() => {
+    const colors = scheme === 'dark' ? dark : light;
+    applyWebScrollbars(scheme, colors);
+    applyWebGlobals(colors);
+  }, [scheme]);
   const value = React.useMemo<ThemeValue>(
     () => ({
       c: scheme === 'dark' ? dark : light,
