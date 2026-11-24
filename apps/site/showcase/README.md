@@ -6,8 +6,8 @@ sizes, in light and dark. Nothing is placed by hand.
 
 ## Run it
 
-You need Chrome (`CHROME_PATH`, or the default Windows install) and a checkout with every feature the shots use
-(Lecture mode, Play/Pause AI, the ruler and laser, Markdown text boxes). From the repo root:
+You need Chrome (`CHROME_PATH`, or the default Windows install). The shots are taken from `main`; every feature they
+show is there (Lecture mode, Play/Pause AI, the ruler and laser, Markdown text boxes with maths). From the repo root:
 
 ```bash
 # 1. The web export, pointed at the showcase's own local server (port 18917; SHOWCASE_SERVER_PORT to change it)
@@ -21,8 +21,12 @@ node apps/site/showcase/capture.mjs --only=ai,lecture --sizes=desktop --themes=d
 node apps/site/showcase/frame.mjs                    # or: pnpm --filter @qalm/site showcase:frame
 ```
 
-To capture another checkout (an integration branch in a separate worktree, say), set `SHOWCASE_ROOT` to it: the
-seed uses that checkout's `@qalm/core`, its web export and its server.
+To capture another checkout (a feature branch in a separate worktree, say), set `SHOWCASE_ROOT` to it: the seed uses
+that checkout's `@qalm/core`, its web export and its server.
+
+Comment pins and margin cards only show on slide 4 (the `ai` shot). The `markdown` and `lecture` shots turn the
+notebook's AI access off while they run (no pins on the slides around them) and back on after; `pdf` and `ai` press
+Play AI with the Tutor agent following, so the header reads "AI live · Tutor".
 
 Sizes: desktop 1440 × 900, tablet 1180 × 820 and portrait 820 × 1180, all at DPR 2. The pipeline never touches ports
 8787 or 8081, picks a random port for the static server and for Chrome's debugger, and stops only the processes it

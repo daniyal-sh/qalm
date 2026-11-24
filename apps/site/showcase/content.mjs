@@ -137,11 +137,7 @@ export async function buildLibrary({ deckPdf, cellPng }) {
           write(page, info.id, it);
           out.slide2Ink = it.filter((x) => x.type === 'stroke').map((x) => x.id);
           out.slide2Loop = [lp.id];
-          pinned(at(18, 11, 2), () => {
-            const cid = page.addComment({ author: { kind: 'agent', name: TUTOR }, text: 'Nice, you circled the key identity. Quick check: in $\\int x\\cos x\\,dx$, which part is $u$?', anchorIds: [lp.id], anchor: lp.bbox });
-            pinned(at(18, 11, 5), () => page.replyToComment(cid, { kind: 'user', name: STUDENT.name }, 'u = x, so dv = cos x dx?'));
-            pinned(at(18, 11, 6), () => page.replyToComment(cid, { kind: 'agent', name: TUTOR }, '**Exactly.** Then v is sin x, and what is left is one easy integral.'));
-          });
+          // No comment thread on this slide: its pin would show in the pdf shot and the hero.
         },
       },
       {
@@ -165,8 +161,9 @@ export async function buildLibrary({ deckPdf, cellPng }) {
           clock.t = lecStart + 28 * 60000;
           tl.push({ t: lt(clock.t - 6000), k: 'page', p: info.id, n: 3 });
           const it = [];
-          it.push(...blue.write('dx', 122, 188, { size: 1.2 }).items);
-          it.push(...blue.write('e^{x}', 288, 188, { size: 1.2 }).items);
+          const du = blue.write('dx', 122, 188, { size: 1.2 });
+          const v = blue.write('e^{x}', 288, 188, { size: 1.2 });
+          it.push(...du.items, ...v.items);
           blue.pause(20000);
           const l1 = ink.write('∫ x e^{x} dx = x e^{x} − ∫ e^{x} dx', 70, 262, { size: 1.25 });
           const l2 = ink.write('= x e^{x} − e^{x} + C', 129, 292, { size: 1.25 });
@@ -180,6 +177,14 @@ export async function buildLibrary({ deckPdf, cellPng }) {
           write(page, info.id, it);
           out.slide4Answer = [...l3.items.map((x) => x.id), rect.id];
           out.slide4Work = it.filter((x) => x.type === 'stroke').map((x) => x.id);
+          // The tutor's threads live on this slide only (the ai shot); the pdf, hero and lecture shots show slides without pins.
+          pinned(at(18, 11, 2), () => {
+            const fill = [...du.items, ...v.items];
+            const box = [Math.min(du.bbox[0], v.bbox[0]), Math.min(du.bbox[1], v.bbox[1]), Math.max(du.bbox[2], v.bbox[2]), Math.max(du.bbox[3], v.bbox[3])];
+            const cid = page.addComment({ author: { kind: 'agent', name: TUTOR }, text: 'Both right: $du = dx$ and $v = e^x$. Quick check for the next one: in $\\int x\\cos x\\,dx$, which part is $u$?', anchorIds: fill.map((x) => x.id), anchor: box });
+            pinned(at(18, 11, 5), () => page.replyToComment(cid, { kind: 'user', name: STUDENT.name }, 'u = x, so dv = cos x dx?'));
+            pinned(at(18, 11, 6), () => page.replyToComment(cid, { kind: 'agent', name: TUTOR }, '**Exactly.** Then $v = \\sin x$, and what is left is one easy integral.'));
+          });
           pinned(at(18, 20, 14), () => {
             const cid = page.addComment({ author: { kind: 'user', name: STUDENT.name }, text: 'Why is there only one +C, at the very end?', anchorIds: l2.items.map((x) => x.id), anchor: l2.bbox, ask: true });
             pinned(at(18, 20, 15), () =>

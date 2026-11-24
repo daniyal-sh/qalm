@@ -65,6 +65,50 @@ async function drag(page, pts, { steps = 6, hold = false } = {}) {
   if (!hold) await page.mouse.up();
 }
 
+/** Plays the AI with the Tutor agent following, until the header reads "AI live · Tutor". */
+async function aiLive(env) {
+  const { page } = env;
+  env.startAgent();
+  const play = page.getByLabel(/AI paused\. Play AI/).first();
+  if (await play.isVisible().catch(() => false)) await play.click();
+  await page.getByText(/AI live · Tutor/).first().waitFor({ timeout: 20_000 });
+}
+
+/** Pauses the AI again and stops the agent, so the next shot starts paused. */
+async function aiPause(env) {
+  const { page } = env;
+  const pause = page.getByLabel(/Pause AI$/).first();
+  if (await pause.isVisible().catch(() => false)) await pause.click();
+  await idle(page, 400);
+  env.stopAgent();
+}
+
+/** Turns the open notebook's AI access on or off from the More menu (off hides comment pins, cards and the AI chip). */
+async function aiAccess(env, on) {
+  const { page } = env;
+  await page.getByLabel('More', { exact: true }).first().click();
+  const item = page.getByText(on ? 'Turn on AI access' : 'Turn off AI access', { exact: true }).first();
+  if (await item.isVisible().catch(() => false)) await item.click();
+  else await page.keyboard.press('Escape');
+  await idle(page, 600);
+}
+
+/** Scrolls the page that fills most of the band [top, bottom] (CSS px) to the band's middle. */
+async function centreBetween(env, top, bottom) {
+  const { page } = env;
+  const r = await page.evaluate(([top, bottom]) => {
+    const rs = [...document.querySelectorAll('canvas')].map((c) => c.getBoundingClientRect()).filter((r) => r.width > 200 && r.height > 150);
+    const seen = (r) => Math.max(0, Math.min(r.bottom, bottom) - Math.max(r.top, top));
+    rs.sort((a, b) => seen(b) - seen(a));
+    return rs[0] ? { top: rs[0].top, h: rs[0].height } : null;
+  }, [top, bottom]);
+  if (!r) return;
+  const want = top + Math.max(8, (bottom - top - r.h) / 2);
+  await page.mouse.move(env.w / 2, (top + bottom) / 2);
+  await page.mouse.wheel(0, r.top - want);
+  await idle(page, 900);
+}
+
 export const SHOTS = [
   {
     name: 'library',
@@ -76,10 +120,17 @@ export const SHOTS = [
     },
   },
   {
-    // An imported PDF slide annotated by hand: a circled formula, arrows, a highlight, margin notes, the tutor's card.
+    // An imported PDF slide annotated by hand: a circled formula, arrows, a highlight, margin notes; AI live with the
+    // Tutor following. The slide has no comment threads (no pins on it).
     name: 'pdf',
+    settle: 1200,
     async run(env) {
       await open(env, 'calc', 2);
+      await aiLive(env);
+      await env.page.mouse.move(env.w - 2, env.h - 2);
+    },
+    async after(env) {
+      await aiPause(env);
     },
   },
   {
@@ -90,10 +141,20 @@ export const SHOTS = [
     },
   },
   {
-    // Markdown + LaTeX text box on a slide.
+    // Markdown + LaTeX text box on the last slide, scrolled to the end. AI access off, so the slide above shows no
+    // comment pins or margin cards.
     name: 'markdown',
     async run(env) {
-      await open(env, 'calc', 5);
+      const { page } = env;
+      await open(env, 'calc', 5, false);
+      await aiAccess(env, false);
+      await page.mouse.move(env.w / 2, env.h / 2);
+      await page.mouse.wheel(0, 4000);
+      await idle(page, 1200);
+      await page.mouse.move(env.w - 2, env.h - 2);
+    },
+    async after(env) {
+      await aiAccess(env, true);
     },
   },
   {
@@ -160,42 +221,71 @@ export const SHOTS = [
     async run(env) {
       const { page } = env;
       await open(env, 'calc', 4);
-      env.startAgent();
-      await page.getByLabel(/AI paused\. Play AI/).first().click();
-      await page.getByText(/AI live · Tutor/).first().waitFor({ timeout: 20_000 });
+      await aiLive(env);
       await page.getByLabel(/^Comments/).first().click();
       await idle(page, 1200);
       const t = page.getByText(/Why is there only one \+C/).first();
       if (await t.isVisible().catch(() => false)) await t.click();
+      // MathJax loads on demand: until it has, a formula shows its TeX source as text
+      await page.waitForFunction(() => !/C_1|\\int|\\sin/.test(document.body.innerText), null, { timeout: 20_000 });
       await idle(page, 1200);
       await page.mouse.move(env.w - 2, env.h - 2);
     },
     async after(env) {
-      env.stopAgent();
+      await aiPause(env);
     },
   },
   {
-    // Lecture: playback of the recorded lecture, mid-way, with the transcript following along.
+    // Lecture: playback of the recorded lecture at 18:01, on the LIATE slide (no comment threads) with the mnemonic
+    // being written, the transcript following along, and the slide centred between the header and the player. AI access
+    // is off for it (as a student replaying a lecture may have it), so no comment pins show on the slides around it.
     name: 'lecture',
     settle: 1500,
     async run(env) {
       const { page } = env;
-      await open(env, 'calc', 4);
+      await open(env, 'calc', 3, false);
+      await aiAccess(env, false);
       await page.getByLabel('More', { exact: true }).first().click();
       await page.getByText(/^Lectures \(1\)/).first().click();
       await page.locator('[data-testid="lecture-play-0"]').first().click();
       await page.getByLabel('Position').first().waitFor({ timeout: 15_000 });
       await idle(page, 800);
       const pos = await page.getByLabel('Position').first().boundingBox();
-      await page.mouse.click(pos.x + pos.width * (29.4 / 49.6), pos.y + pos.height / 2);
+      // seek to 18:01 (the mnemonic mostly written): click, read where it landed, correct
+      const want = 18 * 60 + 1, dur = 49 * 60 + 37;
+      let x = pos.x + (pos.width * want) / dur;
+      for (let k = 0; k < 4; k++) {
+        await page.mouse.click(x, pos.y + pos.height / 2);
+        await idle(page, 500);
+        const [m, s] = ((await page.locator('[data-testid="lecture-position"]').first().innerText()).split('/')[0] ?? '').trim().split(':').map(Number);
+        const err = m * 60 + s - want;
+        if (Math.abs(err) <= 2 || Number.isNaN(err)) break;
+        x -= (err / dur) * pos.width;
+      }
       await idle(page, 1000);
       const tr = page.getByLabel('Transcript', { exact: true }).first();
-      if ((await tr.getAttribute('aria-selected').catch(() => null)) !== 'true' && !(await page.getByText(/factor it: e to the x/).first().isVisible().catch(() => false))) await tr.click();
+      if ((await tr.getAttribute('aria-selected').catch(() => null)) !== 'true' && !(await page.getByText(/Whichever type comes first/).first().isVisible().catch(() => false))) await tr.click();
       await idle(page, 1200);
+      // the transcript starts on a whole line: the one before the current line at the top of its panel
+      const cur = await page.getByText(/Whichever type comes first/).first().elementHandle();
+      await cur?.evaluate((el) => {
+        let sc = el.parentElement;
+        while (sc && !(sc.scrollHeight > sc.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(sc).overflowY))) sc = sc.parentElement;
+        if (!sc) return;
+        let row = el;
+        while (row.parentElement && row.parentElement.parentElement !== sc) row = row.parentElement;
+        const prev = row.previousElementSibling ?? row;
+        sc.scrollTop += prev.getBoundingClientRect().top - sc.getBoundingClientRect().top - 6;
+      });
+      await idle(page, 400);
+      const bar = await page.locator('[data-testid="lecture-player"]').first().boundingBox();
+      await centreBetween(env, 82, bar ? bar.y - 8 : env.h - 80);
       await page.mouse.move(env.w - 2, env.h - 2);
     },
-    async after({ page }) {
-      await page.getByLabel('Close player').first().click().catch(() => {});
+    async after(env) {
+      await env.page.getByLabel('Close player').first().click().catch(() => {});
+      await idle(env.page, 400);
+      await aiAccess(env, true);
     },
   },
   {
@@ -268,13 +358,16 @@ export const SHOTS = [
       if (await trail.isVisible().catch(() => false)) await trail.click();
       const b = await pageBox(page);
       const s = b.w / SLIDE_W;
-      // a sweep under the product rule, then up towards u'v + uv', still moving when the shot is taken
-      const pts = [];
-      for (let i = 0; i <= 70; i++) {
-        const t = i / 70;
-        pts.push([b.x + (60 + 190 * t) * s, b.y + (180 + 6 * Math.sin(t * Math.PI) - (t > 0.8 ? (t - 0.8) * 60 : 0)) * s]);
+      // Circling the product rule (slide units) in about half a second: the trail fades over 1 s, so all of it is still
+      // on screen, fading from its start, when the shot is taken with the pointer still down.
+      const [cx, cy, rx, ry] = [146, 158, 112, 34];
+      await page.mouse.move(b.x + (cx - rx) * s, b.y + (cy + 6) * s);
+      await page.mouse.down();
+      for (let i = 1; i <= 30; i++) {
+        const a = Math.PI + 0.18 + (i / 30) * Math.PI * 1.8;
+        await page.mouse.move(b.x + (cx + rx * Math.cos(a)) * s, b.y + (cy - ry * Math.sin(a) * (1 - 0.06 * (i / 30))) * s);
+        await page.waitForTimeout(14);
       }
-      await drag(page, pts, { steps: 2, hold: true });
     },
     async after({ page }) {
       await page.mouse.up();
