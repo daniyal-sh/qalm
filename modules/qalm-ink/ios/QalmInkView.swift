@@ -11,6 +11,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   let onLasso = EventDispatcher()
   let onPenButton = EventDispatcher()
   let onRejectedTouch = EventDispatcher()
+  let onShapeHold = EventDispatcher()
 
   // MARK: Tunables (spec §3; physical sizes in millimetres)
   private static let mmPerPoint = 0.19               // iPad point ≈ 0.19 mm
@@ -42,6 +43,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private var rightHanded = true
   private var palmThresholdMm = 20.0
   private var committed = Set<String>()
+  private var shapeSnap = false  // live shapes on: report holds (onShapeHold)
 
   // MARK: State
   fileprivate struct Pt {
@@ -64,6 +66,15 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     var pendingEstimates: [NSNumber: Int] = [:]
     var erasedUpTo = 0  // eraser: points already emitted
     var claimToken = 0
+    // Live shapes: where the hold began (page units, point index), the onShapeHold awaited (-1: none), and once
+    // snapped the shape under the pen (`snapBase` as recognised, `snapCur` adjusted) and where the pen was then.
+    var holdX = 0.0, holdY = 0.0
+    var holdIdx = 0
+    var holdRequest = -1
+    var snapKind: String?
+    var snapBase: [SIMD2<Double>] = []
+    var snapCur: [SIMD2<Double>] = []
+    var snapFrom = SIMD2<Double>(0, 0)
     init(touch: UITouch, isPencil: Bool, tool: Tool, colorString: String, color: UIColor, width: Double,
          style: String, smoothing: Int, location: CGPoint) {
       self.touch = touch
@@ -82,6 +93,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   fileprivate struct Pending {
     let layer: CAShapeLayer
     let outline: [FHVec]
+    /// A snapped shape: drawn as a stroked outline (kind, page-unit points, width) instead of `outline`.
+    var shape: (kind: String, pts: [SIMD2<Double>], width: Double)? = nil
   }
 
   private var active: Active?
@@ -89,6 +102,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private var lastPenTime: TimeInterval = -1_000_000
   private var lastPenLocation: CGPoint?
   private var claimCounter = 0
+  private var holdCounter = 0
+  private var holdWork: DispatchWorkItem?
   private static var lastPenButtonTime: TimeInterval = -1_000_000  // shared: every overlay on screen gets the pencil interaction
 
   // MARK: Layers
@@ -190,6 +205,10 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     applyInputConfig()
   }
 
+  func setShapeSnap(_ on: Bool) {
+    shapeSnap = on
+  }
+
   func setCommittedIds(_ ids: [String]) {
     committed = Set(ids)
     let done = pending.keys.filter { committed.contains($0) }
@@ -238,7 +257,12 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     CATransaction.setDisableActions(true)
     for (_, p) in pending {
       p.layer.frame = bounds
-      p.layer.path = Freehand.path(from: p.outline, sx: sx, sy: sy)
+      if let s = p.shape {
+        p.layer.path = shapePath(kind: s.kind, pts: s.pts)
+        p.layer.lineWidth = CGFloat(s.width) * sx
+      } else {
+        p.layer.path = Freehand.path(from: p.outline, sx: sx, sy: sy)
+      }
     }
     CATransaction.commit()
     if let a = active { render(a, predicted: []) }
@@ -415,11 +439,94 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private func append(_ a: Active, touch: UITouch, event: UIEvent) {
     let samples = event.coalescedTouches(for: touch) ?? [touch]
     for s in samples {
+      let pt = makePoint(s, a)
+      if let kind = a.snapKind {
+        // Adjusting: the stroke stays as drawn; the shape follows the pen.
+        a.snapCur = LiveShape.adjust(kind: kind, pts: a.snapBase, from: a.snapFrom, to: SIMD2(pt.x, pt.y))
+        continue
+      }
       if s.estimatedPropertiesExpectingUpdates.contains(.force), let idx = s.estimationUpdateIndex {
         a.pendingEstimates[idx] = a.points.count
       }
-      a.points.append(makePoint(s, a))
+      a.points.append(pt)
+      // Holding still: within holdMm of where the hold began (not of the previous point, so a slow drift ends it).
+      let mmPerUnit = Double(sx) * QalmInkView.mmPerPoint
+      if a.points.count == 1 || hypot(pt.x - a.holdX, pt.y - a.holdY) * mmPerUnit > LiveShape.holdMm {
+        a.holdX = pt.x
+        a.holdY = pt.y
+        a.holdIdx = a.points.count - 1
+        a.holdRequest = -1  // an answer to an earlier hold is stale now
+        armHold(a)
+      }
     }
+  }
+
+  // MARK: Live shapes (the hold is timed here; recognition runs in JS: onShapeHold → setShapePreview)
+
+  private func armHold(_ a: Active) {
+    holdWork?.cancel()
+    holdWork = nil
+    guard shapeSnap, a.tool == .pen, a.snapKind == nil else { return }
+    let work = DispatchWorkItem { [weak self, weak a] in
+      guard let self = self, let a = a else { return }
+      self.holdElapsed(a)
+    }
+    holdWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + LiveShape.holdSeconds, execute: work)
+  }
+
+  private func cancelHold() {
+    holdWork?.cancel()
+    holdWork = nil
+  }
+
+  private func holdElapsed(_ a: Active) {
+    guard active === a, a.snapKind == nil, a.points.count >= 2 else { return }
+    holdCounter += 1
+    a.holdRequest = holdCounter
+    let pts: [[String: Any]] = a.points[0...a.holdIdx].map { ["x": $0.x, "y": $0.y] }
+    onShapeHold(["requestId": holdCounter, "points": pts])
+  }
+
+  /// JS answered a hold: snap if the pen is still down and still holding there (otherwise the answer is stale).
+  func shapePreview(requestId: Int, kind: String?, pts: [SIMD2<Double>]) {
+    guard let a = active, let kind = kind, a.holdRequest == requestId, a.snapKind == nil, let last = a.points.last else { return }
+    a.snapKind = kind
+    a.snapBase = pts
+    a.snapCur = pts
+    a.snapFrom = SIMD2(last.x, last.y)
+    tick(at: CGPoint(x: CGFloat(last.x) * sx, y: CGFloat(last.y) * sy))
+    render(a, predicted: [])
+  }
+
+  /// A haptic tick: on the Apple Pencil Pro where the system offers it (iPadOS 17.5+), else the device's own.
+  private func tick(at location: CGPoint) {
+    if #available(iOS 17.5, *) {
+      UICanvasFeedbackGenerator(view: self).alignmentOccurred(at: location)
+    } else {
+      UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+  }
+
+  private func shapePath(kind: String, pts: [SIMD2<Double>]) -> CGPath {
+    let path = CGMutablePath()
+    for pl in LiveShape.polylines(kind: kind, pts: pts) {
+      guard let f = pl.first else { continue }
+      path.move(to: CGPoint(x: CGFloat(f.x) * sx, y: CGFloat(f.y) * sy))
+      for p in pl.dropFirst() { path.addLine(to: CGPoint(x: CGFloat(p.x) * sx, y: CGFloat(p.y) * sy)) }
+    }
+    return path
+  }
+
+  /// Draws a snapped shape on `l` as PageCanvas does: stroked, round caps and joins, the pen's width.
+  private func styleShapeLayer(_ l: CAShapeLayer, color: UIColor, width: Double) {
+    l.fillColor = nil
+    l.strokeColor = color.cgColor
+    l.lineWidth = CGFloat(width) * sx
+    l.lineCap = .round
+    l.lineJoin = .round
+    l.opacity = 1
+    l.compositingFilter = nil
   }
 
   /// Float32 rounding: stored points are Float32 (encodePoints), so the overlay computes the outline from
@@ -485,6 +592,11 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     defer { CATransaction.commit() }
+    if let kind = a.snapKind {
+      styleShapeLayer(liveLayer, color: a.color, width: a.width)
+      liveLayer.path = shapePath(kind: kind, pts: a.snapCur)
+      return
+    }
     let pts = predicted.isEmpty ? a.points : a.points + predicted
     switch a.tool {
     case .pen, .highlighter:
@@ -511,6 +623,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
 
   private func finish(_ a: Active) {
     active = nil
+    cancelHold()
     switch a.tool {
     case .pen, .highlighter:
       guard !a.points.isEmpty else { clearLive(); return }
@@ -519,20 +632,26 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
         ["x": $0.x, "y": $0.y, "p": $0.p, "tilt": $0.tilt, "az": $0.az, "t": $0.t]
       }
       let held = heldMs(a.points)
-      // Hand the stroke to a pending layer that stays until PageCanvas has drawn it.
+      let snapped = a.snapKind.map { (kind: $0, pts: a.snapCur, width: a.width) }
+      // Hand the stroke (or the shape it snapped to) to a pending layer that stays until PageCanvas has drawn it.
       if !committed.contains(a.id) {
         let l = CAShapeLayer()
         l.actions = ["path": NSNull(), "position": NSNull(), "bounds": NSNull(), "opacity": NSNull()]
         l.contentsScale = liveLayer.contentsScale
-        styleStrokeLayer(l, tool: a.tool, color: a.color)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         l.frame = bounds
-        l.path = Freehand.path(from: outlinePts, sx: sx, sy: sy)
+        if let s = snapped {
+          styleShapeLayer(l, color: a.color, width: s.width)
+          l.path = shapePath(kind: s.kind, pts: s.pts)
+        } else {
+          styleStrokeLayer(l, tool: a.tool, color: a.color)
+          l.path = Freehand.path(from: outlinePts, sx: sx, sy: sy)
+        }
         strokesLayer.insertSublayer(l, below: liveLayer)
         liveLayer.path = nil
         CATransaction.commit()
-        pending[a.id] = Pending(layer: l, outline: outlinePts)
+        pending[a.id] = Pending(layer: l, outline: outlinePts, shape: snapped)
         let id = a.id
         DispatchQueue.main.asyncAfter(deadline: .now() + QalmInkView.pendingFallback) { [weak self] in
           guard let self = self, let p = self.pending[id] else { return }
@@ -542,7 +661,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
       } else {
         clearLive()
       }
-      onStrokeEnd([
+      var event: [String: Any] = [
         "id": a.id,
         "tool": a.tool.rawValue,
         "color": a.colorString,
@@ -551,7 +670,11 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
         "heldMs": held,
         "style": a.style,
         "smoothing": a.smoothing,
-      ])
+      ]
+      if let s = snapped {
+        event["shape"] = ["kind": s.kind, "pts": s.pts.map { [$0.x, $0.y] }] as [String: Any]
+      }
+      onStrokeEnd(event)
     case .eraser:
       emitErase(a, isFinal: true)
       cursorLayer.isHidden = true
@@ -570,6 +693,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   /// Drop the stroke in progress without emitting it.
   private func retract(reason: String) {
     guard active != nil else { return }
+    cancelHold()
     active = nil
     clearLive()
     cursorLayer.isHidden = true
