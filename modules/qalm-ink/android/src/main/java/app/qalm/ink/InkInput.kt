@@ -9,12 +9,15 @@ import kotlin.math.max
  * from drawing so it can be tested with synthesized [MotionEvent]s. The view owns the stroke itself; this class
  * decides when one starts, moves, ends or is retracted, and when the overlay claims the gesture from its parents.
  *
- * 1. Pen input always draws. With `drawWith = "pen"` fingers never draw: they are left to scroll and zoom.
+ * 1. Pen input always draws. With `drawWith = "pen"` fingers never draw: they are left to scroll and zoom, except
+ *    a touch that rule 2 or 3 rejects (or one landing while the pen writes), which is swallowed so it never scrolls.
  * 2. A finger whose contact major axis (`getTouchMajor`, px → mm with `xdpi`) exceeds [PALM_MAJOR_MM] is a palm.
  * 3. A finger within [PEN_LOCKOUT_MS] of any pen activity (contact or hover) is rejected, and so is a finger
  *    beside or below the last pen position on the `hand` side while the pen was seen within [HAND_SIDE_WINDOW_MS].
  * 4. `ACTION_CANCEL` / `FLAG_CANCELED` retracts the stroke in progress, as do a second finger (a scroll or zoom)
  *    and a contact that grows into a palm.
+ * 5. The pen button pressed while hovering is the shortcut ([Host.penButton]). Held (or the eraser end used) while
+ *    the pen touches, it only makes that stroke erase: firing the shortcut too left the eraser on afterwards.
  *
  * A stroke must own its gesture from touch-down: a parent ScrollView checks for a scroll before the overlay sees
  * the same move, so a fast stroke whose first move is past the touch slop would scroll the page instead. A pen (or
@@ -69,10 +72,9 @@ internal class InkInput(private val host: Host) {
       MotionEvent.ACTION_MOVE -> onMove(ev)
       MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_UP -> {
         val idx = ev.actionIndex
-        if (isPenTool(ev.getToolType(idx))) {
-          notePen(ev, idx)
-          buttonDown = false
-        }
+        // buttonDown keeps the last state seen: lifting with the button still held must not fire the shortcut
+        // on the next hover.
+        if (isPenTool(ev.getToolType(idx))) notePen(ev, idx)
         if (drawing && ev.getPointerId(idx) == livePointer) {
           // FLAG_CANCELED: the OS decided this pointer was accidental (palm). Retract instead of committing.
           if ((ev.flags and FLAG_CANCELED) != 0) {
@@ -91,7 +93,7 @@ internal class InkInput(private val host: Host) {
   /** A hovering pen counts as pen activity (lockout, hand side) and can press its button. */
   fun onHoverEvent(ev: MotionEvent) {
     notePen(ev, 0)
-    firePenButton(penButtonPressed(ev, 0))
+    firePenButton(ev, touching = false)
   }
 
   private fun onDown(ev: MotionEvent, idx: Int) {
@@ -99,13 +101,11 @@ internal class InkInput(private val host: Host) {
     when {
       isPenTool(toolType) -> {
         notePen(ev, idx)
-        val button = penButtonPressed(ev, idx)
-        firePenButton(button)
+        firePenButton(ev, touching = true)
         if (drawing && !liveIsPen) retract("pen-took-over") // the palm got there first
-        if (!drawing) begin(ev, idx, isPen = true, eraser = button)
+        if (!drawing) begin(ev, idx, isPen = true, eraser = erases(ev, idx))
       }
       isFinger(toolType) -> {
-        if (drawWith == "pen") return host.rejected("pen-only") // fingers scroll and zoom
         val palmReason = when {
           palmSizeExceeded(ev, idx) -> "palm-size"
           ev.eventTime - lastPenTime < PEN_LOCKOUT_MS -> "pen-lockout"
@@ -115,6 +115,10 @@ internal class InkInput(private val host: Host) {
         if (palmReason != null) {
           host.claim(true) // swallow the palm so it doesn't scroll the page
           return host.rejected(palmReason)
+        }
+        if (drawWith == "pen") {
+          // Fingers scroll and zoom, but not while the pen writes (the pen already claimed the gesture).
+          return host.rejected(if (drawing && liveIsPen) "pen-active" else "pen-only")
         }
         when {
           !drawing -> begin(ev, idx, isPen = false, eraser = false)
@@ -146,7 +150,7 @@ internal class InkInput(private val host: Host) {
     for (i in 0 until ev.pointerCount) {
       if (isPenTool(ev.getToolType(i))) {
         notePen(ev, i)
-        firePenButton(penButtonPressed(ev, i))
+        firePenButton(ev, touching = true)
       }
     }
     if (!drawing) return
@@ -185,12 +189,16 @@ internal class InkInput(private val host: Host) {
     lastPenY = ev.getY(idx)
   }
 
-  private fun penButtonPressed(ev: MotionEvent, idx: Int): Boolean =
-    ev.getToolType(idx) == MotionEvent.TOOL_TYPE_ERASER ||
-      (ev.buttonState and (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_STYLUS_SECONDARY)) != 0
+  private fun penButtonPressed(ev: MotionEvent): Boolean =
+    (ev.buttonState and (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_STYLUS_SECONDARY)) != 0
 
-  private fun firePenButton(pressed: Boolean) {
-    if (pressed && !buttonDown) host.penButton()
+  /** The barrel button held, or the eraser end: this stroke erases, whatever the tool. */
+  private fun erases(ev: MotionEvent, idx: Int) = ev.getToolType(idx) == MotionEvent.TOOL_TYPE_ERASER || penButtonPressed(ev)
+
+  /** The shortcut fires for a press while hovering only (rule 5). */
+  private fun firePenButton(ev: MotionEvent, touching: Boolean) {
+    val pressed = penButtonPressed(ev)
+    if (pressed && !buttonDown && !touching) host.penButton()
     buttonDown = pressed
   }
 

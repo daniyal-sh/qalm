@@ -102,7 +102,9 @@ apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Objec
     rejected most fingertips, which are 8–10 mm). The lockout, hand side and multi-touch rules catch smaller palm edges.
   - **Pen priority:** a 600 ms pen lockout, and the writing-hand side is considered for 3 s.
   - **Retractions:** an OS cancel retracts the stroke, as does a second finger or a contact that grows into a palm.
-  - **Fingers:** with "pen only" they scroll; a rejected palm never scrolls.
+  - **Fingers:** with "pen only" one finger scrolls and two zoom; a rejected palm (or a finger landing right after the pen)
+    never moves the page, on web, Android and iOS.
+  - **Pen button:** held while writing, it erases only that stroke; pressed while hovering, it's the shortcut.
   - **Parity:** the same rules apply on iOS, Android and web.
 - **Hand-off:** the overlay keeps a finished stroke on screen until its id shows up in `committedIds` (reported by
   `PageCanvas`'s `onDrawn` once Skia has it) plus 2 frames (web) or 50 ms (native), with a 4 s fallback.

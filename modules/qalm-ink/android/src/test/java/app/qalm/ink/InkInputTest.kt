@@ -330,16 +330,95 @@ class InkInputTest {
     assertFalse(input.drawing)
   }
 
+  // ---- pen only: fingers scroll, palms never do ----
+  @Test
+  fun penOnlySwallowsAPalmSoItNeverScrolls() {
+    input.drawWith = "pen"
+    send(1000, MotionEvent.ACTION_DOWN, finger(0, 300f, 300f, 40.0))
+    send(1010, MotionEvent.ACTION_MOVE, finger(0, 300f, 200f, 40.0))
+    send(1020, MotionEvent.ACTION_UP, finger(0, 300f, 100f, 40.0))
+    assertEquals(listOf("claim true", "reject palm-size"), log)
+    assertFalse(input.drawing)
+  }
+
+  @Test
+  fun penOnlyAFingerRightAfterThePenDoesNotScroll() {
+    input.drawWith = "pen"
+    penStroke(upAt = 10_000, x = 500f, y = 500f)
+    log.clear()
+    tap(10_300, finger(1, 100f, 100f)) // left of and above the pen: only the lockout applies
+    tap(11_000, finger(1, 700f, 700f)) // below right: the writing hand
+    assertEquals(listOf("claim true", "reject pen-lockout", "claim true", "reject hand-side"), log)
+    log.clear()
+    tap(11_100, finger(1, 100f, 100f)) // later and away from the hand: it scrolls
+    assertEquals(listOf("reject pen-only"), log)
+  }
+
+  @Test
+  fun penOnlyAFingerWhileThePenWritesDoesNotDrawOrUnclaim() {
+    input.drawWith = "pen"
+    send(10_000, MotionEvent.ACTION_DOWN, pen(0, 500f, 500f))
+    send(10_700, MotionEvent.ACTION_POINTER_DOWN, pen(0, 500f, 500f), finger(1, 100f, 100f), actionIndex = 1)
+    send(10_710, MotionEvent.ACTION_MOVE, pen(0, 510f, 500f), finger(1, 100f, 120f))
+    assertEquals(listOf("start 0 pen", "claim true", "reject pen-active", "move 0"), log)
+  }
+
+  @Test
+  fun penOnlyTwoFingersAreLeftToZoom() {
+    input.drawWith = "pen"
+    send(1000, MotionEvent.ACTION_DOWN, finger(0, 300f, 300f))
+    send(1010, MotionEvent.ACTION_POINTER_DOWN, finger(0, 300f, 300f), finger(1, 500f, 300f), actionIndex = 1)
+    send(1020, MotionEvent.ACTION_MOVE, finger(0, 250f, 300f), finger(1, 550f, 300f))
+    assertEquals(listOf("reject pen-only", "reject pen-only"), log) // never claimed: the pinch handler gets it
+  }
+
   // ---- pen button ----
   @Test
-  fun penButtonAndEraserEndSwitchToTheEraser() {
-    send(1000, MotionEvent.ACTION_DOWN, pen(0, 100f, 100f), buttons = MotionEvent.BUTTON_STYLUS_PRIMARY)
+  fun theBarrelButtonHeldWhileWritingErasesOnlyThatStroke() {
+    val held = MotionEvent.BUTTON_STYLUS_PRIMARY
+    send(1000, MotionEvent.ACTION_DOWN, pen(0, 100f, 100f), buttons = held)
+    send(1010, MotionEvent.ACTION_MOVE, pen(0, 110f, 100f), buttons = held)
+    send(1020, MotionEvent.ACTION_UP, pen(0, 120f, 100f))
+    // still held as the pen lifts and hovers: not a new press
+    hover(1100, buttons = held)
+    // the next stroke, without the button, draws with the tool again
+    send(2000, MotionEvent.ACTION_DOWN, pen(0, 100f, 100f))
+    send(2010, MotionEvent.ACTION_UP, pen(0, 120f, 100f))
+    assertEquals(listOf("start 0 pen eraser", "claim true", "move 0", "finish 0", "start 0 pen", "claim true", "finish 0"), log)
+  }
+
+  @Test
+  fun pressingTheButtonMidStrokeDoesNotSwitchTools() {
+    send(1000, MotionEvent.ACTION_DOWN, pen(0, 100f, 100f))
     send(1010, MotionEvent.ACTION_MOVE, pen(0, 110f, 100f), buttons = MotionEvent.BUTTON_STYLUS_PRIMARY)
     send(1020, MotionEvent.ACTION_UP, pen(0, 120f, 100f))
-    send(2000, MotionEvent.ACTION_DOWN, P(0, MotionEvent.TOOL_TYPE_ERASER, 100f, 100f))
-    assertEquals(
-      listOf("button", "start 0 pen eraser", "claim true", "move 0", "finish 0", "button", "start 0 pen eraser", "claim true"),
-      log,
-    )
+    assertEquals(listOf("start 0 pen", "claim true", "move 0", "finish 0"), log)
+  }
+
+  @Test
+  fun theButtonPressedWhileHoveringIsTheShortcut() {
+    hover(1000)
+    hover(1010, buttons = MotionEvent.BUTTON_STYLUS_PRIMARY)
+    hover(1020, buttons = MotionEvent.BUTTON_STYLUS_PRIMARY) // held: fires once
+    hover(1030)
+    hover(1040, buttons = MotionEvent.BUTTON_STYLUS_SECONDARY)
+    assertEquals(listOf("button", "button"), log)
+  }
+
+  @Test
+  fun theEraserEndErasesWithoutSwitchingTools() {
+    val eraserEnd = P(0, MotionEvent.TOOL_TYPE_ERASER, 100f, 100f)
+    val hover = event(900, MotionEvent.ACTION_HOVER_MOVE, listOf(eraserEnd))
+    input.onHoverEvent(hover)
+    hover.recycle()
+    send(1000, MotionEvent.ACTION_DOWN, eraserEnd)
+    send(1010, MotionEvent.ACTION_UP, eraserEnd)
+    assertEquals(listOf("start 0 pen eraser", "claim true", "finish 0"), log)
+  }
+
+  private fun hover(t: Long, buttons: Int = 0) {
+    val ev = event(t, MotionEvent.ACTION_HOVER_MOVE, listOf(pen(0, 500f, 500f)), buttons = buttons)
+    input.onHoverEvent(ev)
+    ev.recycle()
   }
 }

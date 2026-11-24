@@ -312,9 +312,10 @@ web CSS px = 0.2646 mm):
 3. Touches within 600 ms of pen activity, or below or beside the pen on the `hand` side, are rejected.
 4. An OS cancel (`ACTION_CANCEL` / `FLAG_CANCELED` / `touchesCancelled`) retracts the in-progress stroke.
 
-Hover (where supported) shows a brush-size preview. The pen button, squeeze or double-tap fires `onPenButton`, and the app switches to the eraser.
-On web, the barrel button (or eraser end) held while the pen touches only makes that stroke erase; `onPenButton` fires for a press
-while hovering. The right mouse button erases too, and the page has no context menu.
+Hover (where supported) shows a brush-size preview. The pen button pressed while hovering, a squeeze or a double-tap fires `onPenButton`,
+and the app switches to the eraser (or the last tool, per Settings). On every platform the barrel button (or eraser end) held while the pen
+touches only makes that stroke erase, and nothing fires `onPenButton` while the pen writes (iOS: squeeze and double-tap are ignored then).
+On web the right mouse button erases too, and the page has no context menu.
 
 **No on-device recognition.** qalm-ink has no handwriting recognizer on any platform (ML Kit was removed): the user's agent reads handwriting
 from the region images with its own vision. That keeps the app about 20 MB lighter per language and the same on every platform.
