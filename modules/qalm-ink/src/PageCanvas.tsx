@@ -438,13 +438,15 @@ function useBase(
 ): { plan: BakePlan; base: Base | null; hadBase: boolean } {
   const base = React.useRef<Base | null>(null);
   const hadBase = React.useRef(false);
+  /** Skia couldn't make a surface this size: draw pictures rather than keep the ink hidden. */
+  const failed = React.useRef(false);
   const running = React.useRef<RunningBake | null>(null);
   const [version, setVersion] = React.useState(0);
   const bakeable = React.useCallback((it: Item) => it.type === 'stroke' || it.type === 'shape' || (it.type === 'text' && !!fonts), [fonts]);
   const plan = React.useMemo(() => {
     if (!BAKE_ENABLED) return NO_BAKE;
     const p = planBake(base.current?.baked ?? null, items, target, bakeable, live);
-    return p.enabled && !bakeBudget.fits(base, target.w * target.h) ? NO_BAKE : p;
+    return p.enabled && (failed.current || !bakeBudget.fits(base, target.w * target.h)) ? NO_BAKE : p;
   },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [items, target.key, target.w, target.h, bakeable, live, version],
@@ -488,7 +490,11 @@ function useBase(
     if (!job.full && base.current) {
       // Grow the base by the tail: the old image plus a few dozen items.
       const surface = Skia.Surface.Make(w, h);
-      if (!surface) return;
+      if (!surface) {
+        failed.current = true;
+        setVersion((v) => v + 1);
+        return;
+      }
       const c = surface.getCanvas();
       c.drawImage(base.current.image, 0, 0);
       c.save();
@@ -533,6 +539,8 @@ function useBase(
         surface = Skia.Surface.Make(w, h);
         if (!surface) {
           if (running.current === bake) running.current = null;
+          failed.current = true;
+          setVersion((v) => v + 1);
           return;
         }
         const c = surface.getCanvas();
