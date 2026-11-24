@@ -26,7 +26,7 @@ import kotlin.math.max
  * mouse) stroke claims the gesture (`requestDisallowInterceptTouchEvent`), and so does a rejected palm, so it never
  * scrolls. A finger stroke can't: that call also stops react-native-gesture-handler's pinch for the rest of the
  * gesture (two fingers would never zoom with "pen and finger"). It holds the ancestor scroll views still instead
- * ([Host.holdScroll]), and a second finger releases them, retracts the stroke and lets the pinch or scroll go on.
+ * ([Host.holdScroll]), and a second finger releases them, ends the stroke (rule 4) and lets the pinch or scroll go on.
  */
 internal class InkInput(private val host: Host) {
   interface Host {
