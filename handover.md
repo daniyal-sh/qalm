@@ -133,7 +133,10 @@ apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Objec
   - **Play / Pause AI:** an agent gets a notebook's data only while one of the owner's devices is playing it: an
     `ai:live` heartbeat on the notebook's sync socket every 15 s, live for 40 s after the last one or until the socket
     closes (`DocRoom.liveUntil`, `AgentHub.isLive()`, the one gate for every MCP path; Lecture mode must use it too).
-    Opening a notebook starts paused. Details in `docs/qink-live.md` §4. The old synced `meta.aiPaused` is ignored.
+    Play, heartbeat and reconnect are separate frames, and a stored pause epoch stops a device that missed a Pause
+    from resuming. Opening a notebook starts paused. Details in `docs/qink-live.md` §4. The old synced
+    `meta.aiPaused` is still honoured for old installed apps and cleared on Play. Lecture mode keeps sharing in the
+    background with `AiLive.holdWhileBackgrounded('lecture')` while a recording runs.
 
 ## 5. Status: what exists and what's verified
 

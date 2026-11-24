@@ -423,12 +423,13 @@ from the region images with its own vision. That keeps the app about 20 MB light
   comment in the page room (on the region's strokes still on the page, or the ink in a box, with the box as fallback) and labels it; `comment {thread, resolve?}` replies there (author: the grant's client name). Agents still never touch ink.
 - **Presence:** every agent call records `presence` (client id → name, grant switches, last call) in the notebook room; pending waits
   are counted in memory.
-- **Play / Pause AI (liveness):** agents get a notebook only while one of the owner's devices plays it (`docs/qink-live.md` §4). The editor
-  sends `ai:live` text frames on the `nb:` sync socket every 15 s; `DocRoom` keeps `liveUntil` (last beat + 40 s) in that socket's attachment
-  (survives hibernation, never stored or synced) and `liveUntil()` is the latest over open sockets. `ai:pause` clears all of them and sends
-  `ai:paused` to the other sockets; `ai:stop` and a closing socket clear one. Every MCP path goes through `AgentHub.isLive()` /
-  `requireLive()`; a change wakes pending waits, and a pending wait also re-checks when the last heartbeat would lapse. The old synced
-  `meta.aiPaused` is ignored (removed from `NotebookMeta`).
+- **Play / Pause AI (liveness):** agents get a notebook only while one of the owner's devices plays it (`docs/qink-live.md` §4). Text frames
+  on the `nb:` sync socket: `ai:play`, `ai:live` every 15 s (only extends a live socket), `ai:resume:<epoch>` after a reconnect, `ai:pause`,
+  `ai:stop`. `DocRoom` keeps `liveUntil` (last accepted frame + 40 s) in that socket's attachment (survives hibernation, never synced) and
+  `liveUntil()` is the latest over open sockets; the pause epoch is in the room's `kv` (`aiPauseEpoch`). Every MCP path goes through
+  `AgentHub.isLive()` / `requireLive()` (AI access on, `meta.aiPaused` not set, a live socket); a change wakes pending waits, and a pending
+  wait also re-checks when the last heartbeat would lapse. `applyAgentEdit` asks the notebook room (`agentLiveError`) right before writing.
+  `meta.aiPaused` (deprecated) is still honoured for apps from before Play / Pause; the current app clears it on Play.
 
 ## 5. App (`apps/app`, Expo, New Architecture, expo-router)
 

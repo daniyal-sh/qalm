@@ -178,16 +178,26 @@ says *when*. An agent gets a notebook's data only while it is open in qalm on on
 (the Play / Pause AI control in the editor header). Opening a notebook starts **paused**; Pause, closing the notebook,
 leaving or backgrounding the app, signing out, losing the connection or the device sleeping stop it.
 
-- **Liveness is ephemeral and server-verified**, never a synced flag. While playing, the editor sends the text frame
-  `ai:live` on the notebook's sync socket (`nb:{id}`, which only the owner can open) every **15 s**. The notebook's room
-  counts that socket as live for **40 s** after its last heartbeat (`AI_LIVE_TTL_MS`: two missed beats plus slack), or
-  until the socket closes. Nothing is stored, so a restarted room is paused. Several devices or tabs each send their
-  own heartbeat; the notebook is live while any of them is. `ai:pause` (the button) clears every socket and the room
-  sends `ai:paused` to the other devices, whose headers switch to paused; `ai:stop` (backgrounded, notebook closing)
-  stops only that device. After a dropped connection the editor sends a heartbeat on the new socket at once if it is
-  back within 40 s, and otherwise switches to paused. Constants: `packages/core/src/aiLive.ts`.
-- **One gate**: `AgentHub.isLive()` (AI access on *and* a live heartbeat) is checked by every MCP path. New paths,
-  such as Lecture mode's live transcript, must use it too.
+- **Liveness is ephemeral and server-verified**, never a synced flag. Text frames on the notebook's sync socket
+  (`nb:{id}`, which only the owner can open); the notebook's room counts a socket as live for **40 s** after its last
+  accepted frame (`AI_LIVE_TTL_MS`: two missed beats plus slack), or until it closes. Several devices or tabs each
+  count on their own; the notebook is live while any of them is. Constants and protocol: `packages/core/src/aiLive.ts`.
+  - **Play** sends `ai:play`; the room makes the socket live and answers `ai:playing:<epoch>`.
+  - **Heartbeat** `ai:live` every **15 s** only keeps an already-live socket live. On a socket that isn't live (it
+    expired, or a Pause got there first) it does nothing and the room answers `ai:paused`, so a heartbeat in flight
+    across a Pause can't restart sharing.
+  - **Pause** sends `ai:pause`: the room bumps its **pause epoch** (stored, so it survives a restart), clears every
+    socket and sends `ai:paused` to the others, whose headers switch to paused and send `ai:stop` back. A Pause
+    pressed while this device's socket is down is queued (the editor says so) and sent first on reconnect.
+  - **Reconnect** within 40 s sends `ai:resume:<epoch>`: live again only if nobody pressed Pause since; otherwise the
+    room answers `ai:paused`. A device that missed a Pause while offline can't bring sharing back. Away longer than
+    40 s, or asleep (its heartbeat timer froze past 40 s), it stays paused until Play.
+  - `ai:stop` stops only that device: the notebook closing, AI access off, or the app going to the background unless
+    held (`AiLive.holdWhileBackgrounded(reason)` in `apps/app/src/editor/aiLive.ts`, for Lecture mode: while a
+    recording runs with Play on, backgrounding keeps sharing until the recording pauses or stops, or Pause).
+- **One gate**: `AgentHub.isLive()` (AI access on, the old `aiPaused` flag not set, and a live socket) is checked by
+  every MCP path. New paths, such as Lecture mode's live transcript, must use it too. Agent writes (`comment`,
+  `transcribe`) are checked again by the page room right before it writes, so nothing lands once paused.
 - **While live** the agent may read the whole notebook (any page, older threads with `read("C5")`) and gets updates.
 - **While paused:** `read`, `transcribe` and `comment` fail with "The student hasn't turned on AI for this notebook
   right now." `wait()` lists a paused notebook as `s=… paused` **without its title** (live ones are listed first, as
@@ -199,8 +209,10 @@ leaving or backgrounding the app, signing out, losing the connection or the devi
 - **Presence:** the header shows "AI live · Claude" while an agent has a pending `wait` or made a call in the last
   minute (named by its OAuth client name), "Claude is thinking…" after an Ask, "AI live" with no agent, and "AI
   paused" (neutral, not assistant blue). Stop is "Turn off AI access" in the notebook's menu.
-- The synced `meta.aiPaused` flag ("Pause sharing", before Play / Pause) is gone; the server and app ignore it, so
-  existing notebooks simply open paused.
+- **Apps from before Play / Pause** still write the synced `meta.aiPaused` ("Pause sharing") and don't know Play. While
+  they are installed the server keeps honouring it (`aiPaused` set means paused), the current app clears it on Play,
+  and pauses every playing device when it turns on. An old app's header may still say "… is following along" while
+  an agent merely waits on a paused notebook. Existing notebooks simply open paused.
 
 ## 5. Rough budget (one hour of math tutoring)
 
