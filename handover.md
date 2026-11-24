@@ -267,6 +267,13 @@ email-only sign-in, and `grants.notebook_ids` / `folder_ids` since grants cover 
     Tested on web/Electron (desktop e2e steps); the Android and iOS overlays only add the partial-erase trail (the
     splitting and detection run in JS on every platform); Android unbuilt as an APK, iOS never compiled. Needs a
     real-stylus check of the scribble thresholds.
+  - **Ruler, laser pointer and presentation view** (PR "Ruler, laser pointer and presentation view"): R / K / F5;
+    details and thresholds in `docs/tech-spec.md` §5 and §7 (ruler snap 24 px outside an edge, angles snap within 4° of
+    45° steps, laser fades over 1 s). Tested on web/Electron (desktop e2e: snapped strokes from outside the edge and from
+    over the ruler, mouse drag and handle turn to 45°, a laser trail that fades and adds nothing, F5 presentation).
+    Android: `RulerSnap.kt` (JVM-tested) and the laser in `QalmInkView.kt`, APK unbuilt; iOS: `RulerSnap.swift` and
+    `LaserView`, never compiled. On native the RN ruler view takes a pen landing on its body (it moves); two-finger
+    turning on Android/iPad is untested on devices.
   - Fractions like ⅔ have no glyph on the page; PDF export uses Symbol, so symbol-heavy lines may wrap differently.
   - "Pen and finger" two-finger pan and pinch are verified with synthetic touch on Electron only; Android and iPad need
     a device check (iOS changes are unbuilt).

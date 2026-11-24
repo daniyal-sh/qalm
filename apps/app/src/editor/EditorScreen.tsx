@@ -727,7 +727,6 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   // in window coordinates, and only once a move ends, so dragging it doesn't re-render the pages. ----
   const [rulerOn, setRulerOn] = React.useState(false);
   const [rulerPose, setRulerPose] = React.useState<RulerPose | null>(null);
-  const [rulerLive, setRulerLive] = React.useState<RulerPose | null>(null);
   const areaRef = React.useRef<React.ComponentRef<typeof View>>(null);
   const [areaOrigin, setAreaOrigin] = React.useState({ x: 0, y: 0 });
   const measureArea = React.useCallback(() => {
@@ -1290,19 +1289,15 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               </ScrollView>
             </GestureDetector>
 
-            {rulerOn && !presenting && (rulerLive ?? rulerPose) ? (
+            {rulerOn && !presenting && rulerPose ? (
               <View style={[StyleSheet.absoluteFill, { overflow: 'hidden' }]} pointerEvents="box-none">
                 <Ruler
-                  pose={(rulerLive ?? rulerPose)!}
+                  pose={rulerPose}
                   view={viewport}
                   origin={areaOrigin}
                   pxPerMm={(slots[current] && pages[current] ? (slots[current]!.width * liveScale) / pages[current]!.size.w : 1) * UNITS_PER_MM}
                   input={input}
-                  onChange={(pose, done) => {
-                    if (!done) return setRulerLive(pose);
-                    setRulerLive(null);
-                    setRulerPose(pose);
-                  }}
+                  onChange={setRulerPose}
                   onClose={() => setRulerOn(false)}
                 />
               </View>

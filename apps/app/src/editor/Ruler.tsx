@@ -30,14 +30,16 @@ export interface RulerProps {
   /** Page mm at the current zoom, in px (the ticks measure the page). */
   pxPerMm: number;
   input: Pick<InkInputSettings, 'hand' | 'palm'>;
-  /** While a gesture moves the ruler (`done` false), and once it ends (`done` true: commit it). */
-  onChange(pose: RulerPose, done: boolean): void;
+  /** A move ended: the new pose (while it moves, the ruler shows it itself, so the editor doesn't re-render). */
+  onChange(pose: RulerPose): void;
   onClose(): void;
 }
 
-export function Ruler({ pose, view, origin, pxPerMm, input, onChange, onClose }: RulerProps) {
+export function Ruler({ pose: committed, view, origin, pxPerMm, input, onChange, onClose }: RulerProps) {
   const { c } = useTheme();
   const root = React.useRef<React.ComponentRef<typeof View>>(null);
+  const [moving, setMoving] = React.useState<RulerPose | null>(null);
+  const pose = moving ?? committed;
   const live = React.useRef({ pose, view, origin, input, onChange });
   live.current = { pose, view, origin, input, onChange };
 
@@ -70,12 +72,15 @@ export function Ruler({ pose, view, origin, pxPerMm, input, onChange, onClose }:
       next = st.rotate ? rotateRuler(st.pose, from, to) : dragRuler(st.pose, from, to);
     }
     s.moved = true;
-    live.current.onChange(keepInView(next, live.current.view), false);
+    const kept = keepInView(next, live.current.view);
+    live.current.pose = kept; // a rebase before the next render starts from here
+    setMoving(kept);
   };
   const end = () => {
     const s = g.current;
-    if (s.moved) live.current.onChange(live.current.pose, true);
+    if (s.moved) live.current.onChange(live.current.pose);
     s.moved = false;
+    setMoving(null);
   };
 
   // Web / Electron: pointer events on the ruler's element.
@@ -214,7 +219,7 @@ export function Ruler({ pose, view, origin, pxPerMm, input, onChange, onClose }:
     <View
       ref={root}
       accessible
-      accessibilityRole="adjustable"
+      accessibilityRole="image"
       accessibilityLabel={`Ruler, ${deg}°`}
       {...(native ? native.body.panHandlers : {})}
       style={[
