@@ -137,7 +137,7 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
   stroke smoothing low/medium/high, stored per stroke, identical in core/web/Kotlin/Swift (#6); default ink follows the
   paper colour (#24).
 - **Editing:** lasso tap-select, box select, handles to move/resize/rotate, inline text editing, clipboard incl. paste
-  from other apps on web/desktop, Ctrl/Cmd shortcuts (#8, #20); hold-to-snap shapes at 350 ms incl. rotated rects and
+  from other apps on web/desktop, Ctrl/Cmd shortcuts (#8, #20); hold-to-snap shapes (now live, see below) incl. rotated rects and
   ellipses, diamond, pentagon, hexagon, star, double arrow (#11); custom colours: picker + synced swatches per tool,
   per-colour highlighter opacity (#12); maths symbols in text boxes via a Noto Sans Math subset (#20).
 - **Performance:** chunked Skia pictures, page windowing, nearest-first page loading, PDF render queue and LRU, page-doc
@@ -231,7 +231,10 @@ email-only sign-in and stay in place.
   - Paste from other apps is web/desktop only; native Paste uses qalm's own clipboard.
   - Selecting a far comment thread scrolls to the top of its page, not its line.
   - Emptying an existing text box and reloading (without the page unmounting) keeps the empty box.
-  - Arcs aren't recognised as shapes; there's no snap preview while holding.
+  - Arcs aren't recognised as shapes.
+  - **Live shapes** (#60): hold 400 ms within 2.5 mm and the shape snaps under the pen; drag to resize/rotate, lift to
+    place; one undo restores the stroke. Tested on web/Electron (desktop e2e step); Android built only as a JVM test of
+    `LiveShape.kt` (the view wiring is uncompiled); iOS never compiled. Needs a real-stylus feel check.
   - Fractions like ⅔ have no glyph on the page; PDF export uses Symbol, so symbol-heavy lines may wrap differently.
   - Pinch zoom on tablets works only with "pen only"; with "pen and finger" use the ± buttons.
   - The live highlighter uses plain alpha; finished highlights use multiply.

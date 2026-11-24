@@ -229,12 +229,11 @@ function confusion() {
 }
 
 describe('snapShape: hold to snap', () => {
-  it('needs the pen held still for SNAP_HOLD_MS (350 ms)', () => {
-    expect(SNAP_HOLD_MS).toBe(350);
+  it('needs the pen held still for SNAP_HOLD_MS', () => {
     const { pl, size } = GENERATORS.rect!(rng(1));
     const pts = draw(pl, size, hand(1));
-    expect(snapShape(pts, 349)).toBeNull();
-    expect(snapShape(pts, 350)?.kind).toBe('rect');
+    expect(snapShape(pts, SNAP_HOLD_MS - 1)).toBeNull();
+    expect(snapShape(pts, SNAP_HOLD_MS)?.kind).toBe('rect');
   });
 
   it('never snaps tiny strokes or dots', () => {

@@ -38,6 +38,21 @@ export interface StrokeEndEvent {
   /** pen strokes: the style and smoothing the overlay drew with; store them on the StrokeItem */
   style: InkPenStyle;
   smoothing: InkSmoothing;
+  /**
+   * Set when the stroke snapped to a shape while the pen was held (and was then adjusted and lifted): the shape to
+   * store. `points` is still the hand-drawn stroke up to the snap (for undo). The overlay hands it off under `id`.
+   */
+  shape?: { kind: string; pts: [number, number][] };
+}
+
+/**
+ * A recognised shape while the pen is still down (from `recognizeShape`): what to store (`kind`, `pts`, as
+ * `ShapeItem` in @qalm/core) and its outline to draw (`polylines`, page units).
+ */
+export interface ShapePreview {
+  kind: string;
+  pts: [number, number][];
+  polylines: [number, number][][];
 }
 export interface EraseEvent {
   path: { x: number; y: number }[];
@@ -81,6 +96,19 @@ export interface InkOverlayProps {
   onLasso(e: { nativeEvent: LassoEvent }): void;
   onPenButton?(e: { nativeEvent: PenButtonEvent }): void;
   onRejectedTouch?(e: { nativeEvent: RejectedTouchEvent }): void;
+  /**
+   * Live shapes (pen only). When the pen holds still (`SHAPE_HOLD_MS` within `SHAPE_HOLD_MM` of where the hold began)
+   * the overlay asks this for the shape the stroke so far looks like (the points up to where the hold began). A
+   * shape replaces the ink under the pen at once (haptic tick on native, a pulse on web); null changes nothing and
+   * the pen keeps drawing. Leave it out to turn live shapes off. On native it is called asynchronously, once per
+   * hold: the hold itself is the latency budget, and a reply that arrives after the pen moved on or lifted is dropped.
+   */
+  recognizeShape?(points: { x: number; y: number }[]): ShapePreview | null;
+  /**
+   * Dragging after the snap (web only; the native overlays carry a port of @qalm/core `adjustShape`): the shape for the
+   * pen now at `to`, given it was at `from` when it snapped. Without it the shape stays as recognised.
+   */
+  adjustShape?(shape: ShapePreview, from: [number, number], to: [number, number]): ShapePreview;
   /** Layout. Defaults to absolute fill of the parent (stack it exactly over the PageCanvas). */
   style?: StyleProp<ViewStyle>;
 }
@@ -88,3 +116,7 @@ export interface InkOverlayProps {
 /** Palm rejection constants (tech-spec §3). Shared by every overlay implementation. */
 export const PALM_MAJOR_MM = { relaxed: 30, standard: 20, strict: 14 } as const;
 export const PEN_LOCKOUT_MS = 600;
+/** Live shapes: hold this long (ms) … */
+export const SHAPE_HOLD_MS = 400;
+/** … within this distance (mm) of where the hold began (core: SNAP_HOLD_MS / SNAP_HOLD_TOLERANCE_MM). */
+export const SHAPE_HOLD_MM = 2.5;

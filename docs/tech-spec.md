@@ -205,7 +205,9 @@ strokes. The app sets the style from the toolbar (per device, with the other too
 Default widths (page units): pen 1.2 / 1.8 / 2.8, highlighter 12.
 ```ts
 strokeOutline(s: StrokeItem): [number, number][]; strokeSvgPath(s: StrokeItem): string
-snapShape(points: InkPoint[], heldMs: number): ShapeItem | null          // only if heldMs >= SNAP_HOLD_MS (350); see below
+recognizeShape(points): ShapeItem | null                                // no hold gate: the overlays time the hold; see below
+snapShape(points: InkPoint[], heldMs: number): ShapeItem | null          // recognizeShape, only if heldMs >= SNAP_HOLD_MS (400)
+adjustShape(shape, from, to): pts                                        // dragging after the snap; see below
 hitTestErase(items: Item[], path: {x:number;y:number}[], radius: number): string[]
 lassoSelect(items: Item[], polygon: {x:number;y:number}[]): string[]   // most of the ink inside, or a box's centre
 // Selection (geometry/transform.ts). Sim = { s, r, ox, oy, dx, dy }: p' = o + s·R(r)·(p − o) + d
@@ -479,9 +481,28 @@ front / sends to back, comments, asks and deletes; Ctrl/Cmd + C / X / V / D / A 
 started from a selection stores its item ids (`anchorIds`), so its pin, margin card and Q-ink box ref follow the ink; once
 that ink is all deleted, the thread shows only in the panel ("Ink removed").
 
-### Shape snapping (`snapShape`)
-Hold the pen still for **350 ms** (`SNAP_HOLD_MS`) at the end of a stroke and it snaps. Each overlay reports `heldMs`: how long
-the pen stayed within ~1 mm (web, Android) or 2 page units (iOS) of where it lifted. Steps:
+### Shape snapping (live: `recognizeShape`, `adjustShape`)
+GoodNotes-style, gated by the `snapShapes` setting (the app passes `recognizeShape` to the overlay only when it's on):
+- **Snap while holding.** Pen strokes only. The overlay times the hold: the pen stays within **2.5 mm**
+  (`SNAP_HOLD_TOLERANCE_MM`, measured from where the hold began, not frame to frame) for **400 ms** (`SNAP_HOLD_MS`). It
+  then asks for the shape of the stroke up to where the hold began. A shape replaces the ink under the pen at once: a
+  haptic tick on Android (`CONFIRM`, API 30+, else `CLOCK_TICK`) and iOS (`UICanvasFeedbackGenerator` for the Pencil
+  Pro on 17.5+, else a light impact); a short fading halo on web and Electron. Not a shape: nothing happens, the pen
+  keeps drawing, and lifting keeps the ink.
+- **Adjust while still holding** (`adjustShape`, ported to `LiveShape.kt` / `LiveShape.swift`): lines and arrows move
+  the end nearest the pen by the pen's offset, the other end fixed, still snapping to horizontal or vertical within 5°.
+  Closed shapes scale and turn uniformly about their centre, by the pen's distance and angle from the centre compared
+  with where it snapped; so circles stay round and squares square. Turns under 6° keep the snapped orientation;
+  rectangles and ellipses come upright within 6°. **Lift to place it.**
+- **Native:** a JS function can't run synchronously on the UI thread. The view sends `onShapeHold` (request id and the
+  points up to the hold) and the JS wrapper answers through the view function `setShapePreview(id, shape | null)`.
+  The hold is the latency budget; an answer that arrives after the pen moved on (a new hold) or lifted is dropped.
+  Adjusting runs natively, so the shape follows the pen without a round trip.
+- **Storing it:** `onStrokeEnd` carries `shape: { kind, pts }` besides the hand-drawn `points`. The app adds the stroke,
+  then the shape in its place under the same id (`commitSnapped`): two undo steps, so **one undo brings the hand-drawn
+  stroke back**.
+
+Recognition steps:
 1. Drop the hold's jitter at the end; resample to 96 points evenly spaced along the stroke.
 2. **Closed or open:** a stroke whose end comes back within 20% of its size to its start (after 60% of its length) is
    closed. A short overshoot past the start is cut off. A tail longer than 18% of the loop (the stem of an "a", the end of
@@ -493,6 +514,8 @@ the pen stayed within ~1 mm (web, Android) or 2 page units (iOS) of where it lif
 4. **Closed strokes:**
    - **Corners:** peaks of the turning angle over ±4% of the outline, at least 35° and 1.6× the outline's median turn (a
      circle turns evenly, so it has none).
+   - **Fitted corners (3 or 4):** a line is fitted through the middle 60% of each side and neighbouring sides are
+     intersected: a hand rounds corners off, so the turning points sit inside the shape.
    - **3 corners:** triangle.
    - **4 corners:** rect if every angle is within 18° of 90°. It keeps its rotation, snaps upright within 5°, and becomes a
      square within 10%. Otherwise, or with corners at top/right/bottom/left, it's a diamond.
@@ -500,7 +523,11 @@ the pen stayed within ~1 mm (web, Android) or 2 page units (iOS) of where it lif
    - **5 sharp tips visited every other one:** a 5-point star (inner radius 0.382).
    - **Error limit:** each fit must stay within 6% of the size on average. With 4–7 corners, regular pentagon and hexagon
      fits of the whole outline are tried too.
+   - **Rounded-off rectangle** (≤ 4 corners found): a box along the outline's dominant directions; a rect when it's
+     within 4% of the size on average and closer than 0.7× the ellipse's error.
    - **Otherwise, an ellipse:** principal axes and extents, error under 11% (7% when corners were found). It becomes a circle
      when round within 10%, and upright within 8°.
 Synthetic tests (jitter, wobble, rounded corners, overshoot, rotation) and held handwriting (e, a, s, 8, 2, m, L, V, Z, N,
-cursive, spirals, scribbles) are in `packages/core/test/shapes.test.ts`; handwriting never snaps there.
+cursive, spirals, scribbles) are in `packages/core/test/shapes.test.ts`; handwriting never snaps there. Quick, sparse,
+wobbly strokes as the live hold sees them (wobbly and small circles, rounded rectangles, triangles, lines and arrows),
+letters that must not snap unless held (o, 0, D, ∫) and `adjustShape` are in `packages/core/test/liveShapes.test.ts`.

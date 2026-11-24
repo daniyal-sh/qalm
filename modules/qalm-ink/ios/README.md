@@ -95,7 +95,9 @@ If `s.platforms` stays below 16.1, the code still compiles because `zOffset` and
 
 **Eraser, lasso, `heldMs`**
 - [ ] The eraser sends `onErase` while moving, and the cursor circle follows it. The lasso draws a dashed polygon and sends `onLasso` on lift.
-- [ ] Holding the Pencil still for at least 350 ms at the end of a stroke reports `heldMs` ≥ 350, which triggers shape snapping.
+- [ ] Live shapes: draw a rough circle and hold the Pencil still (within 2.5 mm) for 400 ms: the circle snaps under the
+  Pencil with a haptic tick (Pencil Pro), before lifting. Dragging resizes it; lifting places it; one undo restores the
+  hand-drawn stroke. Moving on before the snap keeps drawing; a stroke that is no shape never snaps.
 
 **Functions**
 - [ ] `renderPdfPage` returns a PNG that is exactly `widthPx` wide, for portrait, landscape and rotated pages. A second call hits the cache.

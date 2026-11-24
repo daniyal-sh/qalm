@@ -1,4 +1,4 @@
-import { boxSelect, inkOnPaper, textHeight, hitTestErase, hitTestPoint, isIdentity, lassoSelect, Page, snapShape, type Item, type PageInfo, type TextItem } from '@qalm/core';
+import { boxSelect, inkOnPaper, textHeight, hitTestErase, hitTestPoint, isIdentity, lassoSelect, Page, type Item, type PageInfo, type TextItem } from '@qalm/core';
 import { InkOverlay, PageCanvas, QalmInk, type InkOverlayProps } from 'qalm-ink';
 import * as React from 'react';
 import { PixelRatio, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -10,7 +10,7 @@ import { useSession, useVersion } from '../state/session';
 import { smoothingLevel } from '../theme/ThemeProvider';
 import { font } from '../theme/tokens';
 import { useEditor } from './context';
-import { DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, dropEmptyText, TEXT_LINE_HEIGHT, hitText, typeText, makeStroke, pointsBBox, transformPatch } from './items';
+import { adjustLiveShape, commitSnapped, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, dropEmptyText, TEXT_LINE_HEIGHT, hitText, typeText, liveShape, makeStroke, pointsBBox, transformPatch } from './items';
 import { isAdditive } from './modifiers';
 import { PAPER_ACCENT, SelectionFrame, type LiveEdit } from './SelectionFrame';
 import { pageDocQueue, pdfQueue } from './renderQueue';
@@ -359,12 +359,14 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
         penStyle={t.penStyle}
         smoothing={smoothingLevel(ed.input.smoothing)}
         input={ed.input}
+        // Live shapes: hold the pen still and the stroke snaps under it; drag to adjust, lift to place.
+        recognizeShape={t.snapShapes && t.tool === 'pen' ? liveShape : undefined}
+        adjustShape={adjustLiveShape}
         onStrokeEnd={({ nativeEvent: e }) => {
           ed.touchPage(info.id);
-          const shape = t.snapShapes && e.tool === 'pen' ? snapShape(e.points, e.heldMs) : null;
-          // A snapped shape takes the stroke's id, so the overlay hands it off without flicker.
-          if (shape) page.addItem({ ...shape, id: e.id, color: e.color, width: e.width });
-          else page.addItem(makeStroke(e));
+          const stroke = makeStroke(e);
+          if (e.shape && t.snapShapes && e.tool === 'pen') commitSnapped(page, stroke, e.shape);
+          else page.addItem(stroke);
         }}
         onErase={({ nativeEvent: e }) => {
           const ids = hitTestErase(page.items(), e.path, t.eraserRadius);

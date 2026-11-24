@@ -77,9 +77,9 @@ describe('stroke geometry', () => {
 describe('snapShape', () => {
   const kind = (p: InkPoint[], held = 600) => snapShape(p, held)?.kind ?? null;
 
-  it('needs a 350 ms hold', () => {
-    expect(snapShape(pts([0, 0], [100, 0]), 349)).toBeNull();
-    expect(kind(pts([0, 0], [100, 0]), 350)).toBe('line');
+  it('needs a 400 ms hold', () => {
+    expect(snapShape(pts([0, 0], [100, 0]), 399)).toBeNull();
+    expect(kind(pts([0, 0], [100, 0]), 400)).toBe('line');
   });
 
   it('recognises each shape', () => {

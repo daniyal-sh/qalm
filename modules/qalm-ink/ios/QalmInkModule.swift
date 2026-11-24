@@ -19,7 +19,7 @@ public class QalmInkModule: Module {
     }
 
     View(QalmInkView.self) {
-      Events("onStrokeEnd", "onErase", "onLasso", "onPenButton", "onRejectedTouch")
+      Events("onStrokeEnd", "onErase", "onLasso", "onPenButton", "onRejectedTouch", "onShapeHold")
 
       Prop("pageSize") { (view: QalmInkView, size: [String: Any]) in
         let w = InkNum.double(size["w"]) ?? 0
@@ -62,6 +62,21 @@ public class QalmInkModule: Module {
       Prop("committedIds") { (view: QalmInkView, ids: [String]) in
         view.setCommittedIds(ids)
       }
+
+      // Live shapes on (the app passed `recognizeShape`): the view reports holds with onShapeHold.
+      Prop("shapeSnap") { (view: QalmInkView, on: Bool?) in
+        view.setShapeSnap(on ?? false)
+      }
+
+      // The answer to onShapeHold: { kind, pts: [[x, y], …] } or null (not a shape).
+      AsyncFunction("setShapePreview") { (view: QalmInkView, requestId: Int, shape: [String: Any]?) in
+        let kind = shape?["kind"] as? String
+        let pts: [SIMD2<Double>] = (shape?["pts"] as? [Any] ?? []).compactMap { p in
+          guard let xy = p as? [Any], xy.count >= 2, let x = InkNum.double(xy[0]), let y = InkNum.double(xy[1]) else { return nil }
+          return SIMD2(x, y)
+        }
+        view.shapePreview(requestId: requestId, kind: pts.isEmpty ? nil : kind, pts: pts)
+      }.runOnQueue(.main)
     }
   }
 }
