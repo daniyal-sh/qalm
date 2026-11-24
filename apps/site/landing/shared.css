@@ -1,0 +1,98 @@
+/* Shared by every page on qalm.apollolearn.app: tokens, base, buttons, header and footer. */
+/* ---------- Apollo Study Space tokens (docs/brand.md) ---------- */
+:root{
+  --bg:#f6f6f8; --canvas:#f3f3f5; --surface:#fff; --surface-2:#f6f6f8; --soft:#e9e9ed;
+  --ink:#27272a; --ink-2:#3f3f46; --muted:#5c5c65; --faint:#8b8b95;
+  --line:#d3d3d9; --line-2:#e4e4e8;
+  --accent:#4338ca; --accent-hover:#3730a3; --accent-ink:#3730a3; --accent-soft:#eeedfa; --accent-line:#c7c3ee; --on-accent:#fff;
+  --assistant:#1d4ed8; --assistant-soft:#ebf0fc; --assistant-line:#bfcdf4;
+  --context:#0f766e; --context-soft:#e4f1ef; --good:#047857; --good-soft:#e6f2ee; --warn:#9a4a08; --warn-soft:#f5ede6;
+  --bad:#b91c1c; --bad-soft:#f8e9e9;
+  --shadow-1:0 1px 2px rgba(0,0,0,.04);
+  --shadow-2:0 18px 40px -16px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.04);
+  --paper-shadow:0 1px 2px rgba(0,0,0,.05),0 24px 48px -28px rgba(24,24,40,.28);
+  --r8:8px; --r12:12px;
+  --sans:"Figtree",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  --gutter:clamp(16px,4vw,40px);
+  --max:1200px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#151517; --canvas:#151517; --surface:#1c1c1f; --surface-2:#212125; --soft:#2a2a2f;
+    --ink:#f4f4f5; --ink-2:#d4d4d8; --muted:#a1a1aa; --faint:#8b8b95;
+    --line:#303035; --line-2:#28282d;
+    --accent:#5b50f0; --accent-hover:#6d63f4; --accent-ink:#a9a3ff; --accent-soft:#26244a; --accent-line:#403b86; --on-accent:#fff;
+    --assistant:#60a5fa; --assistant-soft:#1d2a3d; --assistant-line:#2f4b72;
+    --context:#5eccc4; --context-soft:#17302e; --good:#34d399; --good-soft:#1a2e27; --warn:#fbbf24; --warn-soft:#332a17;
+    --bad:#f87171; --bad-soft:#351f20;
+    --shadow-1:0 1px 2px rgba(0,0,0,.3);
+    --shadow-2:0 18px 40px -16px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.04);
+    --paper-shadow:0 1px 2px rgba(0,0,0,.4),0 28px 56px -30px rgba(0,0,0,.8);
+    color-scheme:dark;
+  }
+}
+
+/* ---------- base ---------- */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 17px/1.6 var(--sans);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;overflow-x:hidden}
+img,svg{display:block;max-width:100%}
+a{color:inherit}
+h1,h2,h3,p{margin:0}
+:focus-visible{outline:2px solid var(--accent-line);outline-offset:2px;box-shadow:0 0 0 1px var(--accent)}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.skip{position:absolute;left:12px;top:-60px;z-index:10;background:var(--surface);border:1px solid var(--line);border-radius:var(--r8);padding:10px 14px;text-decoration:none;font-weight:600}
+.skip:focus{top:12px}
+.wrap{max-width:calc(var(--max) + var(--gutter)*2);margin:0 auto;padding:0 var(--gutter)}
+.mono{font-family:var(--mono);font-size:12px;letter-spacing:0}
+.muted{color:var(--muted)}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;height:48px;padding:0 20px;border-radius:var(--r8);border:1px solid var(--line);background:var(--surface);color:var(--ink);font:600 15px/1 var(--sans);text-decoration:none;white-space:nowrap;transition:background-color .15s,border-color .15s,color .15s}
+.btn:hover{border-color:var(--ink-2)}
+.btn svg{width:18px;height:18px;flex:none}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn-sm{height:40px;padding:0 14px;font-size:14px}
+.btn .arrow{transition:transform .15s}
+.btn:hover .arrow{transform:translateX(2px)}
+
+/* ---------- header ---------- */
+.site-head{padding:20px 0}
+.site-head .wrap{display:flex;align-items:center;gap:24px}
+.lockup{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}
+.lockup svg{width:42px;height:35px}
+.lockup .name{display:flex;flex-direction:column;line-height:1}
+.lockup b{font-size:22px;font-weight:600;letter-spacing:-.02em}
+.lockup small{font-size:12.8px;font-weight:500;color:var(--muted);margin-top:3px}
+.mark .nib{stroke:var(--ink)} .mark .nibfill{fill:var(--ink)} .mark .orbit{stroke:var(--accent)} .mark .planet{fill:var(--assistant)}
+.site-nav{display:flex;gap:4px;margin-left:auto}
+.site-nav a{padding:10px 12px;border-radius:var(--r8);text-decoration:none;color:var(--muted);font-size:15px;font-weight:500}
+.site-nav a:hover{color:var(--ink);background:var(--soft)}
+@media (max-width:860px){.site-nav{display:none}.site-head .btn{margin-left:auto}}
+
+/* ---------- hand-drawn underline ---------- */
+.underline{display:inline-block;position:relative;white-space:nowrap}
+.underline svg{position:absolute;left:-2%;bottom:-.1em;width:104%;height:.24em;overflow:visible}
+.underline path{fill:var(--accent)}
+
+/* ---------- footer ---------- */
+.site-foot{border-top:1px solid var(--line-2);padding:32px 0 40px}
+.site-foot .wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.site-foot .lockup svg{width:32px;height:27px}
+.site-foot .lockup b{font-size:17px}
+.site-foot .lockup small{font-size:11px}
+.site-foot nav{display:flex;gap:4px;margin-left:auto}
+.site-foot nav a{font-size:14px;color:var(--muted);text-decoration:none;padding:10px 10px;border-radius:var(--r8)}
+.site-foot nav a:hover{color:var(--ink);background:var(--soft)}
+.site-foot .copy{font-size:13px;color:var(--muted);width:100%}
+
+.site-foot nav{flex-wrap:wrap}
+@media (max-width:640px){
+  .site-foot nav{margin-left:-10px;width:calc(100% + 10px)}
+}
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}

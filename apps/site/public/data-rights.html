@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Rights · qalm</title>
+<meta name="description" content="How to access, correct, export or delete your qalm account data.">
+<link rel="canonical" href="https://qalm.apollolearn.app/data-rights">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f6f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#151517" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="qalm by Apollo">
+<meta property="og:title" content="Data Rights · qalm">
+<meta property="og:description" content="How to access, correct, export or delete your qalm account data.">
+<meta property="og:url" content="https://qalm.apollolearn.app/data-rights">
+<meta property="og:image" content="https://qalm.apollolearn.app/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="qalm: a handwriting app that doesn't suck. A notebook page of handwritten notes.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Data Rights · qalm">
+<meta name="twitter:description" content="How to access, correct, export or delete your qalm account data.">
+<meta name="twitter:image" content="https://qalm.apollolearn.app/og.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Shared by every page on qalm.apollolearn.app: tokens, base, buttons, header and footer. */
+/* ---------- Apollo Study Space tokens (docs/brand.md) ---------- */
+:root{
+  --bg:#f6f6f8; --canvas:#f3f3f5; --surface:#fff; --surface-2:#f6f6f8; --soft:#e9e9ed;
+  --ink:#27272a; --ink-2:#3f3f46; --muted:#5c5c65; --faint:#8b8b95;
+  --line:#d3d3d9; --line-2:#e4e4e8;
+  --accent:#4338ca; --accent-hover:#3730a3; --accent-ink:#3730a3; --accent-soft:#eeedfa; --accent-line:#c7c3ee; --on-accent:#fff;
+  --assistant:#1d4ed8; --assistant-soft:#ebf0fc; --assistant-line:#bfcdf4;
+  --context:#0f766e; --context-soft:#e4f1ef; --good:#047857; --good-soft:#e6f2ee; --warn:#9a4a08; --warn-soft:#f5ede6;
+  --bad:#b91c1c; --bad-soft:#f8e9e9;
+  --shadow-1:0 1px 2px rgba(0,0,0,.04);
+  --shadow-2:0 18px 40px -16px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.04);
+  --paper-shadow:0 1px 2px rgba(0,0,0,.05),0 24px 48px -28px rgba(24,24,40,.28);
+  --r8:8px; --r12:12px;
+  --sans:"Figtree",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  --gutter:clamp(16px,4vw,40px);
+  --max:1200px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#151517; --canvas:#151517; --surface:#1c1c1f; --surface-2:#212125; --soft:#2a2a2f;
+    --ink:#f4f4f5; --ink-2:#d4d4d8; --muted:#a1a1aa; --faint:#8b8b95;
+    --line:#303035; --line-2:#28282d;
+    --accent:#5b50f0; --accent-hover:#6d63f4; --accent-ink:#a9a3ff; --accent-soft:#26244a; --accent-line:#403b86; --on-accent:#fff;
+    --assistant:#60a5fa; --assistant-soft:#1d2a3d; --assistant-line:#2f4b72;
+    --context:#5eccc4; --context-soft:#17302e; --good:#34d399; --good-soft:#1a2e27; --warn:#fbbf24; --warn-soft:#332a17;
+    --bad:#f87171; --bad-soft:#351f20;
+    --shadow-1:0 1px 2px rgba(0,0,0,.3);
+    --shadow-2:0 18px 40px -16px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.04);
+    --paper-shadow:0 1px 2px rgba(0,0,0,.4),0 28px 56px -30px rgba(0,0,0,.8);
+    color-scheme:dark;
+  }
+}
+
+/* ---------- base ---------- */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 17px/1.6 var(--sans);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;overflow-x:hidden}
+img,svg{display:block;max-width:100%}
+a{color:inherit}
+h1,h2,h3,p{margin:0}
+:focus-visible{outline:2px solid var(--accent-line);outline-offset:2px;box-shadow:0 0 0 1px var(--accent)}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.skip{position:absolute;left:12px;top:-60px;z-index:10;background:var(--surface);border:1px solid var(--line);border-radius:var(--r8);padding:10px 14px;text-decoration:none;font-weight:600}
+.skip:focus{top:12px}
+.wrap{max-width:calc(var(--max) + var(--gutter)*2);margin:0 auto;padding:0 var(--gutter)}
+.mono{font-family:var(--mono);font-size:12px;letter-spacing:0}
+.muted{color:var(--muted)}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;height:48px;padding:0 20px;border-radius:var(--r8);border:1px solid var(--line);background:var(--surface);color:var(--ink);font:600 15px/1 var(--sans);text-decoration:none;white-space:nowrap;transition:background-color .15s,border-color .15s,color .15s}
+.btn:hover{border-color:var(--ink-2)}
+.btn svg{width:18px;height:18px;flex:none}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn-sm{height:40px;padding:0 14px;font-size:14px}
+.btn .arrow{transition:transform .15s}
+.btn:hover .arrow{transform:translateX(2px)}
+
+/* ---------- header ---------- */
+.site-head{padding:20px 0}
+.site-head .wrap{display:flex;align-items:center;gap:24px}
+.lockup{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}
+.lockup svg{width:42px;height:35px}
+.lockup .name{display:flex;flex-direction:column;line-height:1}
+.lockup b{font-size:22px;font-weight:600;letter-spacing:-.02em}
+.lockup small{font-size:12.8px;font-weight:500;color:var(--muted);margin-top:3px}
+.mark .nib{stroke:var(--ink)} .mark .nibfill{fill:var(--ink)} .mark .orbit{stroke:var(--accent)} .mark .planet{fill:var(--assistant)}
+.site-nav{display:flex;gap:4px;margin-left:auto}
+.site-nav a{padding:10px 12px;border-radius:var(--r8);text-decoration:none;color:var(--muted);font-size:15px;font-weight:500}
+.site-nav a:hover{color:var(--ink);background:var(--soft)}
+@media (max-width:860px){.site-nav{display:none}.site-head .btn{margin-left:auto}}
+
+/* ---------- hand-drawn underline ---------- */
+.underline{display:inline-block;position:relative;white-space:nowrap}
+.underline svg{position:absolute;left:-2%;bottom:-.1em;width:104%;height:.24em;overflow:visible}
+.underline path{fill:var(--accent)}
+
+/* ---------- footer ---------- */
+.site-foot{border-top:1px solid var(--line-2);padding:32px 0 40px}
+.site-foot .wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.site-foot .lockup svg{width:32px;height:27px}
+.site-foot .lockup b{font-size:17px}
+.site-foot .lockup small{font-size:11px}
+.site-foot nav{display:flex;gap:4px;margin-left:auto}
+.site-foot nav a{font-size:14px;color:var(--muted);text-decoration:none;padding:10px 10px;border-radius:var(--r8)}
+.site-foot nav a:hover{color:var(--ink);background:var(--soft)}
+.site-foot .copy{font-size:13px;color:var(--muted);width:100%}
+
+.site-foot nav{flex-wrap:wrap}
+@media (max-width:640px){
+  .site-foot nav{margin-left:-10px;width:calc(100% + 10px)}
+}
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+/* ---------- pages ---------- */
+.kicker{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:500;color:var(--muted)}
+.doc-hero{border-bottom:1px solid var(--line-2);padding:clamp(28px,5vw,72px) 0 clamp(36px,5vw,64px)}
+.doc-hero h1{font-size:clamp(40px,6vw,72px);line-height:1;letter-spacing:-.04em;font-weight:600;margin:16px 0 0;max-width:14em;text-wrap:balance}
+.doc-hero .lead{font-size:clamp(17px,1.5vw,19px);color:var(--muted);line-height:1.6;margin-top:20px;max-width:38em}
+.updated{display:inline-block;margin-top:26px;padding-bottom:4px;border-bottom:2px solid var(--accent);font-size:14px;font-weight:600}
+.doc{display:grid;grid-template-columns:15rem minmax(0,1fr);gap:clamp(32px,6vw,72px);padding:clamp(36px,5vw,64px) 0 clamp(56px,7vw,96px)}
+.toc{position:sticky;top:24px;align-self:start;border-top:1px solid var(--line)}
+.toc a{display:flex;align-items:center;gap:12px;min-height:44px;padding:6px 0;border-bottom:1px solid var(--line-2);font-size:14px;color:var(--muted);text-decoration:none;line-height:1.35}
+.toc a:hover{color:var(--accent-ink)}
+.num{font-family:var(--mono);font-size:12px;color:var(--accent-ink);font-variant-numeric:tabular-nums;flex:none}
+.sections{max-width:46rem;border-top:1px solid var(--line)}
+.sec{display:grid;grid-template-columns:3rem minmax(0,1fr);gap:12px;padding:clamp(28px,3.5vw,40px) 0;border-bottom:1px solid var(--line-2);scroll-margin-top:24px}
+.sec:first-child{padding-top:24px}
+.sec .num{padding-top:9px}
+.sec h2{font-size:clamp(22px,2.4vw,28px);line-height:1.2;letter-spacing:-.02em;font-weight:600}
+.sec p{margin-top:14px;font-size:16.5px;line-height:1.75;color:var(--muted)}
+.sec ul{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:12px}
+.sec li{display:flex;gap:12px;font-size:16.5px;line-height:1.75;color:var(--muted)}
+.sec li::before{content:"";width:6px;height:6px;margin-top:.8em;background:var(--accent);flex:none}
+.prose a,.contact-band a{color:var(--accent-ink);font-weight:500;text-decoration:underline;text-underline-offset:3px}
+.contact-band{border-top:1px solid var(--line-2);background:var(--surface);padding:clamp(36px,5vw,64px) 0}
+.contact-band h2{font-size:clamp(24px,2.6vw,30px);letter-spacing:-.02em;font-weight:600}
+.contact-band p{margin-top:12px;font-size:16px;line-height:1.7;color:var(--muted);max-width:46em}
+@media (max-width:900px){
+  .doc{grid-template-columns:1fr}
+  .toc{position:static}
+}
+@media (max-width:640px){
+  .sec{grid-template-columns:1fr;gap:4px}
+  .sec .num{padding-top:0}
+}
+
+/* contact */
+.ways{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;padding:clamp(36px,5vw,64px) 0}
+.way{padding:clamp(22px,3vw,32px);display:flex;flex-direction:column;gap:10px}
+.way .ic{width:44px;height:44px;border-radius:var(--r12);display:grid;place-items:center;background:var(--accent-soft);color:var(--accent-ink);margin-bottom:6px}
+.way .ic svg{width:22px;height:22px}
+.way h2{font-size:22px;letter-spacing:-.02em;font-weight:600}
+.way p{font-size:16px;color:var(--muted);line-height:1.6}
+.way .btn{align-self:flex-start;margin-top:8px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r12);box-shadow:var(--shadow-1)}
+.small-print{padding:0 0 clamp(56px,7vw,96px);font-size:15px;color:var(--muted);line-height:1.7;max-width:46em}
+@media (max-width:760px){.ways{grid-template-columns:1fr}}
+
+/* 404 and "not available yet" */
+.note-page{padding:clamp(28px,6vw,88px) 0 clamp(64px,9vw,120px);display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:clamp(32px,6vw,80px);align-items:center}
+.note-page h1{font-size:clamp(38px,5vw,64px);line-height:1.02;letter-spacing:-.04em;font-weight:600;text-wrap:balance}
+.note-page p{margin-top:18px;font-size:clamp(17px,1.5vw,19px);color:var(--muted);line-height:1.6;max-width:30em}
+.note-page .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px}
+.scrap{background:#fff;border-radius:6px;box-shadow:var(--shadow-2);transform:rotate(-1.5deg);max-width:440px;width:100%;justify-self:center}
+.scrap svg{width:100%;height:auto;display:block}
+.scrap .pen-ink{fill:#27272a}
+@media (max-width:820px){.note-page{grid-template-columns:1fr}.scrap{order:-1;max-width:320px}}
+@media (max-width:640px){.note-page .actions .btn{flex:1 1 100%}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="lockup" href="/" aria-label="qalm by Apollo, home"><svg class="mark" aria-hidden="true" focusable="false" viewBox="0 0 120 100" fill="none" stroke-linecap="round" stroke-linejoin="round"><defs><mask id="qalm-ring-head"><rect width="120" height="100" fill="#fff"/><path d="M60 94 C52 78 38 64 37 48 C36 34 46 22 60 11 C74 22 84 34 83 48 C82 64 68 78 60 94Z" fill="#000"/></mask></defs><path d="M7.5 57.3L8.0 55.7L8.8 53.9L9.8 52.2L11.2 50.4L12.9 48.5L14.8 46.6L17.0 44.7L19.4 42.8L22.1 40.9L25.1 39.0L28.2 37.2L31.5 35.4L35.0 33.6L38.6 31.9L42.3 30.3L46.2 28.7L50.1 27.3L54.1 25.9L58.2 24.7L62.2 23.5L66.2 22.5L70.2 21.6L74.2 20.9L78.0 20.3L81.7 19.8L85.4 19.4L88.8 19.2L92.1 19.2L95.2 19.3L98.1 19.5L100.8 19.9L103.2 20.5L105.4 21.1L107.3 21.9L108.9 22.9L110.3 23.9" class="orbit" stroke-width="6" mask="url(#qalm-ring-head)"/><path d="M60 86 C54 73 45 61 44 48 C43 37 50 28 60 19 C70 28 77 37 76 48 C75 61 66 73 60 86Z" class="nib" stroke-width="7"/><path d="M60 80 L60 57" class="nib" stroke-width="5"/><circle cx="60" cy="50" r="4.5" class="nibfill"/><path d="M111.2 24.9L112.0 26.3L112.5 27.9L112.6 29.6L112.3 31.4L111.6 33.3L110.5 35.3L109.0 37.4L107.1 39.5L104.9 41.6L102.4 43.8L99.5 46.0L96.3 48.1L92.8 50.2L89.1 52.3L85.2 54.3L81.1 56.2L76.8 58.1L72.4 59.8L67.9 61.4L63.3 62.9L58.7 64.2L54.1 65.4L49.6 66.4L45.1 67.2L40.8 67.9L36.6 68.4L32.6 68.7L28.8 68.8L25.2 68.7L21.9 68.5L18.9 68.0L16.2 67.4L13.8 66.6L11.8 65.6L10.1 64.4L8.8 63.1" class="orbit" stroke-width="6"/><circle cx="107.3" cy="39.3" r="7.5" class="planet"/></svg><span class="name"><b>qalm</b><small>by Apollo</small></span></a>
+    <nav class="site-nav" aria-label="Site"><a href="/">Home</a><a href="/#pen">Features</a></nav>
+    <a class="btn btn-sm" href="/app/">Open qalm</a>
+  </div>
+</header>
+<main id="main">
+  <article>
+    <section class="doc-hero">
+      <div class="wrap">
+        <p class="kicker">Data rights</p>
+        <h1>Data Rights</h1>
+        <p class="lead">How to ask for a copy of your qalm data, correct it, export it, or delete your account.</p>
+        <p class="updated">Last updated: November 24, 2026</p>
+      </div>
+    </section>
+    <div class="wrap doc">
+      <nav class="toc" aria-label="Data Rights sections"><a href="#section-1"><span class="num">01</span>Requests you can make</a><a href="#section-2"><span class="num">02</span>How to make a request</a><a href="#section-3"><span class="num">03</span>Parents, guardians, and schools</a><a href="#section-4"><span class="num">04</span>What deletion covers</a><a href="#section-5"><span class="num">05</span>Response timing</a><a href="#section-6"><span class="num">06</span>If you are not satisfied</a></nav>
+      <div class="sections">
+      <section class="sec prose" id="section-1" aria-labelledby="h-1"><span class="num" aria-hidden="true">01</span><div><h2 id="h-1">Requests you can make</h2><ul><li><span>Access: get a copy of the personal information qalm holds about you.</span></li><li><span>Correction: fix inaccurate account information.</span></li><li><span>Export: receive your account records and notebooks in a structured, machine-readable format. You can also export any notebook yourself, at any time, as a PDF or a full .qalm backup.</span></li><li><span>Deletion: delete your account and everything in it.</span></li><li><span>Objection and restriction: object to processing based on our legitimate interests, or ask us to pause processing while a concern is resolved.</span></li><li><span>Withdraw permission: turn AI access off for a notebook, or disconnect an agent in Settings, at any time.</span></li></ul></div></section>
+      <section class="sec prose" id="section-2" aria-labelledby="h-2"><span class="num" aria-hidden="true">02</span><div><h2 id="h-2">How to make a request</h2><p>Email <a href="mailto:privacy@apollolearn.app">privacy@apollolearn.app</a> from the email address you sign in to qalm with, and say which request you are making. To protect your account, we act only on requests we can verify came from the account owner or someone authorised to act for them, and we may ask for more information to confirm this. Making a request is free.</p></div></section>
+      <section class="sec prose" id="section-3" aria-labelledby="h-3"><span class="num" aria-hidden="true">03</span><div><h2 id="h-3">Parents, guardians, and schools</h2><p>A parent, guardian, or school can make a request about a young person’s account. We will ask for reasonable proof of authority before releasing, changing, or deleting their data, and may involve them where that is appropriate for their age.</p></div></section>
+      <section class="sec prose" id="section-4" aria-labelledby="h-4"><span class="num" aria-hidden="true">04</span><div><h2 id="h-4">What deletion covers</h2><p>qalm does not have a delete-account button yet. To delete your account, email <a href="mailto:privacy@apollolearn.app">privacy@apollolearn.app</a> as described above. We then delete your account and sign-in sessions, your notebooks with their pages, ink, text, comments and readings, the files you imported, and your AI access settings, agent approvals and activity log, and we disconnect any agents. We keep only a non-identifying record that a deletion was completed. Deleted data leaves our backups as they roll over.</p><ul><li><span>Copies on your devices stay until you sign out, clear the site’s data, or uninstall the app, because we cannot reach your devices to erase them.</span></li><li><span>Deleting a notebook forever in the app removes its pages and ink from our servers straight away; see the Privacy Notice for the small record we keep.</span></li><li><span>Anything an AI agent already received is held by your AI provider. Ask them to delete it under their own terms.</span></li></ul></div></section>
+      <section class="sec prose" id="section-5" aria-labelledby="h-5"><span class="num" aria-hidden="true">05</span><div><h2 id="h-5">Response timing</h2><p>We aim to respond within one month of receiving a verified request. If a request is complex or we receive many requests, we may take up to two further months and will tell you why. If we cannot fulfil a request, we will explain the reason.</p></div></section>
+      <section class="sec prose" id="section-6" aria-labelledby="h-6"><span class="num" aria-hidden="true">06</span><div><h2 id="h-6">If you are not satisfied</h2><p>Reply to our response and we will review it again. If you live in the UK you can also complain to the Information Commissioner’s Office (<a href="https://ico.org.uk">ico.org.uk</a>), and in the EU or EEA to your local data protection authority.</p></div></section>
+      </div>
+    </div>
+    <section class="contact-band" aria-labelledby="contact-h">
+      <div class="wrap">
+        <h2 id="contact-h">Contact</h2>
+        <p>Privacy questions and data requests: <a href="mailto:privacy@apollolearn.app">privacy@apollolearn.app</a>. Account help and anything else: <a href="mailto:support@apollolearn.app">support@apollolearn.app</a>.</p>
+        <p>qalm is operated by Ali Hamdaan, an individual based in Pakistan.</p>
+        <p>See also the <a href="/terms">Terms of Service</a>, <a href="/privacy">Privacy Notice</a>, and <a href="/data-rights">Data Rights</a>.</p>
+      </div>
+    </section>
+  </article>
+</main>
+<footer class="site-foot">
+  <div class="wrap">
+    <a class="lockup" href="/" aria-label="qalm by Apollo, home"><svg class="mark" aria-hidden="true" focusable="false" viewBox="0 0 120 100" fill="none" stroke-linecap="round" stroke-linejoin="round"><defs><mask id="qalm-ring-foot"><rect width="120" height="100" fill="#fff"/><path d="M60 94 C52 78 38 64 37 48 C36 34 46 22 60 11 C74 22 84 34 83 48 C82 64 68 78 60 94Z" fill="#000"/></mask></defs><path d="M7.5 57.3L8.0 55.7L8.8 53.9L9.8 52.2L11.2 50.4L12.9 48.5L14.8 46.6L17.0 44.7L19.4 42.8L22.1 40.9L25.1 39.0L28.2 37.2L31.5 35.4L35.0 33.6L38.6 31.9L42.3 30.3L46.2 28.7L50.1 27.3L54.1 25.9L58.2 24.7L62.2 23.5L66.2 22.5L70.2 21.6L74.2 20.9L78.0 20.3L81.7 19.8L85.4 19.4L88.8 19.2L92.1 19.2L95.2 19.3L98.1 19.5L100.8 19.9L103.2 20.5L105.4 21.1L107.3 21.9L108.9 22.9L110.3 23.9" class="orbit" stroke-width="6" mask="url(#qalm-ring-foot)"/><path d="M60 86 C54 73 45 61 44 48 C43 37 50 28 60 19 C70 28 77 37 76 48 C75 61 66 73 60 86Z" class="nib" stroke-width="7"/><path d="M60 80 L60 57" class="nib" stroke-width="5"/><circle cx="60" cy="50" r="4.5" class="nibfill"/><path d="M111.2 24.9L112.0 26.3L112.5 27.9L112.6 29.6L112.3 31.4L111.6 33.3L110.5 35.3L109.0 37.4L107.1 39.5L104.9 41.6L102.4 43.8L99.5 46.0L96.3 48.1L92.8 50.2L89.1 52.3L85.2 54.3L81.1 56.2L76.8 58.1L72.4 59.8L67.9 61.4L63.3 62.9L58.7 64.2L54.1 65.4L49.6 66.4L45.1 67.2L40.8 67.9L36.6 68.4L32.6 68.7L28.8 68.8L25.2 68.7L21.9 68.5L18.9 68.0L16.2 67.4L13.8 66.6L11.8 65.6L10.1 64.4L8.8 63.1" class="orbit" stroke-width="6"/><circle cx="107.3" cy="39.3" r="7.5" class="planet"/></svg><span class="name"><b>qalm</b><small>by Apollo</small></span></a>
+    <nav aria-label="Legal and contact"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/data-rights">Data rights</a><a href="/contact">Contact</a></nav>
+    <p class="copy">© 2026 Apollo. Made for people who think with a pen.</p>
+  </div>
+</footer>
+</body>
+</html>

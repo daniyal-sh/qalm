@@ -1,0 +1,7 @@
+# qalm.apollolearn.app
+User-agent: *
+Allow: /
+Disallow: /app/
+Disallow: /download/
+
+Sitemap: https://qalm.apollolearn.app/sitemap.xml

@@ -3,19 +3,215 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Not found · qalm</title>
+<title>Page not found · qalm</title>
+<meta name="description" content="This page isn't here.">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f6f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#151517" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="qalm by Apollo">
+<meta property="og:title" content="Page not found · qalm">
+<meta property="og:description" content="This page isn't here.">
+<meta property="og:url" content="https://qalm.apollolearn.app/404">
+<meta property="og:image" content="https://qalm.apollolearn.app/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="qalm: a handwriting app that doesn't suck. A notebook page of handwritten notes.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Page not found · qalm">
+<meta name="twitter:description" content="This page isn't here.">
+<meta name="twitter:image" content="https://qalm.apollolearn.app/og.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
 <style>
-  :root { color-scheme: light dark; --bg: #f3f3f5; --fg: #1c1c22; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #16161b; --fg: #ececf1; } }
-  body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 17px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
-  main { padding: 24px 16px; text-align: center; }
+/* Shared by every page on qalm.apollolearn.app: tokens, base, buttons, header and footer. */
+/* ---------- Apollo Study Space tokens (docs/brand.md) ---------- */
+:root{
+  --bg:#f6f6f8; --canvas:#f3f3f5; --surface:#fff; --surface-2:#f6f6f8; --soft:#e9e9ed;
+  --ink:#27272a; --ink-2:#3f3f46; --muted:#5c5c65; --faint:#8b8b95;
+  --line:#d3d3d9; --line-2:#e4e4e8;
+  --accent:#4338ca; --accent-hover:#3730a3; --accent-ink:#3730a3; --accent-soft:#eeedfa; --accent-line:#c7c3ee; --on-accent:#fff;
+  --assistant:#1d4ed8; --assistant-soft:#ebf0fc; --assistant-line:#bfcdf4;
+  --context:#0f766e; --context-soft:#e4f1ef; --good:#047857; --good-soft:#e6f2ee; --warn:#9a4a08; --warn-soft:#f5ede6;
+  --bad:#b91c1c; --bad-soft:#f8e9e9;
+  --shadow-1:0 1px 2px rgba(0,0,0,.04);
+  --shadow-2:0 18px 40px -16px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.04);
+  --paper-shadow:0 1px 2px rgba(0,0,0,.05),0 24px 48px -28px rgba(24,24,40,.28);
+  --r8:8px; --r12:12px;
+  --sans:"Figtree",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  --gutter:clamp(16px,4vw,40px);
+  --max:1200px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#151517; --canvas:#151517; --surface:#1c1c1f; --surface-2:#212125; --soft:#2a2a2f;
+    --ink:#f4f4f5; --ink-2:#d4d4d8; --muted:#a1a1aa; --faint:#8b8b95;
+    --line:#303035; --line-2:#28282d;
+    --accent:#5b50f0; --accent-hover:#6d63f4; --accent-ink:#a9a3ff; --accent-soft:#26244a; --accent-line:#403b86; --on-accent:#fff;
+    --assistant:#60a5fa; --assistant-soft:#1d2a3d; --assistant-line:#2f4b72;
+    --context:#5eccc4; --context-soft:#17302e; --good:#34d399; --good-soft:#1a2e27; --warn:#fbbf24; --warn-soft:#332a17;
+    --bad:#f87171; --bad-soft:#351f20;
+    --shadow-1:0 1px 2px rgba(0,0,0,.3);
+    --shadow-2:0 18px 40px -16px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.04);
+    --paper-shadow:0 1px 2px rgba(0,0,0,.4),0 28px 56px -30px rgba(0,0,0,.8);
+    color-scheme:dark;
+  }
+}
+
+/* ---------- base ---------- */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 17px/1.6 var(--sans);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;overflow-x:hidden}
+img,svg{display:block;max-width:100%}
+a{color:inherit}
+h1,h2,h3,p{margin:0}
+:focus-visible{outline:2px solid var(--accent-line);outline-offset:2px;box-shadow:0 0 0 1px var(--accent)}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.skip{position:absolute;left:12px;top:-60px;z-index:10;background:var(--surface);border:1px solid var(--line);border-radius:var(--r8);padding:10px 14px;text-decoration:none;font-weight:600}
+.skip:focus{top:12px}
+.wrap{max-width:calc(var(--max) + var(--gutter)*2);margin:0 auto;padding:0 var(--gutter)}
+.mono{font-family:var(--mono);font-size:12px;letter-spacing:0}
+.muted{color:var(--muted)}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;height:48px;padding:0 20px;border-radius:var(--r8);border:1px solid var(--line);background:var(--surface);color:var(--ink);font:600 15px/1 var(--sans);text-decoration:none;white-space:nowrap;transition:background-color .15s,border-color .15s,color .15s}
+.btn:hover{border-color:var(--ink-2)}
+.btn svg{width:18px;height:18px;flex:none}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn-sm{height:40px;padding:0 14px;font-size:14px}
+.btn .arrow{transition:transform .15s}
+.btn:hover .arrow{transform:translateX(2px)}
+
+/* ---------- header ---------- */
+.site-head{padding:20px 0}
+.site-head .wrap{display:flex;align-items:center;gap:24px}
+.lockup{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}
+.lockup svg{width:42px;height:35px}
+.lockup .name{display:flex;flex-direction:column;line-height:1}
+.lockup b{font-size:22px;font-weight:600;letter-spacing:-.02em}
+.lockup small{font-size:12.8px;font-weight:500;color:var(--muted);margin-top:3px}
+.mark .nib{stroke:var(--ink)} .mark .nibfill{fill:var(--ink)} .mark .orbit{stroke:var(--accent)} .mark .planet{fill:var(--assistant)}
+.site-nav{display:flex;gap:4px;margin-left:auto}
+.site-nav a{padding:10px 12px;border-radius:var(--r8);text-decoration:none;color:var(--muted);font-size:15px;font-weight:500}
+.site-nav a:hover{color:var(--ink);background:var(--soft)}
+@media (max-width:860px){.site-nav{display:none}.site-head .btn{margin-left:auto}}
+
+/* ---------- hand-drawn underline ---------- */
+.underline{display:inline-block;position:relative;white-space:nowrap}
+.underline svg{position:absolute;left:-2%;bottom:-.1em;width:104%;height:.24em;overflow:visible}
+.underline path{fill:var(--accent)}
+
+/* ---------- footer ---------- */
+.site-foot{border-top:1px solid var(--line-2);padding:32px 0 40px}
+.site-foot .wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.site-foot .lockup svg{width:32px;height:27px}
+.site-foot .lockup b{font-size:17px}
+.site-foot .lockup small{font-size:11px}
+.site-foot nav{display:flex;gap:4px;margin-left:auto}
+.site-foot nav a{font-size:14px;color:var(--muted);text-decoration:none;padding:10px 10px;border-radius:var(--r8)}
+.site-foot nav a:hover{color:var(--ink);background:var(--soft)}
+.site-foot .copy{font-size:13px;color:var(--muted);width:100%}
+
+.site-foot nav{flex-wrap:wrap}
+@media (max-width:640px){
+  .site-foot nav{margin-left:-10px;width:calc(100% + 10px)}
+}
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+/* ---------- pages ---------- */
+.kicker{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:500;color:var(--muted)}
+.doc-hero{border-bottom:1px solid var(--line-2);padding:clamp(28px,5vw,72px) 0 clamp(36px,5vw,64px)}
+.doc-hero h1{font-size:clamp(40px,6vw,72px);line-height:1;letter-spacing:-.04em;font-weight:600;margin:16px 0 0;max-width:14em;text-wrap:balance}
+.doc-hero .lead{font-size:clamp(17px,1.5vw,19px);color:var(--muted);line-height:1.6;margin-top:20px;max-width:38em}
+.updated{display:inline-block;margin-top:26px;padding-bottom:4px;border-bottom:2px solid var(--accent);font-size:14px;font-weight:600}
+.doc{display:grid;grid-template-columns:15rem minmax(0,1fr);gap:clamp(32px,6vw,72px);padding:clamp(36px,5vw,64px) 0 clamp(56px,7vw,96px)}
+.toc{position:sticky;top:24px;align-self:start;border-top:1px solid var(--line)}
+.toc a{display:flex;align-items:center;gap:12px;min-height:44px;padding:6px 0;border-bottom:1px solid var(--line-2);font-size:14px;color:var(--muted);text-decoration:none;line-height:1.35}
+.toc a:hover{color:var(--accent-ink)}
+.num{font-family:var(--mono);font-size:12px;color:var(--accent-ink);font-variant-numeric:tabular-nums;flex:none}
+.sections{max-width:46rem;border-top:1px solid var(--line)}
+.sec{display:grid;grid-template-columns:3rem minmax(0,1fr);gap:12px;padding:clamp(28px,3.5vw,40px) 0;border-bottom:1px solid var(--line-2);scroll-margin-top:24px}
+.sec:first-child{padding-top:24px}
+.sec .num{padding-top:9px}
+.sec h2{font-size:clamp(22px,2.4vw,28px);line-height:1.2;letter-spacing:-.02em;font-weight:600}
+.sec p{margin-top:14px;font-size:16.5px;line-height:1.75;color:var(--muted)}
+.sec ul{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:12px}
+.sec li{display:flex;gap:12px;font-size:16.5px;line-height:1.75;color:var(--muted)}
+.sec li::before{content:"";width:6px;height:6px;margin-top:.8em;background:var(--accent);flex:none}
+.prose a,.contact-band a{color:var(--accent-ink);font-weight:500;text-decoration:underline;text-underline-offset:3px}
+.contact-band{border-top:1px solid var(--line-2);background:var(--surface);padding:clamp(36px,5vw,64px) 0}
+.contact-band h2{font-size:clamp(24px,2.6vw,30px);letter-spacing:-.02em;font-weight:600}
+.contact-band p{margin-top:12px;font-size:16px;line-height:1.7;color:var(--muted);max-width:46em}
+@media (max-width:900px){
+  .doc{grid-template-columns:1fr}
+  .toc{position:static}
+}
+@media (max-width:640px){
+  .sec{grid-template-columns:1fr;gap:4px}
+  .sec .num{padding-top:0}
+}
+
+/* contact */
+.ways{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;padding:clamp(36px,5vw,64px) 0}
+.way{padding:clamp(22px,3vw,32px);display:flex;flex-direction:column;gap:10px}
+.way .ic{width:44px;height:44px;border-radius:var(--r12);display:grid;place-items:center;background:var(--accent-soft);color:var(--accent-ink);margin-bottom:6px}
+.way .ic svg{width:22px;height:22px}
+.way h2{font-size:22px;letter-spacing:-.02em;font-weight:600}
+.way p{font-size:16px;color:var(--muted);line-height:1.6}
+.way .btn{align-self:flex-start;margin-top:8px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r12);box-shadow:var(--shadow-1)}
+.small-print{padding:0 0 clamp(56px,7vw,96px);font-size:15px;color:var(--muted);line-height:1.7;max-width:46em}
+@media (max-width:760px){.ways{grid-template-columns:1fr}}
+
+/* 404 and "not available yet" */
+.note-page{padding:clamp(28px,6vw,88px) 0 clamp(64px,9vw,120px);display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:clamp(32px,6vw,80px);align-items:center}
+.note-page h1{font-size:clamp(38px,5vw,64px);line-height:1.02;letter-spacing:-.04em;font-weight:600;text-wrap:balance}
+.note-page p{margin-top:18px;font-size:clamp(17px,1.5vw,19px);color:var(--muted);line-height:1.6;max-width:30em}
+.note-page .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px}
+.scrap{background:#fff;border-radius:6px;box-shadow:var(--shadow-2);transform:rotate(-1.5deg);max-width:440px;width:100%;justify-self:center}
+.scrap svg{width:100%;height:auto;display:block}
+.scrap .pen-ink{fill:#27272a}
+@media (max-width:820px){.note-page{grid-template-columns:1fr}.scrap{order:-1;max-width:320px}}
+@media (max-width:640px){.note-page .actions .btn{flex:1 1 100%}}
 </style>
 </head>
 <body>
-<main>
-  <h1>Page not found</h1>
-  <p><a href="/">qalm</a> · <a href="/app">Open qalm</a></p>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="lockup" href="/" aria-label="qalm by Apollo, home"><svg class="mark" aria-hidden="true" focusable="false" viewBox="0 0 120 100" fill="none" stroke-linecap="round" stroke-linejoin="round"><defs><mask id="qalm-ring-head"><rect width="120" height="100" fill="#fff"/><path d="M60 94 C52 78 38 64 37 48 C36 34 46 22 60 11 C74 22 84 34 83 48 C82 64 68 78 60 94Z" fill="#000"/></mask></defs><path d="M7.5 57.3L8.0 55.7L8.8 53.9L9.8 52.2L11.2 50.4L12.9 48.5L14.8 46.6L17.0 44.7L19.4 42.8L22.1 40.9L25.1 39.0L28.2 37.2L31.5 35.4L35.0 33.6L38.6 31.9L42.3 30.3L46.2 28.7L50.1 27.3L54.1 25.9L58.2 24.7L62.2 23.5L66.2 22.5L70.2 21.6L74.2 20.9L78.0 20.3L81.7 19.8L85.4 19.4L88.8 19.2L92.1 19.2L95.2 19.3L98.1 19.5L100.8 19.9L103.2 20.5L105.4 21.1L107.3 21.9L108.9 22.9L110.3 23.9" class="orbit" stroke-width="6" mask="url(#qalm-ring-head)"/><path d="M60 86 C54 73 45 61 44 48 C43 37 50 28 60 19 C70 28 77 37 76 48 C75 61 66 73 60 86Z" class="nib" stroke-width="7"/><path d="M60 80 L60 57" class="nib" stroke-width="5"/><circle cx="60" cy="50" r="4.5" class="nibfill"/><path d="M111.2 24.9L112.0 26.3L112.5 27.9L112.6 29.6L112.3 31.4L111.6 33.3L110.5 35.3L109.0 37.4L107.1 39.5L104.9 41.6L102.4 43.8L99.5 46.0L96.3 48.1L92.8 50.2L89.1 52.3L85.2 54.3L81.1 56.2L76.8 58.1L72.4 59.8L67.9 61.4L63.3 62.9L58.7 64.2L54.1 65.4L49.6 66.4L45.1 67.2L40.8 67.9L36.6 68.4L32.6 68.7L28.8 68.8L25.2 68.7L21.9 68.5L18.9 68.0L16.2 67.4L13.8 66.6L11.8 65.6L10.1 64.4L8.8 63.1" class="orbit" stroke-width="6"/><circle cx="107.3" cy="39.3" r="7.5" class="planet"/></svg><span class="name"><b>qalm</b><small>by Apollo</small></span></a>
+    <nav class="site-nav" aria-label="Site"><a href="/">Home</a><a href="/#pen">Features</a></nav>
+    <a class="btn btn-sm" href="/app/">Open qalm</a>
+  </div>
+</header>
+<main id="main">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><pattern id="dots" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="10" cy="10" r="1.1" fill="#d9dce3"/></pattern></defs></svg>
+  <div class="wrap note-page">
+    <div>
+      <h1>This page isn't here.</h1>
+      <p>It may have moved, or the link has a typo. Your notebooks are fine.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="/">Back to home <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        <a class="btn" href="/app/">Open qalm</a>
+      </div>
+    </div>
+    <div class="scrap" role="img" aria-label="Handwritten: oops!"><svg viewBox="0 0 219 170"><rect width="219" height="170" fill="url(#dots)"/><g class="pen-ink"><path d="M54.6,72Q48.9,74.3 47.5,75.2 46.2,76.2 45,77.5 43.8,78.7 42.7,80.4 41.6,82 40.9,83.4 40.2,84.9 39.6,86.4 39.1,87.9 38.7,89.8 38.3,91.7 38.2,93.7 38.1,95.6 38.3,97.4 38.5,99.2 39.2,100.9 39.9,102.6 41.1,103.8 42.3,105.1 44.1,105.7 45.9,106.3 47.6,106.1 49.4,105.9 51,105 52.7,104.1 54,103 55.2,101.8 56.1,100.4 57.1,99 57.9,97.5 58.7,95.9 59.3,94.2 59.9,92.5 60.4,90.7 60.8,88.9 61.1,87.1 61.3,85.4 61.3,83.7 61.3,82 61.1,80.2 60.8,78.3 60.1,76.6 59.3,74.8 58.1,73.7 56.8,72.5 55.2,72.2 53.6,71.9 50.4,72.9 47.1,74 46.3,73.9 45.6,73.7 45.1,73.2 44.5,72.6 44.5,71.9 44.4,71.1 44.8,70.5 45.2,69.8 45.9,69.5 46.6,69.2 47.3,69.4 48.1,69.7 48.3,69.9 48.6,70.2 48.8,70.5 49,70.9 49,71.6 49,72.4 48.5,73 48.1,73.6 47.3,73.8 46.6,74 46.2,73.9 45.8,73.8 45.5,73.6 45.2,73.4 44.8,72.8 44.4,72.1 44.5,71.4 44.6,70.6 45.1,70.1 45.6,69.5 48.5,68.4 51.5,67.3 53.1,67.2 54.8,67.1 56.4,67.4 58,67.7 59.5,68.4 60.9,69.1 62.4,70.5 63.8,72 64.7,73.6 65.5,75.2 66,77.1 66.5,79 66.6,80.9 66.8,82.8 66.7,84.9 66.6,86.9 66.2,89 65.9,91 65.3,93.1 64.8,95.1 64,97.1 63.2,99.1 62.1,100.9 61.1,102.8 59.8,104.5 58.5,106.1 57.3,107.3 56,108.5 54.4,109.5 52.8,110.5 50.7,111.1 48.6,111.7 46.5,111.8 44.4,111.9 42.8,111.6 41.3,111.4 39.7,110.8 38.2,110.2 36.8,109.2 35.4,108.3 34.4,107.1 33.3,105.8 32.5,104.4 31.8,103 31.3,101.4 30.8,99.8 30.6,97.7 30.4,95.6 30.5,93.5 30.6,91.5 30.9,89.5 31.3,87.6 31.9,85.6 32.5,83.7 33.4,81.8 34.2,79.9 35.3,78.2 36.4,76.4 37.4,75.1 38.5,73.9 39.8,72.7 41.1,71.4 42.6,70.4 44.2,69.3 46,68.6 47.8,67.9 49.4,67.6 51,67.3 52.7,67.4 54.5,67.4 55.2,67.7 55.9,68.1 56.3,68.9 56.6,69.6 56.3,70.4 56.1,71.2 55.3,71.6 54.6,72 54.6,72Z"/><path d="M91.6,70.5Q85.6,72.6 84.2,73.6 82.7,74.6 81.4,75.9 80.2,77.2 79.2,78.5 78.2,79.8 77.4,81.3 76.6,82.7 76,84.3 75.4,85.8 74.9,87.4 74.5,89 74.2,91 73.9,92.9 73.9,94.6 73.9,96.3 74.2,98 74.6,99.8 75.4,101.4 76.3,103 77.7,104.1 79.2,105.3 80.8,105.7 82.5,106.1 84.3,105.8 86.1,105.6 87.5,104.8 88.9,104 90.2,102.8 91.5,101.5 92.5,100.1 93.5,98.7 94.4,97.1 95.3,95.5 96,93.7 96.7,92 97.2,90.1 97.7,88.3 97.9,86.4 98.2,84.6 98.3,82.9 98.4,81.1 98.1,79.2 97.9,77.2 97.3,75.6 96.8,74.1 95.6,72.7 94.4,71.4 92.9,70.9 91.3,70.3 89.4,70.6 87.5,70.8 85.7,71.6 83.8,72.3 83.1,72.2 82.3,72 81.8,71.5 81.3,70.9 81.2,70.2 81.2,69.4 81.6,68.8 82,68.1 82.3,67.9 82.7,67.7 83.4,67.7 84.2,67.7 84.5,67.9 84.9,68 85.3,68.6 85.7,69.3 85.7,70 85.7,70.8 85.2,71.4 84.8,72 84,72.1 83.3,72.3 82.9,72.2 82.5,72.1 82,71.6 81.4,71.1 81.3,70.8 81.1,70.4 81.2,69.7 81.3,68.9 81.9,68.4 82.4,67.8 84.4,67 86.3,66.2 88,65.9 89.6,65.6 91.3,65.6 93,65.7 94.6,66.2 96.2,66.6 97.6,67.5 99,68.4 100.3,70 101.6,71.7 102.3,73.4 103,75.1 103.3,77.1 103.7,79.1 103.7,81.1 103.7,83.1 103.5,85.2 103.3,87.4 102.5,90.5 101.8,93.7 101.2,95.3 100.6,96.8 99,99.7 97.5,102.6 96.5,103.9 95.5,105.2 94.3,106.4 93,107.6 91.4,108.7 89.9,109.8 88.2,110.5 86.6,111.1 85,111.4 83.3,111.6 81.7,111.6 80.1,111.6 78.5,111.3 76.9,111 75.3,110.4 73.8,109.7 72.4,108.7 71,107.7 69.9,106.4 68.9,105.1 68.1,103.6 67.4,102.1 66.9,100.5 66.5,98.8 66.3,97.2 66.2,95.6 66.2,93.9 66.2,92.2 66.5,90.2 66.8,88.2 67.4,86.2 67.9,84.2 68.7,82.2 69.5,80.2 70.3,78.8 71,77.4 71.9,76.1 72.8,74.8 73.9,73.5 75,72.2 76.4,71 77.7,69.8 79.4,68.7 81,67.7 82.8,66.9 84.7,66.2 86.4,66 88,65.7 89.8,65.8 91.5,65.9 92.3,66.2 93,66.6 93.3,67.4 93.6,68.1 93.3,68.9 93,69.7 92.3,70.1 91.6,70.5 91.6,70.5Z"/><path d="M115.2,73.2Q115.2,76.3 115,78.4 114.7,80.5 111.1,103.6 107.6,126.6 106,134.2 104.3,141.8 103.9,142.7 103.5,143.5 102.7,143.9 101.9,144.3 101.5,144.2 101,144.2 100.6,144.1 100.2,143.9 99.6,143.2 99,142.6 98.9,141.7 98.8,140.8 99.3,140 99.8,139.3 100.2,139 100.6,138.8 101.5,138.8 102.4,138.8 102.8,139 103.2,139.2 103.7,139.9 104.2,140.6 104.2,141.5 104.2,142.4 103.6,143.1 103.1,143.8 102.2,144.1 101.3,144.3 100.5,143.9 99.7,143.5 99.2,142.8 98.8,142 99,137.3 99.3,132.7 99.8,128.6 100.2,124.4 104,99.8 107.9,75.3 108.6,73.1 109.4,70.8 109.9,70.3 110.5,69.8 110.9,69.7 111.3,69.6 112,69.6 112.8,69.6 113.5,70 114.2,70.4 114.6,71 115,71.6 115.1,72.4 115.2,73.2 115.2,73.2Z"/><path d="M109,80.3Q110.7,77.8 111.9,76.6 113.1,75.3 114.7,74.2 116.3,73.1 117.8,72.3 119.4,71.5 121,71 122.6,70.5 124.3,70.2 125.9,70 127.5,70 129.1,70 130.8,70.4 132.4,70.7 133.9,71.5 135.4,72.2 136.7,73.5 138,74.7 138.9,76.3 139.8,77.9 140.2,79.5 140.7,81.1 140.8,82.9 141,84.6 140.9,86.4 140.8,88.1 140.5,89.9 140.2,91.7 139.7,93.4 139.2,95 138.6,96.5 137.9,98 137,99.5 136.2,100.9 135,102.4 133.9,103.8 132.5,105 131.2,106.2 129.7,107.2 128.3,108.2 126.7,108.9 125.2,109.6 123.6,110 122,110.4 120.4,110.6 118.8,110.8 116.7,110.6 114.6,110.5 112.6,109.9 110.6,109.4 108.5,108.3 106.3,107.2 105.9,106.6 105.4,106.1 105.4,105.4 105.3,104.7 105.7,104.1 106.1,103.5 106.5,103.3 106.8,103.2 107.5,103.2 108.2,103.2 108.5,103.4 108.8,103.5 109.2,104.1 109.6,104.7 109.6,105.4 109.5,106.1 109.1,106.6 108.6,107.2 108.3,107.3 107.9,107.4 107.6,107.5 107.2,107.5 106.6,107.2 105.9,106.9 105.6,106.2 105.3,105.6 105.4,104.9 105.5,104.2 106,103.8 106.6,103.3 106.9,103.2 107.2,103.1 107.6,103.1 108,103.1 111.1,104.3 114.3,105.5 116.2,105.4 118.1,105.3 120,104.8 121.9,104.2 123.3,103.4 124.7,102.6 126,101.6 127.3,100.5 128.4,99.1 129.5,97.8 130.5,96 131.4,94.2 132,92.6 132.5,91 132.8,89.2 133.2,87.4 133.2,85.7 133.3,84.1 132.9,82.2 132.5,80.3 131.6,78.9 130.8,77.5 129.2,76.7 127.6,75.8 125.8,75.8 124,75.8 122.4,76.3 120.8,76.9 119.2,77.8 117.6,78.7 114.8,81.2 112,83.7 111.5,83.9 111,84.1 110.2,83.9 109.4,83.7 109.1,83.3 108.7,82.8 108.6,82.3 108.4,81.8 108.7,81 109,80.3 109,80.3Z"/><path d="M169.9,76.9Q168.1,75.1 166.5,74.2 164.9,73.3 163.2,73.2 161.5,73 159.7,73.5 157.9,73.9 156.3,75 154.8,76 154,77.5 153.3,78.9 154.3,80.4 155.4,82 160.2,85.1 165.1,88.3 166.7,89.6 168.2,90.9 169.2,92.2 170.2,93.5 170.8,95.2 171.5,96.8 171.6,98.7 171.7,100.6 171.2,102.5 170.6,104.4 169.4,106.1 168.3,107.7 166.7,108.9 165.2,110.1 163.6,110.9 161.9,111.7 160.3,112.1 158.8,112.6 156.7,112.8 154.5,113.1 152.5,113.1 150.4,113 148.4,112.6 146.4,112.2 144.6,111.5 142.8,110.7 140.4,108.3 138.1,106 137.9,105.3 137.7,104.6 138,103.9 138.2,103.3 138.8,102.9 139.4,102.6 140.1,102.7 140.8,102.7 141.1,102.9 141.4,103.1 141.8,103.8 142.1,104.4 142,105.1 141.8,105.8 141.3,106.3 140.8,106.8 140.5,106.9 140.1,106.9 139.4,106.8 138.7,106.6 138.5,106.4 138.2,106.2 138,105.8 137.8,105.5 137.8,104.8 137.8,104.1 138.2,103.5 138.6,103 139.2,102.7 139.9,102.5 140.6,102.8 141.3,103 142.2,104.2 143.2,105.4 144.7,106.2 146.1,107.1 148,107.4 149.8,107.8 151.5,107.7 153.1,107.7 154.7,107.4 156.3,107.1 158.2,106.3 160,105.5 161.4,104.4 162.8,103.2 163.3,101.7 163.9,100.1 163.7,98.5 163.4,96.8 162.4,95.5 161.5,94.3 160.2,93.2 159,92.2 154.3,89.2 149.7,86.2 148.4,84.9 147.1,83.6 146.3,81.6 145.5,79.5 145.9,77.4 146.3,75.2 147.5,73.6 148.6,71.9 150.1,70.8 151.7,69.6 153.4,68.9 155.1,68.2 156.8,67.9 158.5,67.5 160.5,67.5 162.6,67.5 164.6,67.8 166.6,68.1 168.2,68.9 169.8,69.6 171,70.7 172.2,71.8 173,73.1 173.9,74.4 173.9,75.2 174,76 173.5,76.7 173,77.4 172.1,77.5 171.3,77.7 170.6,77.3 169.9,76.9 169.9,76.9Z"/><path d="M195.7,30.1Q195.6,33.3 195.3,35.4 195,37.5 191.7,56.8 188.4,76.1 186.7,83.4 185,90.7 184.6,91.5 184.2,92.3 183.4,92.7 182.6,93.1 182.1,93 181.7,93 181.2,92.9 180.8,92.7 180.2,92 179.6,91.3 179.6,90.4 179.5,89.5 179.7,89.1 179.9,88.7 180.6,88.1 181.3,87.6 182.2,87.6 183.1,87.6 183.5,87.8 183.9,88 184.5,88.7 185,89.5 184.9,90.4 184.9,91.3 184.3,92 183.7,92.7 182.8,92.9 182,93.1 181.1,92.7 180.3,92.3 179.9,91.5 179.5,90.7 179.7,86.4 180,82.1 180.5,78.4 181,74.8 184.6,53.5 188.3,32.1 188.9,30.2 189.4,28.4 189.6,28 189.8,27.7 190.4,27.2 191,26.7 191.4,26.6 191.8,26.4 192.6,26.5 193.3,26.5 194,26.9 194.7,27.2 194.9,27.6 195.2,27.9 195.4,28.6 195.7,29.3 195.7,29.7 195.7,30.1 195.7,30.1Z"/><path d="M181.4,106.2Q182.8,109 182.8,109.5 182.8,110 182.3,110.9 181.9,111.8 181,112.3 180.1,112.7 179.1,112.5 178.1,112.3 177.4,111.5 176.7,110.8 176.6,110.3 176.5,109.8 176.5,109.3 176.6,108.7 177.2,107.9 177.7,107.1 178.2,106.8 178.6,106.6 179.6,106.5 180.6,106.5 181.4,107.1 182.3,107.7 182.5,108.2 182.7,108.7 182.7,109.7 182.6,110.7 182,111.5 181.3,112.2 180.9,112.4 180.4,112.6 179.4,112.5 178.4,112.4 177.6,111.8 176.9,111.1 176.4,110.2 175.9,109.2 175.7,108.5 175.5,107.8 175.5,107.4 175.6,107 175.7,106.7 175.8,106.3 176.3,105.7 176.8,105.1 177.1,105 177.5,104.8 178.2,104.7 179,104.6 179.7,104.8 180.4,105.1 180.9,105.6 181.4,106.2 181.4,106.2Z"/></g><svg x="24" y="128" width="171" height="16" viewBox="0 0 300 24" preserveAspectRatio="none" aria-hidden="true"><path fill="#4338ca" d="M3.8,9Q13.7,7.7 21.1,7.3 28.6,6.8 42.8,6.2 57.1,5.6 74.7,5.2 92.3,4.7 124.6,4.3 157,3.9 191.8,4.2 226.7,4.4 242,4.9 257.2,5.5 268,6.3 278.8,7.1 287.6,8 296.4,9 297.2,9.4 298.1,9.8 298.4,10.2 298.7,10.6 298.8,11.6 299,12.5 298.5,13.4 298,14.2 297.2,14.6 296.3,15 295.8,15 295.3,14.9 294.5,14.4 293.7,13.9 293.3,13 293,12.1 293.3,11.2 293.5,10.3 294.3,9.7 295.1,9.1 295.5,9.1 296,9 296.9,9.3 297.8,9.6 298.2,10 298.5,10.3 298.8,11.3 299,12.2 298.6,13.1 298.3,14 297.9,14.3 297.5,14.6 296.6,14.8 295.6,15 291.3,14.6 287,14.2 278.9,13.8 270.8,13.3 252.3,12.7 233.7,12.1 220.1,11.8 206.5,11.6 186.3,11.5 166.2,11.4 145.4,11.5 124.5,11.6 106.2,11.9 87.9,12.2 72.6,12.6 57.3,13.1 37.5,14 17.7,14.8 12.3,14.9 6.9,15 4.8,14.9 2.8,14.7 2,14 1.3,13.2 1.2,12.5 1,11.8 1.2,11.2 1.4,10.5 1.9,10 2.4,9.5 3.1,9.2 3.8,9 3.8,9Z"/></svg></svg></div>
+  </div>
 </main>
+<footer class="site-foot">
+  <div class="wrap">
+    <a class="lockup" href="/" aria-label="qalm by Apollo, home"><svg class="mark" aria-hidden="true" focusable="false" viewBox="0 0 120 100" fill="none" stroke-linecap="round" stroke-linejoin="round"><defs><mask id="qalm-ring-foot"><rect width="120" height="100" fill="#fff"/><path d="M60 94 C52 78 38 64 37 48 C36 34 46 22 60 11 C74 22 84 34 83 48 C82 64 68 78 60 94Z" fill="#000"/></mask></defs><path d="M7.5 57.3L8.0 55.7L8.8 53.9L9.8 52.2L11.2 50.4L12.9 48.5L14.8 46.6L17.0 44.7L19.4 42.8L22.1 40.9L25.1 39.0L28.2 37.2L31.5 35.4L35.0 33.6L38.6 31.9L42.3 30.3L46.2 28.7L50.1 27.3L54.1 25.9L58.2 24.7L62.2 23.5L66.2 22.5L70.2 21.6L74.2 20.9L78.0 20.3L81.7 19.8L85.4 19.4L88.8 19.2L92.1 19.2L95.2 19.3L98.1 19.5L100.8 19.9L103.2 20.5L105.4 21.1L107.3 21.9L108.9 22.9L110.3 23.9" class="orbit" stroke-width="6" mask="url(#qalm-ring-foot)"/><path d="M60 86 C54 73 45 61 44 48 C43 37 50 28 60 19 C70 28 77 37 76 48 C75 61 66 73 60 86Z" class="nib" stroke-width="7"/><path d="M60 80 L60 57" class="nib" stroke-width="5"/><circle cx="60" cy="50" r="4.5" class="nibfill"/><path d="M111.2 24.9L112.0 26.3L112.5 27.9L112.6 29.6L112.3 31.4L111.6 33.3L110.5 35.3L109.0 37.4L107.1 39.5L104.9 41.6L102.4 43.8L99.5 46.0L96.3 48.1L92.8 50.2L89.1 52.3L85.2 54.3L81.1 56.2L76.8 58.1L72.4 59.8L67.9 61.4L63.3 62.9L58.7 64.2L54.1 65.4L49.6 66.4L45.1 67.2L40.8 67.9L36.6 68.4L32.6 68.7L28.8 68.8L25.2 68.7L21.9 68.5L18.9 68.0L16.2 67.4L13.8 66.6L11.8 65.6L10.1 64.4L8.8 63.1" class="orbit" stroke-width="6"/><circle cx="107.3" cy="39.3" r="7.5" class="planet"/></svg><span class="name"><b>qalm</b><small>by Apollo</small></span></a>
+    <nav aria-label="Legal and contact"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/data-rights">Data rights</a><a href="/contact">Contact</a></nav>
+    <p class="copy">© 2026 Apollo. Made for people who think with a pen.</p>
+  </div>
+</footer>
 </body>
 </html>
