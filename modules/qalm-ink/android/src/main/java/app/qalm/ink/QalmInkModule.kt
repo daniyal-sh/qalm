@@ -19,6 +19,15 @@ class PageSizeRecord : Record {
   @Field var h: Double = 842.0
 }
 
+/** The on-screen ruler in window dp (InkOverlay.types InkRuler). */
+class RulerRecord : Record {
+  @Field var cx: Double = 0.0
+  @Field var cy: Double = 0.0
+  @Field var angle: Double = 0.0
+  @Field var length: Double = 0.0
+  @Field var thickness: Double = 0.0
+}
+
 class InputRecord : Record {
   @Field var drawWith: String = "pen"
   @Field var hand: String = "right"
@@ -56,6 +65,10 @@ class QalmInkModule : Module() {
       }
       Prop("committedIds") { view: QalmInkView, v: List<String> -> view.setCommittedIds(v) }
       Prop("shapeSnap") { view: QalmInkView, v: Boolean? -> view.shapeSnap = v ?: false }
+      Prop("ruler") { view: QalmInkView, v: RulerRecord? ->
+        view.ruler = v?.takeIf { it.length > 0 && it.thickness > 0 }?.let { RulerSnap.Pose(it.cx, it.cy, it.angle, it.length, it.thickness) }
+      }
+      Prop("laserMode") { view: QalmInkView, v: String? -> view.laserMode = if (v == "dot") "dot" else "trail" }
 
       // The answer to onShapeHold: { kind, pts: [[x, y], …] } or null (not a shape).
       AsyncFunction("setShapePreview") { view: QalmInkView, requestId: Int, shape: Map<String, Any?>? ->

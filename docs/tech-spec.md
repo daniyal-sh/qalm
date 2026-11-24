@@ -299,12 +299,16 @@ drawn ids.
 interface PageCanvasProps { info: PageInfo; items: Item[]; selection?: string[]; anchors?: { id: string /*comment id*/; bbox: BBox; active: boolean }[]; pdfImage?: string /*uri*/; width: number /*px*/; onDrawn?(ids: string[]): void /*item ids, once Skia has them*/;
   live?: { ids: string[]; transform: Sim } /* a selection being dragged: drawn transformed, paths not rebuilt */ }
 // InkOverlay (native view QalmInkView; web: src/InkOverlay.web.tsx)
-type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'none';
+type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'laser' | 'none';
 interface InkOverlayProps {
   pageSize: { w: number; h: number };          // page units; the overlay's laid-out size maps linearly onto the page
   tool: InkTool; color: string; width: number;
   penStyle?: 'fountain' | 'ball' | 'brush'; smoothing?: 0 | 1 | 2 | 3;   // pen only; defaults 'fountain' / 0
   lassoMode?: 'free' | 'rect';                 // lasso: a loop, or a rectangle from the first point to the last
+  eraserMode?: 'stroke' | 'partial';            // partial: a faint trail of the eraser's last 250 ms (§7, Erasing)
+  laserMode?: 'trail' | 'dot';                  // laser: a fading trail, or a dot under the pen (§7, Laser pointer)
+  ruler?: { cx: number; cy: number; angle: number; length: number; thickness: number } | null;
+                                                // window px / dp / pt: strokes starting near an edge follow it (§7, Ruler)
   input: { drawWith: 'pen' | 'any'; hand: 'left' | 'right'; palm: 'relaxed' | 'standard' | 'strict' };
   committedIds: string[];                       // stroke ids already drawn by PageCanvas (from its onDrawn)
   onStrokeEnd(e: { nativeEvent: { id: string; tool: 'pen'|'highlighter'; color: string; width: number; points: InkPoint[]; heldMs: number; style; smoothing } }): void;
@@ -461,8 +465,24 @@ from the region images with its own vision. That keeps the app about 20 MB light
     Full screen button. Desktop uses `BrowserWindow.setFullScreen` (F11 is caught in main's `before-input-event`, since
     there's no menu bar), browsers the Fullscreen API, iPad and Android hide the system bars (`expo-status-bar`,
     `expo-navigation-bar` immersive). The header, toolbar and side panels give way to a floating pill (pen, highlighter,
-    eraser, lasso, colour, undo/redo, exit) that can be dragged to any edge and is remembered (`focusPill` pref). Esc
-    clears a selection first, then leaves fullscreen; leaving restores the panels.
+    eraser, lasso, laser, ruler, colour, undo/redo, exit) that can be dragged to any edge and is remembered (`focusPill`
+    pref). Where even the shrunk pill (0.8×) can't fit along its edge (a portrait phone), the lasso, laser and ruler fold into a
+    "More tools" button (`pillCompact`). Esc clears a selection first, then leaves fullscreen; leaving restores the panels.
+  - Presentation view: F5 (web / desktop), the laser's "Present" option or More → Present. Fullscreen with no chrome:
+    no header, toolbar, pill, page numbers and menus, margin cards, comment pins, selection or ruler. The page is fitted
+    whole and centred (`fitZoom`, which may go below the 0.75× minimum; pinch is off), the laser is the tool, and a
+    small bar at the bottom has previous / next, "n / m", the laser's trail / dot and Stop. Keys: → ↓ Space Enter PgDn
+    next, ← ↑ Backspace PgUp previous, Home / End, K switches trail / dot, Esc or F5 stops (`present.logic.ts`); Space
+    or Enter on a focused bar button only presses it. F5 never reloads the page, even in a text field (where it does
+    nothing). While presenting, the pen button doesn't switch to the eraser and Ctrl+wheel / trackpad pinch don't zoom;
+    the page shown is tracked by its id, so pages added or moved elsewhere don't change it, and if it is deleted
+    elsewhere the nearest page that exists is shown (none left: it stops). Leaving
+    fullscreen any other way stops it too; stopping restores the tool, the zoom and the page.
+  - Desktop keys (web and Electron; not while typing): P pen, H highlighter, E eraser (again: whole stroke / partial),
+    L lasso, T text, K laser (again: trail / dot), R ruler on / off, F5 present, F11 or Ctrl+Cmd+F fullscreen, Esc
+    (selection, then fullscreen or presenting), Ctrl/Cmd + Z / Shift+Z / Y undo and redo, Ctrl/Cmd + C / X / V / D / A,
+    Delete, PgUp / PgDn / Home / End and Ctrl+G for pages. The toolbar shows the laser and the ruler after the text
+    tool and Insert image; on narrow windows the bar scrolls sideways with edge chevrons.
   - Settings: Account, Pen and palm rejection, and AI access (connected agents, pending requests, activity log)
   - Sign-in
 - **Sync:** the client uses the `y-websocket` provider (with tickets) for each loaded doc, with IndexedDB persistence on web and file persistence on native.
@@ -582,6 +602,47 @@ that ink is all deleted, the thread shows only in the panel ("Ink removed").
   margins) and of small closed letters (o, 8, "2o") in `scribbleProbes.test.ts`.
 - **Limits:** a vertical scratch-out with legs further apart than ~0.4 × their length (e.g. 6 mm legs moving on 1.5 mm
   each) is kept as ink; scribble back and forth along the words instead. Circular scribbles ("@@@") aren't detected.
+
+### Ruler (editor UI only)
+- **What:** a toggle (toolbar, pill, R) shows a translucent straightedge over the pages: mm, 5 mm and numbered cm
+  ticks on both long edges at the current page's scale (page mm at this zoom; mm ticks are left out below 3 px per mm),
+  and its angle (0–179°). It belongs to the editor, not the page: never synced, saved, exported or sent to agents.
+  Default 720 × 72 px (`RULER`), centred, no wider than the view less 48 px; its centre stays in the view.
+- **Moving it** (`ruler.logic.ts`): one finger or the mouse on its body drags it; two fingers turn it about their
+  midpoint and move it with them (a second finger anywhere counts once one is on the ruler); the round handle at its
+  right end turns it with the mouse; × hides it. Angles snap to multiples of 45° within **4°** (`RULER.snapDeg`). A
+  palm (the overlay's palm rules) doesn't move it. In "Pen and finger" a finger on the ruler moves it instead of
+  drawing. The pose goes to the overlays (window coordinates) when a move holds still for **80 ms**
+  (`RULER_SETTLE_MS`: a finger holding the ruler while the pen draws along it) and when it ends, so dragging doesn't
+  re-render pages every frame; on web an overlay also reads the live pose at pen-down (`getRuler`), so a stroke follows
+  the ruler where it is even mid-move.
+- **Drawing along it** (`rulerEdgeAt`, `rulerLine`, `projectOnLine`; ports in `RulerSnap.kt` / `RulerSnap.swift`): a
+  pen or highlighter stroke that **starts within 24 px** (`RULER.snapPx`, `RULER_SNAP_PX`; dp / pt on native) outside a
+  long edge, or over the ruler's half next to it, and along its length (plus 24 px at each end) follows that edge:
+  every point, predicted ones too, is projected onto the edge line pushed out by half the pen width, keeping pressure,
+  tilt and time. Such a stroke never snaps to a shape, and is never taken for a scribble (`ruler` on `onStrokeEnd`:
+  going back and forth along the ruler would look like one). On web a pen landing on the ruler is handed to the overlay
+  underneath (`forwardToInk`: a synthetic pointerdown, then the overlay captures the pointer). Zoom-proof: the line is
+  mapped into each page's units when the stroke starts.
+- **Native:** the overlays snap. The pose is in React Native's `measureInWindow` coordinates, so Android measures its
+  own origin with RN's own `RootViewUtil.getViewportOffset` (its place in the window, less the status bar only when
+  the app isn't edge-to-edge; Expo 58 is) and iOS uses UIWindow coordinates (`convert(_:to: nil)`), which is what RN
+  reports there. Both still need a check on a device. A native overlay gets the pose when it settles (80 ms), not at
+  pen-down mid-move as on web. The ruler view itself is React Native, so on iPad and Android a pen landing
+  on the ruler's body moves it (only web forwards it); strokes starting outside the edge snap everywhere.
+
+### Laser pointer
+- A tool (toolbar, pill, K) whose options are **Trail** (default) and **Dot** (`tools.laserMode`). It draws on the ink
+  overlay only and never emits a stroke, so nothing is saved, synced or undoable. It never erases either: the pen's
+  barrel button, the eraser end and the right mouse button (which erase that stroke with the other tools) draw the
+  laser too.
+- **Trail:** a red line, a 3 px core in brand `bad` (#b91c1c) over a 10 px glow in its dark tint (#f87171) at 35 %,
+  each segment fading with its age and gone after **1 s** (`LASER_FADE_MS`), also after the pen lifts. **Dot:** a 4 px
+  core in a 9 px glow under the pen, and under a hovering pen or mouse (the mouse cursor is hidden). Sizes are screen
+  px at any zoom. The trail is drawn in 8 fade steps (`laserRuns` in `laser.ts`, ported to Kotlin and Swift): each
+  run of one press within one step is a single path, drawn on its own layer after clearing what it covers, so no joint
+  is painted twice (no beads). Web: canvas, requestAnimationFrame while fading; Android: the front-buffered layer
+  redrawn with `postOnAnimation`; iOS: a `LaserView` drawn with a CADisplayLink.
 
 ### Shape snapping (live: `recognizeShape`, `adjustShape`)
 GoodNotes-style, gated by the `snapShapes` setting (the app passes `recognizeShape` to the overlay only when it's on):

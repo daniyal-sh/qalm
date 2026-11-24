@@ -394,7 +394,8 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
         onStrokeEnd={({ nativeEvent: e }) => {
           ed.touchPage(info.id);
           // Scribble to erase: a quick zig-zag over ink deletes it (one undo step) and is not kept.
-          if (e.tool === 'pen' && !e.shape && ed.input.scribbleErase) {
+          // Not a stroke ruled along the ruler (back and forth along it would look like a scribble).
+          if (e.tool === 'pen' && !e.shape && !e.ruler && ed.input.scribbleErase) {
             const gone = scribbleErase(page, e.points, e.width);
             if (gone) {
               drawn.dismiss(e.id);
@@ -422,6 +423,10 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
         }}
         lassoMode={t.lassoMode}
         eraserMode={t.eraserMode}
+        laserMode={t.laserMode}
+        // The ruler (window coordinates): a pen stroke starting near its edge follows it.
+        ruler={ed.ruler}
+        getRuler={ed.getRuler}
         onLasso={({ nativeEvent: e }) => {
           const pts = e.polygon;
           const last = pts[pts.length - 1];

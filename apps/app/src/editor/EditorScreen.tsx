@@ -1,8 +1,8 @@
-import { createNotebookUndoManager, inkOnPaper, Notebook, Page, PEN_WIDTHS, HIGHLIGHTER_WIDTH, type ImageItem, type Item } from '@qalm/core';
+import { createNotebookUndoManager, inkOnPaper, Notebook, Page, PEN_WIDTHS, HIGHLIGHTER_WIDTH, UNITS_PER_MM, type ImageItem, type Item, type RulerPose } from '@qalm/core';
 import { router } from 'expo-router';
 import { NavigationBar } from 'expo-navigation-bar';
 import { StatusBar } from 'expo-status-bar';
-import { QalmInk, renderThumbnail } from 'qalm-ink';
+import { QalmInk, renderThumbnail, type InkRuler } from 'qalm-ink';
 import * as React from 'react';
 import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, useWindowDimensions, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { GestureDetector, usePinchGesture } from 'react-native-gesture-handler';
@@ -44,6 +44,10 @@ import { ReadingSheet } from './ReadingSheet';
 import { SwatchStrip } from './Swatches';
 import { Toolbar } from './Toolbar';
 import { FocusPill, usePillPlace } from './FocusPill';
+import { PresentBar } from './PresentBar';
+import { clampPresent, f5Action, presentKey } from './present.logic';
+import { Ruler } from './Ruler';
+import { defaultRuler, keepInView } from './ruler.logic';
 import { enterFocus, fullscreenShortcut, leaveFocus, type Panels } from './focus.logic';
 import { keyTarget, NAV_SIDEBAR_MIN, NAV_SIDEBAR_W, parseGoTo } from './navigator.logic';
 import { PageNavigator } from './PageNavigator';
@@ -62,10 +66,14 @@ import {
   stepZoom,
   viewKey,
   windowRange,
+  centredScroll,
+  fitZoom,
   type ToolId,
 } from './view';
 
 const GAP = 44;
+/** Presenting: the page is fitted this much clear of the bottom (the bar) and the top. */
+const PRESENT_BAR_ROOM = 56;
 /** The cross-page undo stack's id for the notebook's page list. */
 const PAGES_UNDO = '__pages';
 const DEFAULT_TOOLS: ToolState = {
@@ -79,6 +87,7 @@ const DEFAULT_TOOLS: ToolState = {
   eraserMode: 'stroke',
   snapShapes: true,
   lassoMode: 'free',
+  laserMode: 'trail',
 };
 
 type MenuState = { items: MenuItem[]; anchor?: { x: number; y: number; align?: 'left' | 'right' } } | null;
@@ -103,7 +112,9 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const prevTool = React.useRef<ToolId>('pen');
   React.useEffect(() => {
     void kvGet<Partial<ToolState>>('tools').then(
-      (t) => t && setTools((x) => ({ ...x, ...t, tool: x.tool, eraserMode: t.eraserMode === 'partial' ? 'partial' : 'stroke' })),
+      (t) =>
+        t &&
+        setTools((x) => ({ ...x, ...t, tool: x.tool, eraserMode: t.eraserMode === 'partial' ? 'partial' : 'stroke', laserMode: t.laserMode === 'dot' ? 'dot' : 'trail' })),
     );
   }, []);
   const changeTools = React.useCallback((p: Partial<ToolState>) => {
@@ -125,7 +136,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     },
     [changeTools],
   );
-  const onPenButton = React.useCallback(() => setTool(penButtonTool(input.penGesture, toolRef.current, prevTool.current)), [input.penGesture, setTool]);
+  const onPenButton = React.useCallback(() => {
+    if (presentRef.current !== null) return; // presenting: the pen button never swaps the laser for the eraser
+    setTool(penButtonTool(input.penGesture, toolRef.current, prevTool.current));
+  }, [input.penGesture, setTool]);
 
   // ---- undo ----
   const undo = React.useMemo(() => new CrossPageUndo(), []);
@@ -313,15 +327,32 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     requestAnimationFrame(() => vScroll.current?.scrollTo({ y, animated: false }));
   }, [base]);
 
+  // Presentation (below): the page index shown, or null. Declared before the pinch: its callbacks become worklets that
+  // capture what they use when the editor renders.
+  // The page is tracked by its id (pages added, moved or deleted on another device meanwhile), with its last index
+  // for when it is gone.
+  const [present, setPresent] = React.useState<{ id: string; at: number } | null>(null);
+  const presentAt = present === null ? null : ((i) => (i >= 0 ? i : clampPresent(present.at, pages.length)))(pages.findIndex((x) => x.id === present.id));
+  const setPresentAt = (i: number | null) => {
+    const id = i === null ? undefined : pagesNow.current[i]?.id;
+    setPresent(i === null || !id ? null : { id, at: i });
+  };
+  const pagesNow = React.useRef(pages);
+  pagesNow.current = pages;
+  const presentRef = React.useRef(presentAt);
+  presentRef.current = presentAt;
   const pinchScale = React.useRef(1);
   const pinch = usePinchGesture({
     runOnJS: true,
     disableReanimated: true,
     onUpdate: (e) => {
+      if (presentRef.current !== null) return; // presenting: the page stays fitted
       pinchScale.current = e.scale;
       setLiveScale(clampZoom(zoomRef.current * e.scale) / zoomRef.current);
     },
-    onDeactivate: () => commitZoom(zoomRef.current * pinchScale.current),
+    onDeactivate: () => {
+      if (presentRef.current === null) commitZoom(zoomRef.current * pinchScale.current);
+    },
   });
 
   /**
@@ -352,6 +383,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     const onWheel = (ev: WheelEvent) => {
       if (!ev.ctrlKey && !ev.metaKey) return;
       ev.preventDefault();
+      if (presentRef.current !== null) return; // presenting: the page stays fitted (and the browser doesn't zoom)
       zoomSoon((zoomTarget.current ?? zoomRef.current) * Math.exp(-ev.deltaY * 0.01));
     };
     window.addEventListener('wheel', onWheel, { passive: false });
@@ -502,10 +534,31 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     trackModifiers();
     const onKey = (ev: KeyboardEvent) => {
       const target = ev.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      const mod = ev.ctrlKey || ev.metaKey;
       const k = ev.key.toLowerCase();
+      const mod = ev.ctrlKey || ev.metaKey;
+      // F5 never reloads the page (a comment or text box being typed would be lost), even while typing; outside a text
+      // field it presents (or stops presenting).
+      const typing = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      if (k === 'f5' && !mod && !ev.altKey) {
+        ev.preventDefault();
+        const f5 = f5Action(typing, presentRef.current !== null);
+        if (f5 === 'stop') stopPresentingRef.current();
+        else if (f5 === 'start') startPresentingRef.current();
+        return;
+      }
+      if (typing) return;
       const a = selRef.current;
+      // Presenting: arrows, space and page keys turn pages; K switches the laser; Esc stops.
+      if (presentRef.current !== null) {
+        if (mod || ev.altKey) return;
+        const act = presentKey(ev.key, presentRef.current, pagesRef.current.length, !!target?.closest?.('button, [role="button"]'));
+        if (act === null) return;
+        ev.preventDefault();
+        if (act === 'stop') stopPresentingRef.current();
+        else if (act === 'laser') changeTools({ laserMode: toolsRef.current.laserMode === 'dot' ? 'trail' : 'dot' });
+        else setPresentAt(act.page);
+        return;
+      }
       if (mod && k === 'z') {
         ev.preventDefault();
         if (ev.shiftKey) undo.redo();
@@ -545,6 +598,15 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       }
       else if (k === 'l') setTool('lasso');
       else if (k === 't') setTool('text');
+      else if (k === 'k') {
+        // K picks the laser; pressed again, it switches between its trail and its dot.
+        if (toolsRef.current.tool !== 'laser') setTool('laser');
+        else {
+          const mode = toolsRef.current.laserMode === 'dot' ? 'trail' : 'dot';
+          changeTools({ laserMode: mode });
+          showToast(mode === 'dot' ? 'Laser: dot' : 'Laser: trail');
+        }
+      } else if (k === 'r') toggleRulerRef.current();
       else if (!ev.altKey) {
         const to = keyTarget(ev.key, currentRef.current, pagesRef.current.length);
         if (to === null) return;
@@ -674,6 +736,92 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   }, [focus]);
   // iPad and Android: fullscreen is the editor's own (hidden system bars); leaving the editor leaves it.
   React.useEffect(() => () => void (Platform.OS !== 'web' && setFullscreen(false)), []);
+  // ---- ruler (editor UI only: never in the page or an export). Its pose is in the page area's px; the overlays get it
+  // in window coordinates, and only once a move ends, so dragging it doesn't re-render the pages. ----
+  const [rulerOn, setRulerOn] = React.useState(false);
+  const [rulerPose, setRulerPose] = React.useState<RulerPose | null>(null);
+  const areaRef = React.useRef<React.ComponentRef<typeof View>>(null);
+  const [areaOrigin, setAreaOrigin] = React.useState({ x: 0, y: 0 });
+  const measureArea = React.useCallback(() => {
+    areaRef.current?.measureInWindow((x, y) => setAreaOrigin((o) => (o.x === x && o.y === y ? o : { x, y })));
+  }, []);
+  const toggleRuler = () => {
+    if (!rulerOn && !rulerPose) setRulerPose(defaultRuler(viewportRef.current));
+    else if (!rulerOn && rulerPose) setRulerPose(keepInView(rulerPose, viewportRef.current));
+    setRulerOn((x) => !x);
+  };
+  const toggleRulerRef = React.useRef(toggleRuler);
+  toggleRulerRef.current = toggleRuler;
+
+  // ---- presentation: no chrome, fullscreen, the page fitted and centred, page arrows and the laser ----
+  const presentSaved = React.useRef<{ tool: ToolId; zoom: number; fullscreen: boolean; sawFullscreen: boolean } | null>(null);
+  const startPresenting = () => {
+    if (presentRef.current !== null || !pagesRef.current.length) return;
+    presentSaved.current = { tool: toolsRef.current.tool, zoom: zoomRef.current, fullscreen: focusRef.current, sawFullscreen: focusRef.current };
+    setSelection(null);
+    setEditingText(null);
+    setTool('laser');
+    setPresentAt(currentRef.current);
+    if (!focusRef.current) setFullscreen(true);
+  };
+  const stopPresenting = () => {
+    const saved = presentSaved.current;
+    const at = presentRef.current;
+    presentSaved.current = null;
+    setPresentAt(null);
+    if (!saved) return;
+    setTool(saved.tool);
+    if (!saved.fullscreen) setFullscreen(false);
+    setLiveScale(1);
+    setZoom(clampZoom(saved.zoom));
+    if (at !== null) pendingPresentExit.current = at;
+  };
+  const startPresentingRef = React.useRef(startPresenting);
+  startPresentingRef.current = startPresenting;
+  const stopPresentingRef = React.useRef(stopPresenting);
+  stopPresentingRef.current = stopPresenting;
+  // Leaving fullscreen some other way (the browser's own Esc, the system) stops presenting too.
+  React.useEffect(() => {
+    const saved = presentSaved.current;
+    if (presentAt === null || !saved) return;
+    if (focus) saved.sawFullscreen = true;
+    else if (saved.sawFullscreen) stopPresentingRef.current();
+  }, [focus, presentAt]);
+  // Fit the page (a zoom below the usual minimum if it needs one), then centre it once the layout has caught up.
+  React.useEffect(() => {
+    if (presentAt === null) return;
+    const page = pages[presentAt];
+    if (!page) return;
+    const widest = Math.max(1, ...pages.map((x) => x.size.w));
+    // Room for the bar at the bottom (and as much at the top, so the page stays centred).
+    const z = fitZoom(page, widest, base, { w: viewport.w, h: viewport.h - 2 * PRESENT_BAR_ROOM });
+    if (Math.abs(z - zoom) > 1e-3) {
+      setLiveScale(1);
+      setZoom(z);
+      return;
+    }
+    const slot = slots[presentAt];
+    if (slot) requestAnimationFrame(() => vScroll.current?.scrollTo({ y: centredScroll(slot, viewport.h), animated: false }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presentAt, slots, viewport.w, viewport.h, base]);
+  // After presenting: back to the page that was shown, at the old zoom.
+  const pendingPresentExit = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    const at = pendingPresentExit.current;
+    if (at === null || presentAt !== null) return;
+    pendingPresentExit.current = null;
+    const slot = slots[at];
+    if (slot) requestAnimationFrame(() => vScroll.current?.scrollTo({ y: Math.max(0, slot.top - 80), animated: false }));
+  }, [slots, presentAt]);
+  const presenting = presentAt !== null;
+  // Pages deleted meanwhile (on another device): stay on a page that exists ("5 / 4" never shows); none left, stop.
+  React.useEffect(() => {
+    if (present === null) return;
+    if (presentAt === null) stopPresentingRef.current();
+    else if (pages[presentAt]?.id !== present.id || presentAt !== present.at) setPresentAt(presentAt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pages, present]);
+
   const mac = Platform.OS === 'web' && (desktop()?.platform === 'darwin' || (typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)));
   const fsKey = Platform.OS === 'web' ? ` (${fullscreenShortcut(mac)})` : '';
   const thumbs = React.useMemo(
@@ -795,6 +943,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         { label: 'Export PDF', icon: 'file-text', onPress: () => void run('Exporting PDF…', () => exportNotebook(ctx, notebookId, 'pdf')) },
         { label: 'Export .qalm backup', icon: 'archive', onPress: () => void run('Exporting…', () => exportNotebook(ctx, notebookId, 'qalm')) },
         { label: 'Full screen', icon: 'maximize', onPress: () => setFullscreen(true) },
+        { label: 'Present', icon: 'monitor', description: Platform.OS === 'web' ? 'F5' : undefined, onPress: () => startPresenting() },
         { label: 'Settings', icon: 'settings', onPress: () => router.push('/settings') },
       ],
     });
@@ -923,6 +1072,20 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newestAgent?.at]);
 
+  // The ruler for the overlays: window coordinates, the committed pose only (not every frame of a drag).
+  const rulerWindow = React.useMemo(
+    () => (rulerOn && rulerPose && !presenting ? { ...rulerPose, cx: rulerPose.cx + areaOrigin.x, cy: rulerPose.cy + areaOrigin.y } : null),
+    [rulerOn, rulerPose, presenting, areaOrigin],
+  );
+  // The ruler as it is right now (window coordinates), also while a finger moves it: an overlay reads it at pen-down
+  // on web, so a stroke follows the ruler where it is even before its pose settles (RULER_SETTLE_MS).
+  const rulerNow = React.useRef<InkRuler | null>(null);
+  const rulerSeen = React.useRef<InkRuler | null>(null);
+  if (rulerSeen.current !== rulerWindow) {
+    rulerSeen.current = rulerWindow;
+    rulerNow.current = rulerWindow;
+  }
+  const getRuler = React.useCallback(() => rulerNow.current, []);
   const edCtx = React.useMemo<EditorCtx | null>(
     () =>
       notebook
@@ -941,16 +1104,19 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             editingText,
             setEditingText,
             activeCommentId,
-            showComments: ui.comments,
+            // Presenting shows the pages only: no comment pins.
+            showComments: ui.comments && !presenting,
             setActiveComment: (id: string | null) => {
               selectThread(id);
               if (id) setCommentsOpen(true);
             },
             reportPage,
             touchPage,
+            ruler: rulerWindow,
+            getRuler,
           }
         : null,
-    [notebook, notebookId, tools, setTool, onPenButton, input, notePenSeen, undo, registry, selection, editingText, activeCommentId, ui.comments, selectThread, reportPage, touchPage],
+    [notebook, notebookId, tools, setTool, onPenButton, input, notePenSeen, undo, registry, selection, editingText, activeCommentId, ui.comments, presenting, selectThread, reportPage, touchPage, rulerWindow],
   );
 
   if (!h || !notebook || !meta || !edCtx) {
@@ -1053,7 +1219,14 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               onPaper={setPaperFor}
             />
           ) : null}
-          <View style={{ flex: 1 }} onLayout={(e) => setViewport({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+          <View
+            ref={areaRef}
+            style={{ flex: 1 }}
+            onLayout={(e) => {
+              setViewport({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height });
+              measureArea();
+            }}
+          >
             <GestureDetector gesture={pinch}>
               <ScrollView horizontal scrollEnabled={contentW > viewport.w + 1} contentContainerStyle={{ width: contentW }} showsHorizontalScrollIndicator={contentW > viewport.w + 1}>
                 <ScrollView
@@ -1091,6 +1264,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                               <View style={{ flex: 1, backgroundColor: info.paperColor === 'night' ? '#1f1f23' : info.paperColor === 'cream' ? '#fbf7ee' : '#ffffff' }} />
                             )}
                           </View>
+                          {presenting ? null : (
                           <View style={[styles.pageFoot, { left, top: slot.top + slot.height + 4, width: slot.width }]}>
                             <Text variant="meta" tone="faint">
                               {i + 1}
@@ -1098,7 +1272,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                             </Text>
                             <IconButton icon="more-horizontal" label={`Page ${i + 1} options`} size={32} onPress={(e) => pageMenu(i, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })} />
                           </View>
-                          {column && cards && (cards.shown.length || cards.more) ? (
+                          )}
+                          {!presenting && column && cards && (cards.shown.length || cards.more) ? (
                             <View
                               pointerEvents="box-none"
                               style={{ position: 'absolute', left: left + slot.width + column.gap, top: slot.top, width: column.width, height: slot.height }}
@@ -1132,7 +1307,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                         </React.Fragment>
                       );
                     })}
-                    {slots.length ? (
+                    {slots.length && !presenting ? (
                       <View style={{ position: 'absolute', top: contentHeight(slots, GAP), left: 0, right: 0, alignItems: 'center' }}>
                         <Button label="Add page" icon="plus" size="sm" onPress={() => addPage()} />
                       </View>
@@ -1142,8 +1317,35 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               </ScrollView>
             </GestureDetector>
 
-            {/* Floating toolbar; in fullscreen, the focus pill */}
-            {focus ? (
+            {rulerOn && !presenting && rulerPose ? (
+              <View style={[StyleSheet.absoluteFill, { overflow: 'hidden' }]} pointerEvents="box-none">
+                <Ruler
+                  pose={rulerPose}
+                  view={viewport}
+                  origin={areaOrigin}
+                  pxPerMm={(slots[current] && pages[current] ? (slots[current]!.width * liveScale) / pages[current]!.size.w : 1) * UNITS_PER_MM}
+                  input={input}
+                  onChange={setRulerPose}
+                  onLive={(p) => {
+                    rulerNow.current = { ...p, cx: p.cx + areaOrigin.x, cy: p.cy + areaOrigin.y };
+                  }}
+                  onClose={() => setRulerOn(false)}
+                />
+              </View>
+            ) : null}
+
+            {/* Floating toolbar; in fullscreen, the focus pill; presenting, only the page arrows and the laser */}
+            {presenting ? (
+              <PresentBar
+                index={presentAt!}
+                count={pages.length}
+                onPage={(d) => presentAt !== null && setPresentAt(Math.max(0, Math.min(pages.length - 1, presentAt + d)))}
+                laserMode={tools.laserMode}
+                onLaserMode={(m) => changeTools({ laserMode: m, tool: 'laser' })}
+                onExit={stopPresenting}
+                bottom={16 + insets.bottom}
+              />
+            ) : focus ? (
               <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
                 <FocusPill
                   view={viewport}
@@ -1155,6 +1357,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                   paper={pages[current]?.paperColor}
                   onTool={setTool}
                   onChange={changeTools}
+                  ruler={rulerOn}
+                  onRuler={toggleRuler}
                   canUndo={undo.canUndo}
                   canRedo={undo.canRedo}
                   onUndo={() => undo.undo()}
@@ -1175,11 +1379,14 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                 onZoom={(d) => zoomSoon(stepZoom(zoomTarget.current ?? zoom, d), 250)}
                 onZoomReset={() => zoomSoon(1, 0)}
                 leading={phone ? undoRedo : undefined}
+                ruler={rulerOn}
+                onRuler={toggleRuler}
+                onPresent={startPresenting}
               />
             </View>
             )}
 
-            {selection && selectionPage ? (
+            {selection && selectionPage && !presenting ? (
               <View style={[styles.selWrap, { bottom: selBottom }]} pointerEvents="box-none">
                 <Appear style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
                   {recoloring ? (

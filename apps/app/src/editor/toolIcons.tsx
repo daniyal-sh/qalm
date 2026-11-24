@@ -18,7 +18,12 @@ export type ToolIconName =
   | 'shapes'
   | 'rect-select'
   | 'erase-stroke'
-  | 'erase-partial';
+  | 'erase-partial'
+  | 'ruler'
+  | 'laser'
+  | 'laser-trail'
+  | 'laser-dot'
+  | 'present';
 
 const STROKE = 1.8;
 
@@ -111,6 +116,48 @@ function Shape({ name, color }: { name: ToolIconName; color: string }) {
           <Path d="M3.4 14.6c1.8-4.6 3.8-5.4 5.6-2.4" {...p} />
           <Path d="M15.4 17.6c.6-.8 1.1-1.8 1.6-3 .9-2.2 2-3.4 3.6-3.6" {...p} />
           <Circle cx={12.2} cy={15.4} r={2.8} {...p} />
+        </>
+      );
+    case 'ruler':
+      // A straightedge on the slant, with its ticks.
+      return (
+        <>
+          <Path d="M3.4 16.6 16.6 3.4l4 4L7.4 20.6z" {...p} />
+          <Path d="M7.2 12.8l1.6 1.6M10 10l2.4 2.4M12.8 7.2l1.6 1.6" {...p} />
+        </>
+      );
+    case 'laser':
+      // A pointer, its beam, and the glowing point it throws.
+      return (
+        <>
+          <Path d="M3.4 20.6l4.4-4.4" {...p} strokeWidth={3.2} />
+          <Path d="M9.6 14.4l3.2-3.2" {...p} strokeDasharray="1.4 1.6" />
+          <Circle cx={16.4} cy={7.6} r={2.2} fill={color} />
+          <Circle cx={16.4} cy={7.6} r={4.6} {...p} />
+        </>
+      );
+    case 'laser-trail':
+      // A trail fading out behind the point.
+      return (
+        <>
+          <Path d="M3.4 17.2c2.4-4.4 4.8-4.6 7-1.8 1.9 2.4 4 2.3 6-.6" {...p} strokeDasharray="2.2 2.4" />
+          <Circle cx={18.8} cy={12.6} r={2.4} fill={color} />
+        </>
+      );
+    case 'laser-dot':
+      return (
+        <>
+          <Circle cx={12} cy={12} r={6.4} {...p} />
+          <Circle cx={12} cy={12} r={2.6} fill={color} />
+        </>
+      );
+    case 'present':
+      // A screen on a stand, playing.
+      return (
+        <>
+          <Rect x={3} y={3.8} width={18} height={12.4} rx={2} {...p} />
+          <Path d="M12 16.2v4M8.2 20.2h7.6" {...p} />
+          <Path d="M10.4 7.6v5l4-2.5z" {...p} />
         </>
       );
     case 'shapes':

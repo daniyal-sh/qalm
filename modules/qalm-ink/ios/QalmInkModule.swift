@@ -72,6 +72,15 @@ public class QalmInkModule: Module {
         view.setShapeSnap(on ?? false)
       }
 
+      // The on-screen ruler in window points ({ cx, cy, angle, length, thickness }) or null.
+      Prop("ruler") { (view: QalmInkView, ruler: [String: Any]?) in
+        view.setRuler(ruler)
+      }
+
+      Prop("laserMode") { (view: QalmInkView, mode: String?) in
+        view.setLaserMode(mode ?? "trail")
+      }
+
       // The answer to onShapeHold: { kind, pts: [[x, y], …] } or null (not a shape).
       AsyncFunction("setShapePreview") { (view: QalmInkView, requestId: Int, shape: [String: Any]?) in
         let kind = shape?["kind"] as? String

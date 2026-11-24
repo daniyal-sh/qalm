@@ -118,13 +118,29 @@ export function mountedRange(slots: PageSlot[], scrollY: number, viewportH: numb
   return [Math.max(0, first - overscan), Math.min(slots.length - 1, last + overscan)];
 }
 
+/**
+ * Presentation: the zoom at which `page` fits whole in `view` with `margin` px around it. Not clamped to MIN_ZOOM (a
+ * tall page on a wide screen needs less), only kept above 0.1 and at most MAX_ZOOM.
+ */
+export function fitZoom(page: Pick<PageInfo, 'size'>, widestPageW: number, base: number, view: { w: number; h: number }, margin = 24): number {
+  const w1 = base * (page.size.w / Math.max(1, widestPageW)); // the page's px width at zoom 1
+  const h1 = (w1 * page.size.h) / page.size.w;
+  const z = Math.min((view.w - 2 * margin) / w1, (view.h - 2 * margin) / h1);
+  return Math.max(0.1, Math.min(MAX_ZOOM, Number.isFinite(z) ? z : 1));
+}
+
+/** Presentation: the scroll offset that centres `slot` vertically in a viewport `viewH` high. */
+export function centredScroll(slot: Pick<PageSlot, 'top' | 'height'>, viewH: number): number {
+  return Math.max(0, Math.round(slot.top + slot.height / 2 - viewH / 2));
+}
+
 /** Scroll offset that keeps the same content point under the viewport centre after a zoom change. */
 export function anchoredScroll(prevScroll: number, viewport: number, prevZoom: number, nextZoom: number): number {
   const centre = prevScroll + viewport / 2;
   return Math.max(0, centre * (nextZoom / prevZoom) - viewport / 2);
 }
 
-export type ToolId = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'text';
+export type ToolId = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'text' | 'laser';
 
 /** The pen button / squeeze / double-tap (tech-spec §3): toggles the eraser, or swaps back to the previous tool. */
 export function penButtonTool(gesture: 'eraser' | 'last' | 'none', tool: ToolId, previous: ToolId): ToolId {

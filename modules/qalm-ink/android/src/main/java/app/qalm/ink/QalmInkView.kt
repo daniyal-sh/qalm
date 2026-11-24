@@ -10,6 +10,7 @@ import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
 import android.os.Build
+import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.SurfaceView
@@ -17,6 +18,7 @@ import android.view.View
 import androidx.annotation.RequiresApi
 import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
 import androidx.input.motionprediction.MotionEventPredictor
+import com.facebook.react.uimanager.RootViewUtil
 import com.facebook.react.views.scroll.ReactHorizontalScrollView
 import com.facebook.react.views.scroll.ReactScrollView
 import expo.modules.kotlin.AppContext
@@ -87,6 +89,10 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   var eraserMode = "stroke"
   /** Live shapes on (the app passed `recognizeShape`): report holds with onShapeHold. */
   var shapeSnap = false
+  /** The on-screen ruler (window dp), or null: pen strokes starting near its edge follow it (RulerSnap). */
+  var ruler: RulerSnap.Pose? = null
+  /** laser: "trail" (fades over Laser.FADE_MS) or "dot" (one point under the pen). */
+  var laserMode = "trail"
   var drawWith by input::drawWith
   var hand by input::hand
   var palm by input::palm
@@ -104,6 +110,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   }
 
   fun propsChanged() {
+    if (tool != "laser") laser.clear()
     if (hover != null && live == null) layer.drawFrame(frameForHover())
   }
 
@@ -119,7 +126,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   // ---- state ----
   private class Live(
     val pointerId: Int,
-    val kind: String, // ink | erase | lasso
+    val kind: String, // ink | erase | lasso | laser
     val isPen: Boolean,
     val tool: String, // pen | highlighter
     val color: String,
@@ -144,6 +151,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     var snapCur: List<DoubleArray> = emptyList()
     var snapFrom = doubleArrayOf(0.0, 0.0)
     var erasedUpTo = 0
+    /** Along the ruler: the line (page units: ax, ay, bx, by) every point is projected onto. */
+    var line: DoubleArray? = null
   }
 
   /** A finished stroke (filled outline) or snapped shape (stroked at [lineWidth] page units) until PageCanvas has it. */
@@ -152,6 +161,9 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   private var live: Live? = null
   private val pending = ArrayList<Pending>()
   private var hover: FloatArray? = null // view px
+  /** The laser's trail (page units, uptime ms), fading after the pen lifts too. Never saved. */
+  private val laser = ArrayList<Laser.Pt>()
+  private val laserTick = Runnable { tickLaser() }
 
   private val mmPerPx: Double
     get() = resources.displayMetrics.let { InkInput.mmPerPx(it.xdpi, it.densityDpi) }
@@ -178,6 +190,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   }
 
   override fun onDetachedFromWindow() {
+    removeCallbacks(laserTick)
+    laser.clear()
     input.reset()
     layer.release()
     super.onDetachedFromWindow()
@@ -195,9 +209,16 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     val pressure = if (h < 0) ev.getPressure(idx) else ev.getHistoricalPressure(idx, h)
     val tiltFromVertical = if (h < 0) ev.getAxisValue(MotionEvent.AXIS_TILT, idx) else ev.getHistoricalAxisValue(MotionEvent.AXIS_TILT, idx, h)
     val orientation = if (h < 0) ev.getOrientation(idx) else ev.getHistoricalOrientation(idx, h)
+    var px = x / unitPxX()
+    var py = y / unitPxY()
+    live.line?.let { l ->
+      val q = RulerSnap.project(px, py, l[0], l[1], l[2], l[3])
+      px = q[0]
+      py = q[1]
+    }
     return InkPoint(
-      x = x / unitPxX(),
-      y = y / unitPxY(),
+      x = px,
+      y = py,
       p = if (stylus) min(1.0, max(0.0, pressure.toDouble())) else 0.5,
       tilt = if (stylus) PI / 2 - tiltFromVertical else PI / 2,
       az = if (stylus) orientation.toDouble() else 0.0,
@@ -206,6 +227,11 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   }
 
   private fun addPoint(live: Live, pt: InkPoint) {
+    if (live.kind == "laser") {
+      laser.add(Laser.Pt(pt.x.toFloat(), pt.y.toFloat(), live.downTime + pt.t.toLong(), live.points.isEmpty()))
+      live.points.add(pt)
+      return
+    }
     val kind = live.snapKind
     if (kind != null) {
       // Adjusting: the stroke stays as drawn; the shape follows the pen.
@@ -233,7 +259,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   private fun armHold(l: Live) {
     removeCallbacks(holdTimeout)
-    if (shapeSnap && l.kind == "ink" && l.tool == "pen" && l.snapKind == null) postDelayed(holdTimeout, LiveShape.HOLD_MS)
+    // A stroke along the ruler is a straight line already: it never snaps to a shape.
+    if (shapeSnap && l.kind == "ink" && l.tool == "pen" && l.snapKind == null && l.line == null) postDelayed(holdTimeout, LiveShape.HOLD_MS)
   }
 
   private fun holdElapsed() {
@@ -284,11 +311,12 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   private fun reject(reason: String) = onRejectedTouch(mapOf("reason" to reason))
 
   private fun start(ev: MotionEvent, idx: Int, isPen: Boolean, eraser: Boolean): Boolean {
-    val t = if (eraser) "eraser" else tool
+    val t = Laser.toolFor(tool, eraser)
     if (t == "none") return false
     val kind = when (t) {
       "eraser" -> "erase"
       "lasso" -> "lasso"
+      "laser" -> "laser"
       else -> "ink"
     }
     val l = Live(
@@ -303,6 +331,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
       smoothing = smoothing,
       downTime = ev.eventTime,
     )
+    if (kind == "ink") l.line = rulerLine(ev.getX(idx), ev.getY(idx), l.width / 2)
     live = l
     hover = null
     addPoint(l, point(ev, idx, -1, l))
@@ -330,12 +359,53 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     render(l)
   }
 
+  // ---- ruler: the window-dp pose, mapped onto this page ----
+  /**
+   * This view's origin in React Native's window coordinates (px), exactly as `measureInWindow` reports them: RN's own
+   * `RootViewUtil.getViewportOffset` (its place in the window; less the status bar and cutout only when the app isn't
+   * edge-to-edge, which Expo 58 is). Needs a check on a device with a status bar.
+   */
+  private fun rnWindowOrigin(): IntArray {
+    val o = RootViewUtil.getViewportOffset(this)
+    return intArrayOf(o.x, o.y)
+  }
+
+  /**
+   * The ruler line a stroke starting at view px (x, y) follows (page units, pushed out by [offset]), or null. The
+   * pose is in React Native window dp (measureInWindow), so this view's origin is measured the same way.
+   */
+  private fun rulerLine(x: Float, y: Float, offset: Double): DoubleArray? {
+    val r = ruler ?: return null
+    val d = resources.displayMetrics.density.toDouble()
+    val o = rnWindowOrigin()
+    val edge = RulerSnap.edgeAt(r, (o[0] + x) / d, (o[1] + y) / d) ?: return null
+    val toPage = { wx: Double, wy: Double -> doubleArrayOf((wx * d - o[0]) / unitPxX(), (wy * d - o[1]) / unitPxY()) }
+    return RulerSnap.line(edge, toPage, offset)
+  }
+
+  // ---- laser: a fading trail (or a dot) on the front buffer; nothing is emitted or saved ----
+  private fun tickLaser() {
+    removeCallbacks(laserTick)
+    Laser.prune(laser, SystemClock.uptimeMillis())
+    val l = live
+    val at = if (l?.kind == "laser") l.points.lastOrNull()?.let { floatArrayOf(it.x.toFloat(), it.y.toFloat()) } else null
+    layer.drawFrame(laserFrame(at))
+    if (laser.isNotEmpty() || l?.kind == "laser") postOnAnimation(laserTick)
+  }
+
+  private fun laserFrame(at: FloatArray?): Frame = Frame(
+    laser = if (laserMode == "dot") emptyList() else laser.toList(),
+    laserNow = SystemClock.uptimeMillis(),
+    laserDot = if (laserMode == "dot") at else null,
+  )
+
   private fun finish(ev: MotionEvent, idx: Int) {
     val l = live ?: return
     addPoint(l, point(ev, idx, -1, l))
     live = null
     removeCallbacks(holdTimeout)
     when (l.kind) {
+      "laser" -> tickLaser() // nothing to save: the trail fades on its own
       "erase" -> {
         emitErase(l, final = true)
         layer.drawFrame(null)
@@ -370,6 +440,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
             "heldMs" to Math.round(heldMs).toDouble(),
             "style" to l.style,
             "smoothing" to l.smoothing,
+            "ruler" to (l.line != null),
           ) + (if (shapeKind != null) mapOf("shape" to mapOf("kind" to shapeKind, "pts" to l.snapCur.map { listOf(it[0], it[1]) })) else emptyMap()),
         )
       }
@@ -378,8 +449,9 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   private fun retract() {
     removeCallbacks(holdTimeout)
+    val wasLaser = live?.kind == "laser"
     live = null
-    layer.drawFrame(null)
+    if (wasLaser) tickLaser() else layer.drawFrame(null)
   }
 
   private fun emitErase(l: Live, final: Boolean) {
@@ -422,6 +494,10 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     /** Partial erase: where the eraser just went, stroked at [trailWidth] page units. */
     val trail: Path? = null,
     val trailWidth: Float = 0f,
+    /** Laser: the trail (each segment faded by its age at [laserNow]) and the dot, page units. */
+    val laser: List<Laser.Pt> = emptyList(),
+    val laserNow: Long = 0L,
+    val laserDot: FloatArray? = null,
   )
 
   /** Pens are opaque; a highlighter uses its colour's own alpha (#rrggbbaa) or HIGHLIGHTER_ALPHA (tech-spec §2). */
@@ -432,6 +508,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   }
 
   private fun render(l: Live) {
+    if (l.kind == "laser") return tickLaser()
     val snapKind = l.snapKind
     val frame = when {
       l.kind == "ink" && snapKind != null -> Frame(
@@ -478,6 +555,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   private fun frameForHover(): Frame? {
     val h = hover ?: return null
+    if (tool == "laser") return if (laserMode == "dot") laserFrame(floatArrayOf((h[0] / unitPxX()).toFloat(), (h[1] / unitPxY()).toFloat())) else null
     if (tool == "lasso" || tool == "none") return null
     return Frame(
       cursor = doubleArrayOf(h[0] / unitPxX(), h[1] / unitPxY(), strokeWidth / 2),
@@ -487,6 +565,13 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
   private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+  /** Clears what a laser run covers in its layer (DST_OUT), before the run is drawn. */
+  private val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    style = Paint.Style.STROKE
+    strokeCap = Paint.Cap.ROUND
+    strokeJoin = Paint.Join.ROUND
+    xfermode = android.graphics.PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+  }
   /** Shapes: round caps and joins, as PageCanvas draws them. */
   private val shapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     style = Paint.Style.STROKE
@@ -543,6 +628,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
       shapePaint.strokeWidth = frame.trailWidth
       canvas.drawPath(it, shapePaint)
     }
+    if (frame.laser.size > 1 || frame.laserDot != null) paintLaser(canvas, frame, px * resources.displayMetrics.density)
     frame.cursor?.let {
       linePaint.color = frame.cursorColor
       linePaint.alpha = 180
@@ -550,6 +636,38 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
       canvas.drawCircle(it[0].toFloat(), it[1].toFloat(), max(it[2].toFloat(), px), linePaint)
     }
     canvas.restore()
+  }
+
+  /** The laser: a soft glow (the dark theme's `bad` tint) under a solid `bad` core, each segment faded by age. [dp] in page units. */
+  private fun paintLaser(canvas: Canvas, frame: Frame, dp: Float) {
+    // Each layer on its own: a run of the trail in one fade band is one path (no joints painted twice), and each run
+    // first clears what it covers, so where two bands meet the newer one shows, not both (no beads at the joints).
+    val runs = Laser.runs(frame.laser, frame.laserNow).map { (pts, alpha) ->
+      Path().apply { pts.forEachIndexed { i, p -> if (i == 0) moveTo(p.x, p.y) else lineTo(p.x, p.y) } } to alpha
+    }
+    if (runs.isNotEmpty()) {
+      for (pass in 0..1) {
+        val width = (if (pass == 0) 10f else 3f) * dp
+        val layer = canvas.saveLayer(null, null)
+        shapePaint.color = if (pass == 0) LASER_GLOW else LASER_CORE
+        shapePaint.strokeWidth = width
+        clearPaint.strokeWidth = width
+        for ((path, alpha) in runs) {
+          canvas.drawPath(path, clearPaint)
+          shapePaint.alpha = Math.round(255 * alpha * (if (pass == 0) 0.35f else 1f))
+          canvas.drawPath(path, shapePaint)
+        }
+        canvas.restoreToCount(layer)
+      }
+    }
+    frame.laserDot?.let {
+      fillPaint.color = LASER_GLOW
+      fillPaint.alpha = 90
+      canvas.drawCircle(it[0], it[1], 9f * dp, fillPaint)
+      fillPaint.color = LASER_CORE
+      fillPaint.alpha = 255
+      canvas.drawCircle(it[0], it[1], 4f * dp, fillPaint)
+    }
   }
 
   private interface InkLayer {
@@ -635,6 +753,9 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     const val HIGHLIGHTER_ALPHA = 0.45
     val LASSO_COLOR = Color.parseColor("#4338ca")
     val ERASER_CURSOR = Color.parseColor("#8b8b95")
+    /** InkOverlay.types LASER_CORE / LASER_GLOW: brand `bad` and its dark-theme tint. */
+    val LASER_CORE = Color.parseColor("#b91c1c")
+    val LASER_GLOW = Color.parseColor("#f87171")
 
     private fun hasAlpha(s: String) = s.trim().length == 9
 

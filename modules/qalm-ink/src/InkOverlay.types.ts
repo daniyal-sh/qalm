@@ -17,7 +17,20 @@ export interface InkPoint {
   t: number;
 }
 
-export type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'none';
+export type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'laser' | 'none';
+
+/**
+ * The on-screen ruler (same shape as `RulerPose` in @qalm/core), in window coordinates: CSS px on web, dp on Android,
+ * points on iOS. The overlay converts it to its page with its own position in the window.
+ */
+export interface InkRuler {
+  cx: number;
+  cy: number;
+  /** radians, clockwise */
+  angle: number;
+  length: number;
+  thickness: number;
+}
 /** Same as PenStyle / Smoothing in @qalm/core (tech-spec §2). */
 export type InkPenStyle = 'fountain' | 'ball' | 'brush';
 export type InkSmoothing = 0 | 1 | 2 | 3;
@@ -43,6 +56,8 @@ export interface StrokeEndEvent {
    * store. `points` is still the hand-drawn stroke up to the snap (for undo). The overlay hands it off under `id`.
    */
   shape?: { kind: string; pts: [number, number][] };
+  /** Ruled along the ruler (its points lie on one line): never a scribble. */
+  ruler?: boolean;
 }
 
 /**
@@ -89,6 +104,22 @@ export interface InkOverlayProps {
    * ERASE_TRAIL_MS under the pen, while the page catches up. Default 'stroke'.
    */
   eraserMode?: 'stroke' | 'partial';
+  /**
+   * While set (the ruler is shown), a pen or highlighter stroke that starts within RULER_SNAP_PX outside one of its long
+   * edges (or over its half next to that edge) is drawn straight along that edge: each point is projected onto the
+   * edge line, pushed out by half the pen width, keeping its pressure. Such a stroke never snaps to a shape.
+   */
+  ruler?: InkRuler | null;
+  /**
+   * Web only: the ruler as it is right now, read when a stroke starts (a finger may be moving it; `ruler` only
+   * changes once its pose settles). Takes precedence over `ruler`.
+   */
+  getRuler?(): InkRuler | null;
+  /**
+   * laser only: 'trail' (default) leaves a glowing red trail that fades over LASER_FADE_MS; 'dot' shows one point
+   * that follows the pen (and a hovering pen or mouse). The laser never emits strokes: nothing is saved.
+   */
+  laserMode?: 'trail' | 'dot';
   /** lasso only: a freeform loop (default) or a rectangle from where the drag started to where it is now */
   lassoMode?: 'free' | 'rect';
   input: InkInputSettings;
@@ -128,6 +159,13 @@ export interface InkOverlayProps {
 /** Palm rejection constants (tech-spec §3). Shared by every overlay implementation. */
 export const PALM_MAJOR_MM = { relaxed: 30, standard: 20, strict: 14 } as const;
 export const PEN_LOCKOUT_MS = 600;
+/** Ruler snapping: a stroke starting this far (window px / dp / pt) outside a ruler edge follows it (core RULER.snapPx). */
+export const RULER_SNAP_PX = 24;
+/** The laser's trail fades out over this long (ms). */
+export const LASER_FADE_MS = 1000;
+/** Laser colours: brand `bad` (#b91c1c) for the core and its dark-theme tint (#f87171) for the glow. */
+export const LASER_CORE = '#b91c1c';
+export const LASER_GLOW = '#f87171';
 /** Partial erase: the trail under the eraser covers its last this many ms. */
 export const ERASE_TRAIL_MS = 250;
 /** Live shapes: hold this long (ms) … */

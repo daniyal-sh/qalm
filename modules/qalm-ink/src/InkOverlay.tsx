@@ -39,7 +39,7 @@ const NativeInkView = requireNativeView('QalmInk') as unknown as React.Component
  * the latency budget; the view drops an answer that comes after the pen moved on or lifted. Adjusting the shape while
  * the pen drags runs natively (a port of @qalm/core `adjustShape`), so `adjustShape` is not used here.
  */
-export function InkOverlay({ style, width, recognizeShape, adjustShape: _adjust, ...props }: InkOverlayProps) {
+export function InkOverlay({ style, width, recognizeShape, adjustShape: _adjust, getRuler: _getRuler, ...props }: InkOverlayProps) {
   const ref = React.useRef<NativeInkViewRef>(null);
   const recognize = React.useRef(recognizeShape);
   recognize.current = recognizeShape;
