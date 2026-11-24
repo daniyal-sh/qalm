@@ -118,7 +118,7 @@ try {
   }));
   log('qalmDesktop:', JSON.stringify(bridge));
   if (bridge.node) throw new Error('Node is reachable from the page');
-  if (!bridge.keys.includes('openFile') || !bridge.keys.includes('saveFile') || !bridge.keys.includes('onDeepLink')) throw new Error('bridge incomplete');
+  if (!['openFile', 'saveFile', 'onDeepLink', 'setFullScreen', 'onFullScreenChange'].every((k) => bridge.keys.includes(k))) throw new Error('bridge incomplete');
 
   // 3. Import a PDF through the native open dialog (stubbed in main).
   await app.evaluate(({ dialog }, p) => {
@@ -153,6 +153,30 @@ try {
   await win.reload();
   await win.locator('canvas[style*="crosshair"]').first().waitFor({ timeout: 60_000 });
   log('reloaded', nbUrl);
+
+  // 5b. Fullscreen: F11 (main's before-input-event on Windows/Linux) fills the window and shows the focus pill;
+  // Esc leaves it and the header comes back. macOS has no F11: there the toolbar button does it.
+  const isFull = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isFullScreen());
+  const waitFull = async (want) => {
+    for (let i = 0; i < 40 && (await isFull()) !== want; i++) await win.waitForTimeout(100);
+    if ((await isFull()) !== want) throw new Error(`window fullscreen should be ${want}`);
+  };
+  if (process.platform === 'darwin') await win.getByLabel(/^Full screen/).first().click();
+  // A real input event (Playwright's CDP keys skip before-input-event, where main handles F11).
+  else await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.sendInputEvent({ type: 'keyDown', keyCode: 'F11' }));
+  await waitFull(true);
+  await win.getByLabel(/^Exit full screen/).first().waitFor({ timeout: 10_000 });
+  if (await win.getByLabel('Back to library').first().isVisible()) throw new Error('the header should give way to the focus pill');
+  writeFileSync(join(tmp, 'fullscreen.png'), await win.screenshot());
+  await win.keyboard.press('Escape');
+  await waitFull(false);
+  await win.getByLabel('Back to library').first().waitFor({ timeout: 10_000 });
+  // The toolbar button and the pill's exit button go through the bridge.
+  await win.getByLabel(/^Full screen/).first().click();
+  await waitFull(true);
+  await win.getByLabel(/^Exit full screen/).first().click();
+  await waitFull(false);
+  log('fullscreen: F11 / button on, Esc / pill off; focus pill and header follow');
 
   // 6. Export through the native save dialog (stubbed in main).
   await app.evaluate(({ dialog }, p) => {

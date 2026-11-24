@@ -179,10 +179,19 @@ try {
   await win.getByText('Create', { exact: true }).first().click();
   await win.waitForFunction(() => location.pathname.startsWith('/notebook/'), null, { timeout: 30_000 });
   const nbUrl = win.url();
+  // QALM_PALM_FULLSCREEN=1: the same checks in the fullscreen focus layout (the window stays fullscreen across pages).
+  const fullscreen = process.env.QALM_PALM_FULLSCREEN === '1';
+  const setFull = async (on) => {
+    await app.evaluate(({ BrowserWindow }, on) => BrowserWindow.getAllWindows()[0].setFullScreen(on), on);
+    await win.waitForFunction((on) => (innerWidth === screen.width) === on, on, { timeout: 20_000 });
+    await sleep(500);
+  };
+  if (fullscreen) await setFull(true);
   const open = async (input) => {
     await setInput(input);
     await win.goto(nbUrl);
     await win.locator('canvas[style*="crosshair"]').first().waitFor({ timeout: 60_000 });
+    if (fullscreen) await win.getByLabel(/^Exit full screen/).first().waitFor({ timeout: 10_000 });
     await sleep(1500);
   };
   await open({ drawWith: 'any', palm: 'standard', hand: 'right' });
@@ -282,7 +291,10 @@ try {
   check('pen only: a finger right after the pen does not scroll', (await scrollTops()) === top, `scrolled ${(await scrollTops()) - top} px`);
   await open({ drawWith: 'pen' });
   before = await ink(clip);
-  const zoom = async () => (await win.getByLabel('Reset zoom').first().textContent())?.trim();
+  const zoom = async () =>
+    fullscreen
+      ? `${Math.round((await win.locator('canvas[style*="crosshair"]').first().boundingBox()).width)} px wide`
+      : (await win.getByLabel('Reset zoom').first().textContent())?.trim();
   const z0 = await zoom();
   await touch('touchStart', [{ id: 1, x: cx - 40, y: cy, mm: FINGER }, { id: 2, x: cx + 40, y: cy, mm: FINGER }]);
   for (let i = 1; i <= 10; i++) {
@@ -294,8 +306,13 @@ try {
   const z1 = await zoom();
   check('pen only: two fingers zoom the page', z1 !== z0, `${z0} → ${z1}`);
   check('pen only: …and never zoom the whole window', (await win.evaluate(() => visualViewport?.scale ?? 1)) === 1);
+  if (fullscreen) await setFull(false);
   await win.getByLabel('Reset zoom').first().click();
   await sleep(800);
+  if (fullscreen) {
+    await setFull(true);
+    await sleep(1000);
+  }
   check('pen only: two fingers never draw', Math.abs((await ink(clip)) - before) < 40);
 
   if (errors.length) console.log(`console errors:\n  ${errors.join('\n  ')}`);
