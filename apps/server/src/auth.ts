@@ -128,7 +128,7 @@ async function logout(req: Request, env: Env): Promise<void> {
   }
 }
 
-const normEmail = (e: string) => e.trim().toLowerCase();
+export const normEmail = (e: string) => e.trim().toLowerCase();
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 
@@ -159,7 +159,7 @@ const PER_IP_PER_HOUR = 20;
  * At most 5 emails per address and 20 per client IP (CF-Connecting-IP) per rolling hour; records the send.
  * Without CF-Connecting-IP (local dev, tests) only the per-address limit applies.
  */
-async function limitEmails(env: Env, req: Request, email: string): Promise<void> {
+export async function limitEmails(env: Env, req: Request, email: string): Promise<void> {
   const t = now();
   const ip = req.headers.get('CF-Connecting-IP');
   const keys: [string, number][] = [[`email:${email}`, PER_EMAIL_PER_HOUR]];
@@ -178,7 +178,7 @@ async function limitEmails(env: Env, req: Request, email: string): Promise<void>
 
 // ---- email magic link ----
 
-function sixDigits(): string {
+export function sixDigits(): string {
   const a = new Uint32Array(1);
   do crypto.getRandomValues(a);
   while (a[0]! >= 4_294_000_000); // unbiased mod 1e6
@@ -220,7 +220,7 @@ interface LinkRow { email: string; return_to: string | null }
 /** A live (unused, unexpired) link, without consuming it. */
 async function peekMagicLink(env: Env, token: string): Promise<LinkRow | null> {
   if (!token) return null;
-  return env.DB.prepare('SELECT email, return_to FROM magic_links WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2')
+  return env.DB.prepare(`SELECT email, return_to FROM magic_links WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2 AND purpose = 'signin'`)
     .bind(await sha256Hex(token), now())
     .first<LinkRow>();
 }
@@ -231,7 +231,7 @@ async function peekMagicLink(env: Env, token: string): Promise<LinkRow | null> {
  */
 async function consumeAppLink(env: Env, token: string, nonce: string | undefined, confirm: boolean): Promise<string | null> {
   const row = await env.DB.prepare(
-    `UPDATE magic_links SET used_at = ?2 WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2 AND return_to IS NULL
+    `UPDATE magic_links SET used_at = ?2 WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2 AND return_to IS NULL AND purpose = 'signin'
        AND (nonce_hash = ?3 OR ?4 = 1) RETURNING email`,
   )
     .bind(await sha256Hex(token), now(), nonce ? await sha256Hex(nonce) : '', !nonce && confirm ? 1 : 0)
@@ -239,7 +239,7 @@ async function consumeAppLink(env: Env, token: string, nonce: string | undefined
   return row?.email ?? null;
 }
 
-const MAX_CODE_ATTEMPTS = 5;
+export const MAX_CODE_ATTEMPTS = 5;
 
 /** The 6-digit code typed on the device that asked (its nonce is required). */
 async function consumeCode(env: Env, email: string, code: string, nonce: string): Promise<string | null> {
@@ -247,14 +247,14 @@ async function consumeCode(env: Env, email: string, code: string, nonce: string)
   const row = await env.DB.prepare(
     `UPDATE magic_links SET used_at = ?3 WHERE token_hash = (
        SELECT token_hash FROM magic_links
-       WHERE email = ?1 AND code_hash = ?2 AND nonce_hash = ?4 AND used_at IS NULL AND expires_at > ?3 AND attempts < ?5 LIMIT 1
+       WHERE email = ?1 AND code_hash = ?2 AND nonce_hash = ?4 AND used_at IS NULL AND expires_at > ?3 AND attempts < ?5 AND purpose = 'signin' LIMIT 1
      ) RETURNING email`,
   )
     .bind(email, await codeHash(email, code), t, await sha256Hex(nonce), MAX_CODE_ATTEMPTS)
     .first<{ email: string }>();
   if (row) return row.email;
   // Wrong guesses count against every live code for the address.
-  await env.DB.prepare('UPDATE magic_links SET attempts = attempts + 1 WHERE email = ?1 AND used_at IS NULL AND expires_at > ?2').bind(email, t).run();
+  await env.DB.prepare(`UPDATE magic_links SET attempts = attempts + 1 WHERE email = ?1 AND used_at IS NULL AND expires_at > ?2 AND purpose = 'signin'`).bind(email, t).run();
   return null;
 }
 
@@ -262,7 +262,7 @@ async function consumeCode(env: Env, email: string, code: string, nonce: string)
 async function consumeConsentLink(env: Env, token: string): Promise<LinkRow | null> {
   if (!token) return null;
   return env.DB.prepare(
-    `UPDATE magic_links SET used_at = ?2 WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2 AND return_to IS NOT NULL RETURNING email, return_to`,
+    `UPDATE magic_links SET used_at = ?2 WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2 AND return_to IS NOT NULL AND purpose = 'signin' RETURNING email, return_to`,
   )
     .bind(await sha256Hex(token), now())
     .first<LinkRow>();

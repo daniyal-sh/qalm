@@ -1,5 +1,6 @@
 import type { Env } from './env';
 import { num } from './env';
+import { handleAccount } from './account';
 import { handleAuth, requireUser, TooManyRequests } from './auth';
 import { handleAuthorize, messagePage } from './consent';
 import { canAccess, deleteNotebook, nbDocId, parseDocId, room } from './docs';
@@ -11,7 +12,7 @@ const TICKET_TTL_MS = 30_000;
 const SHA = /^[0-9a-f]{64}$/;
 
 /** Paths the app calls cross-origin (web build on another origin, Electron from file://). Bearer auth only, no cookies. */
-const CORS_PATHS = /^\/(auth\/(email\/start|email\/lookup|email\/verify|refresh|logout)|me\/storage|sync\/ticket|notebooks\/[^/]+|assets\/[^/]+|ai\/.*|health)$/;
+const CORS_PATHS = /^\/(auth\/(email\/start|email\/lookup|email\/verify|refresh|logout)|account\/delete(\/start)?|me\/storage|sync\/ticket|notebooks\/[^/]+|assets\/[^/]+|ai\/.*|health)$/;
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
@@ -40,7 +41,7 @@ async function handle(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
     try {
-      const res = (await handleAuth(req, env, path)) ?? (await handleAuthorize(req, env, path)) ?? (await route(req, env, url));
+      const res = (await handleAuth(req, env, path)) ?? (await handleAccount(req, env, path)) ?? (await handleAuthorize(req, env, path)) ?? (await route(req, env, url));
       return res ?? error(404, 'Not found');
     } catch (e) {
       if (e instanceof HttpError) {
@@ -61,7 +62,7 @@ async function route(req: Request, env: Env, url: URL): Promise<Response | null>
 
   // ---- sync ----
   if (path === '/sync/ticket' && req.method === 'POST') {
-    const userId = await requireUser(req, env);
+    const userId = await requireLiveUser(req, env);
     const { docId } = await readJson<{ docId?: string }>(req);
     const doc = parseDocId(docId ?? '');
     if (!doc) throw new HttpError(400, 'Invalid docId');
@@ -113,7 +114,7 @@ async function route(req: Request, env: Env, url: URL): Promise<Response | null>
     const userId = await requireUser(req, env);
     const sha = am[1]!.toLowerCase();
     if (!SHA.test(sha)) throw new HttpError(400, 'Asset id must be a sha256 hex digest');
-    if (req.method === 'PUT') return putAsset(req, env, userId, sha);
+    if (req.method === 'PUT') return putAsset(req, env, await requireLiveUser(req, env), sha);
     if (req.method === 'GET') {
       // Only users who uploaded the bytes may read them (each device of a user uploads before referencing).
       const own = await env.DB.prepare('SELECT 1 FROM user_assets WHERE user_id = ?1 AND sha256 = ?2').bind(userId, sha).first();
@@ -132,6 +133,17 @@ async function route(req: Request, env: Env, url: URL): Promise<Response | null>
   // ---- Settings → AI access ----
   if (path.startsWith('/ai/')) return aiApi(req, env, path);
   return null;
+}
+
+/**
+ * A signed-in user whose account still exists and isn't being deleted: for anything that creates server data (sync
+ * tickets claim notebooks, uploads add assets). An access token stays valid for up to an hour after its account is deleted.
+ */
+async function requireLiveUser(req: Request, env: Env): Promise<string> {
+  const userId = await requireUser(req, env);
+  const live = await env.DB.prepare('SELECT 1 FROM users WHERE id = ?1 AND deleting_at IS NULL').bind(userId).first();
+  if (!live) throw new HttpError(401, 'This account no longer exists');
+  return userId;
 }
 
 async function putAsset(req: Request, env: Env, userId: string, sha: string): Promise<Response> {
