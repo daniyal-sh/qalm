@@ -1,4 +1,4 @@
-import { allowedMath, mathDeferredEpoch, onMathDeferred, parseMarkdown, texToPath, type MathBox, type MdBlock, type MdInline } from '@qalm/core';
+import { allowedMath, mathDeferredEpoch, onMathDeferred, parseMarkdown, type MathBox, type MathMemo, type MdBlock, type MdInline } from '@qalm/core';
 import * as React from 'react';
 import { Linking, Platform, StyleSheet, View, type TextStyle } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -11,8 +11,11 @@ import { Text } from './Text';
 const MATH_SCALE = 1.15;
 const HEADING = [1.3, 1.15, 1.05, 1, 1, 1];
 
-/** The comment's formulas that may render (`allowedMath`: a cap per comment); the rest show their source. */
-const MathAllowed = React.createContext<ReadonlySet<object>>(new Set());
+/**
+ * The comment's formulas that may render, with their outlines (`allowedMath`: a cap per comment; `undefined` while
+ * MathJax loads); the rest show their source.
+ */
+const MathAllowed = React.createContext<ReadonlyMap<object, MathBox | undefined>>(new Map());
 
 /** TeX as an inline SVG of its outlines (the same paths text boxes draw), sitting on the text's baseline. */
 function MathSvg({ box, size, color }: { box: MathBox; size: number; color: string }) {
@@ -57,7 +60,7 @@ function Inlines({ c: items, size, color }: { c: readonly MdInline[]; size: numb
       {items.map((x, k) => {
         if (x.t === 'br') return '\n';
         if (x.t === 'math') {
-          const box = allowed.has(x) ? texToPath(x.tex, false) : null;
+          const box = allowed.has(x) ? allowed.get(x) : null;
           if (box) return <MathSvg key={k} box={box} size={size} color={color} />;
           // MathJax not loaded yet: the raw TeX, muted. A TeX error, past the limits or deferred: the source as code.
           return (
@@ -130,7 +133,7 @@ function Blocks({ blocks, size, color, depth = 0 }: { blocks: readonly MdBlock[]
               </View>
             );
           case 'math': {
-            const box = allowed.has(b) ? texToPath(b.tex, true) : null;
+            const box = allowed.has(b) ? allowed.get(b) : null;
             if (box === undefined)
               return (
                 <View key={k} style={styles.mathBlock}>
@@ -163,10 +166,12 @@ export function Markdown({ text, color }: { text: string; color?: string }) {
   const { c } = useTheme();
   const blocks = React.useMemo(() => parseMarkdown(text), [text]);
   // Maths the time slice deferred (a long thread renders in one task), or waiting on MathJax (loaded on demand), fills
-  // in on later renders.
-  const [fill, setFill] = React.useState(mathDeferredEpoch);
-  React.useEffect(() => onMathDeferred(() => setFill(mathDeferredEpoch())), []);
-  const allowed = React.useMemo(() => allowedMath(blocks), [blocks, fill]); // eslint-disable-line react-hooks/exhaustive-deps
+  // in on later renders. A store, not state set from an effect, so a fill-in between render and subscribe isn't missed.
+  const fill = React.useSyncExternalStore(onMathDeferred, mathDeferredEpoch, mathDeferredEpoch);
+  // The formulas this comment has resolved, kept across renders: filling in always progresses, even when a long thread's
+  // maths outgrows the shared formula cache (it would evict what each pass needs again).
+  const memo = React.useMemo((): MathMemo => new Map(), [text]);
+  const allowed = React.useMemo(() => allowedMath(blocks, memo), [blocks, memo, fill]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <MathAllowed.Provider value={allowed}>
       <Blocks blocks={blocks} size={typeRamp.body.fontSize} color={color ?? c.ink} />

@@ -1,4 +1,4 @@
-import { layoutMarkdown, mathDeferredEpoch, onMathDeferred, setFallbackTextMeasure, type MdFont, type TextItem } from '@qalm/core';
+import { layoutMarkdown, mathDeferredEpoch, onMathDeferred, setFallbackTextMeasure, type MdFont, type MdLayout, type TextItem } from '@qalm/core';
 import * as React from 'react';
 import {
   FontHinting,
@@ -22,6 +22,7 @@ import figtreeBoldItalic from '../assets/fonts/Figtree-BoldItalic.ttf';
 import geistMono from '../assets/fonts/GeistMono-Regular.ttf';
 import notoMath from '../assets/fonts/NotoSansMath-Subset.ttf';
 import { disposeLater } from './dispose';
+import { createWidthCache } from './widthCache';
 import { TEXT_FONTS } from './textMetrics';
 
 /** The typefaces of Markdown text boxes, by core's font key (`MdFont`). */
@@ -88,10 +89,11 @@ function pathOf(d: string): SkPath | null {
  * `enabled`: only pages with Markdown boxes listen.
  */
 export function useMathFill(enabled: boolean): number {
-  const [epoch, setEpoch] = React.useState(mathDeferredEpoch);
-  React.useEffect(() => (enabled ? onMathDeferred(() => setEpoch(mathDeferredEpoch())) : undefined), [enabled]);
-  return enabled ? epoch : 0;
+  // A store, not state set from an effect: a fill-in between render and subscribe can't be missed.
+  return React.useSyncExternalStore(enabled ? onMathDeferred : noSubscribe, enabled ? mathDeferredEpoch : zero, enabled ? mathDeferredEpoch : zero);
 }
+const noSubscribe = () => () => {};
+const zero = () => 0;
 
 /**
  * Text none of the Markdown fonts has (Cyrillic, CJK, emoji, …: core's fallback runs) is drawn and measured by a Skia
@@ -99,8 +101,8 @@ export function useMathFill(enabled: boolean): number {
  * its shaping). Set once the text fonts have loaded; until then those runs are estimated and drawn as missing glyphs.
  */
 let fallbackFonts: SkTypefaceFontProvider | null = null;
-const MAX_WIDTHS = 4000;
-const widths = new Map<string, number>();
+/** Fallback runs' widths: bounded by count and by the text they key (a run can be a whole paragraph). */
+const widths = createWidthCache({ count: 4000, chars: 1_000_000 });
 
 function fallbackParagraph(text: string, font: MdFont, size: number, color: string, fonts: SkTypefaceFontProvider): SkParagraph {
   const bold = font === 'b' || font === 'bi';
@@ -121,16 +123,12 @@ export function provideMarkdownFallback(fonts: SkTypefaceFontProvider): void {
   if (fallbackFonts) return;
   fallbackFonts = fonts;
   setFallbackTextMeasure((text, font, size) => {
-    const key = `${font}|${size}|${text}`;
-    let w = widths.get(key);
-    if (w === undefined) {
+    return widths.get(`${font}|${size}|${text}`, () => {
       const p = fallbackParagraph(text, font, size, '#000000', fonts);
-      w = p.getMaxIntrinsicWidth();
+      const w = p.getMaxIntrinsicWidth();
       (p as { dispose?: () => void }).dispose?.();
-      if (widths.size >= MAX_WIDTHS) widths.delete(widths.keys().next().value!);
-      widths.set(key, w);
-    }
-    return w;
+      return w;
+    });
   }, TEXT_FONTS.join('+'));
 }
 
@@ -138,8 +136,8 @@ export function provideMarkdownFallback(fonts: SkTypefaceFontProvider): void {
  * Draws a Markdown text box (`format: 'md'`) from core's layout: the same ops PDF export and agents' crops draw.
  * Text runs are placed by advance (`drawText`, as the layout measures), fallback runs as Paragraphs, maths as outlines.
  */
-export function drawMarkdownText(c: SkCanvas, item: TextItem, faces: MdTypefaces): void {
-  const { ops } = layoutMarkdown(item.text, item.w, item.fontSize);
+export function drawMarkdownText(c: SkCanvas, item: TextItem, faces: MdTypefaces, layout: MdLayout = layoutMarkdown(item.text, item.w, item.fontSize)): void {
+  const { ops } = layout;
   const paint = Skia.Paint();
   paint.setAntiAlias(true);
   const color = Skia.Color(item.color);
@@ -177,11 +175,11 @@ export function drawMarkdownText(c: SkCanvas, item: TextItem, faces: MdTypefaces
 }
 
 /** A Markdown text box recorded as a picture (PageCanvas's declarative tree draws it with `<Picture>`). */
-export function markdownPicture(item: TextItem, faces: MdTypefaces): SkPicture {
+export function markdownPicture(item: TextItem, faces: MdTypefaces, layout: MdLayout = layoutMarkdown(item.text, item.w, item.fontSize)): SkPicture {
   const rec = Skia.PictureRecorder();
   // Turned boxes reach out from their corner in any direction.
-  const reach = Math.hypot(item.w, layoutMarkdown(item.text, item.w, item.fontSize).height) + item.fontSize;
+  const reach = Math.hypot(item.w, layout.height) + item.fontSize;
   const c = rec.beginRecording(Skia.XYWHRect(item.x - reach, item.y - reach, reach * 2, reach * 2));
-  drawMarkdownText(c, item, faces);
+  drawMarkdownText(c, item, faces, layout);
   return rec.finishRecordingAsPicture();
 }

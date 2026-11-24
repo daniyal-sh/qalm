@@ -1,5 +1,5 @@
-import { boxSelect, inkOnPaper, textHeight, hitTestErase, hitTestPoint, isIdentity, lassoSelect, Page, type Item, type PageInfo, type TextItem } from '@qalm/core';
-import { InkOverlay, PageCanvas, QalmInk, type InkOverlayProps } from 'qalm-ink';
+import { boxSelect, inkOnPaper, textHeight, hitTestErase, hitTestPoint, isIdentity, lassoSelect, rendersMarkdown, Page, type Item, type PageInfo, type TextItem } from '@qalm/core';
+import { InkOverlay, PageCanvas, QalmInk, useMathFill, type InkOverlayProps } from 'qalm-ink';
 import * as React from 'react';
 import { PixelRatio, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
@@ -297,9 +297,12 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   const toPage = (wx: number, wy: number, fn: (x: number, y: number) => void) =>
     rootRef.current?.measureInWindow((x, y) => fn((wx - x) / scale, (wy - y) / scale));
 
+  // A Markdown box's height changes as its maths fills in (MathJax loaded on demand, or a deferred time slice): pins on
+  // it move with it.
+  const mathFill = useMathFill(React.useMemo(() => items.some((it) => it.type === 'text' && rendersMarkdown(it)), [items]));
   const anchors = React.useMemo(
     () => (ed.showComments ? commentAnchors(comments, ed.activeCommentId, items) : []),
-    [comments, ed.activeCommentId, items, ed.showComments],
+    [comments, ed.activeCommentId, items, ed.showComments, mathFill], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const assetUri = React.useCallback((id: string) => imageUris.get(id), [imageUris]);
   const onDrawn = React.useCallback(

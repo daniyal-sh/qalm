@@ -1,5 +1,5 @@
 import type { BBox, ImageItem, Item, PageInfo, ShapeItem, TextItem } from '@qalm/core';
-import { inkPaint, itemBBox, itemsOnPaper, rendersMarkdown, paperPattern, shapePolylines, strokeOutline } from '@qalm/core';
+import { inkPaint, itemBBox, itemsOnPaper, layoutMarkdown, rendersMarkdown, paperPattern, shapePolylines, strokeOutline } from '@qalm/core';
 import {
   BlendMode,
   Canvas,
@@ -594,10 +594,12 @@ function useBase(
 }
 
 /** A Markdown text box (`format: 'md'`): core's layout, recorded as a picture. */
-function MarkdownTextNode({ item, md, fonts, fill }: { item: TextItem; md: MdTypefaces; fonts: SkTypefaceFontProvider; fill: number }) {
-  // `fonts`: its fallback runs are measured with them, so the layout changes once they load. `fill`: maths deferred by
-  // the time slice is ready to draw.
-  const picture = React.useMemo(() => markdownPicture(item, md), [item.x, item.y, item.rot, item.color, item.fontSize, item.text, item.w, md, fonts, fill]); // eslint-disable-line react-hooks/exhaustive-deps
+function MarkdownTextNode({ item, md, fonts }: { item: TextItem; md: MdTypefaces; fonts: SkTypefaceFontProvider; fill: number }) {
+  // Recorded again when its layout changes: a complete layout is cached (the same object), so maths filling in on other
+  // boxes doesn't re-record this one; an incomplete one is new each time (`fill` re-renders it). `fonts`: fallback runs
+  // are measured with them.
+  const layout = layoutMarkdown(item.text, item.w, item.fontSize);
+  const picture = React.useMemo(() => markdownPicture(item, md, layout), [item.x, item.y, item.rot, item.color, layout, md, fonts]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => () => disposeLater(picture as unknown as { dispose?: () => void }), [picture]);
   return <Picture picture={picture} />;
 }
@@ -639,6 +641,18 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
   const md = useMdTypefaces(hasMd);
   // Maths the app's time slice deferred: redraw (and re-bake) the page's Markdown boxes once it's ready.
   const fill = useMathFill(hasMd);
+  // What the page's Markdown boxes draw while some are incomplete (maths deferred by the time slice, or waiting on
+  // MathJax): part of the bake key, so only pages whose boxes actually change are baked again as maths fills in.
+  const mdProgress = React.useMemo(() => {
+    if (!hasMd) return '';
+    let s = '';
+    for (const it of items) {
+      if (it.type !== 'text' || !rendersMarkdown(it)) continue;
+      const l = layoutMarkdown(it.text, it.w, it.fontSize);
+      if (l.pending || l.partial) s += `${it.id}:${l.pending ? 'p' : ''}${l.ops.length}:${l.ops.reduce((n, o) => n + (o.k === 'path' ? 1 : 0), 0)};`;
+    }
+    return s;
+  }, [items, hasMd, fill]); // eslint-disable-line react-hooks/exhaustive-deps
   const pdf = usePageImage(pdfImage);
   const bounds = React.useMemo(() => Skia.XYWHRect(-pageW, -pageH, pageW * 3, pageH * 3), [pageW, pageH]);
   const liveIds = React.useMemo(() => (live?.ids.length ? new Set(live.ids) : null), [live?.ids]);
@@ -690,8 +704,8 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
   const backdrop = React.useMemo((): Backdrop => ({ ...paper, pdf, highlights }), [paper, pdf, highlights]);
   const target = React.useMemo(() => {
     const ratio = PixelRatio.get();
-    return { w: Math.round(width * ratio), h: Math.round(height * ratio), key: `${objectId(paper)}|${objectId(pdf)}|${fonts ? 1 : 0}|${md ? 1 : 0}|${fill}|${JSON.stringify(highlights)}` };
-  }, [width, height, paper, pdf, fonts, md, fill, highlights]);
+    return { w: Math.round(width * ratio), h: Math.round(height * ratio), key: `${objectId(paper)}|${objectId(pdf)}|${fonts ? 1 : 0}|${md ? 1 : 0}|${mdProgress}|${JSON.stringify(highlights)}` };
+  }, [width, height, paper, pdf, fonts, md, mdProgress, highlights]);
   const { plan, base, hadBase } = useBase(items, target, pageW, pageH, liveIds, fonts, md, backdrop, ink.pathOf);
   const tailItems = React.useMemo(() => (base ? items.slice(plan.tailStart) : NO_ITEMS), [base, items, plan.tailStart]);
   const tail = useInk(tailItems, bounds, liveIds);
