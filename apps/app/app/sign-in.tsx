@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import * as React from 'react';
 import { Platform, ScrollView, StyleSheet, TextInput, View, type TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -51,6 +51,8 @@ function useNow(on: boolean): number {
 export default function SignIn() {
   const { c } = useTheme();
   const s = useSession();
+  // After Settings → Delete account.
+  const deleted = useLocalSearchParams<{ deleted?: string }>().deleted === '1';
   const [email, setEmail] = React.useState('');
   const [sentTo, setSentTo] = React.useState<string | null>(null);
   const [sentAt, setSentAt] = React.useState<number | null>(null);
@@ -232,6 +234,11 @@ export default function SignIn() {
             </Appear>
           ) : (
             <>
+              {deleted ? (
+                <Note tone="good" icon="check-circle">
+                  Your account was deleted, with everything in it.
+                </Note>
+              ) : null}
               <View style={{ gap: 6 }}>
                 <Text variant="title">Sign in to qalm</Text>
                 <Text tone="muted">Enter your email and we'll send you a sign-in link and a 6-digit code. No password needed.</Text>

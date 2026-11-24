@@ -5,6 +5,7 @@ import * as React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { DeleteAccountSheet } from '../src/account/DeleteAccountSheet';
 import { formatBytes, summarizeUsage, type StorageUsage } from '../src/api/storage';
 import { denyRequest, getAiOverview, grantSummary, revokeGrant, toggleId, updateGrant, type AiOverview, type Grant } from '../src/api/ai';
 import { rejectedTouchText } from '../src/lib/palm';
@@ -30,6 +31,7 @@ const SECTIONS: { id: Section; label: string; icon: IconName }[] = [
 function AccountSection() {
   const s = useSession();
   const { c } = useTheme();
+  const [deleting, setDeleting] = React.useState(false);
   const who = s.profile?.email ?? s.profile?.name ?? (s.user ? 'Signed in' : 'Not signed in');
   return (
     <View style={{ gap: 8 }}>
@@ -47,7 +49,7 @@ function AccountSection() {
       {s.serverUrl ? (
         <Panel>
           {s.user ? (
-            <Row title="Sign out" description="Your notebooks stay in your account. Sign in again to see and sync them." last>
+            <Row title="Sign out" description="Your notebooks stay in your account. Sign in again to see and sync them.">
               <Button
                 label="Sign out"
                 variant="danger"
@@ -57,6 +59,11 @@ function AccountSection() {
                   })
                 }
               />
+            </Row>
+          ) : null}
+          {s.user ? (
+            <Row title="Delete account" description="Deletes your account and everything in it, on every device. We'll email you a code to confirm." last>
+              <Button label="Delete account…" variant="danger" onPress={() => setDeleting(true)} />
             </Row>
           ) : (
             <Row title="Sign in to sync" description="We email you a sign-in link and a code. Notebooks you made here come with you." last>
@@ -68,6 +75,7 @@ function AccountSection() {
       <Text variant="meta" tone="faint" style={{ paddingHorizontal: 4, color: c.faint }}>
         {BRAND.systemName} · free while in beta
       </Text>
+      <DeleteAccountSheet visible={deleting} onClose={() => setDeleting(false)} />
     </View>
   );
 }
