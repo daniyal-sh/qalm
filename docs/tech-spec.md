@@ -398,6 +398,12 @@ from the region images with its own vision. That keeps the app about 20 MB light
     that. Tap to jump, long-press and drag to reorder, bookmark (with a Bookmarks filter), duplicate and delete; the current page is
     highlighted. Thumbnails render lazily (only cells on screen, one at a time, into an offscreen CPU surface as small JPEGs) and are
     cached until the page changes. Desktop keys: PgUp / PgDn, Home / End, Ctrl+G (go to page; the "Page n of m" label opens it too).
+  - Fullscreen and focus layout: F11 (Windows, Linux, browsers), Ctrl+Cmd+F or the green button (macOS), or the header's
+    Full screen button. Desktop uses `BrowserWindow.setFullScreen` (F11 is caught in main's `before-input-event`, since
+    there's no menu bar), browsers the Fullscreen API, iPad and Android hide the system bars (`expo-status-bar`,
+    `expo-navigation-bar` immersive). The header, toolbar and side panels give way to a floating pill (pen, highlighter,
+    eraser, lasso, colour, undo/redo, exit) that can be dragged to any edge and is remembered (`focusPill` pref). Esc
+    clears a selection first, then leaves fullscreen; leaving restores the panels.
   - Settings: Account, Pen and palm rejection, and AI access (connected agents, pending requests, activity log)
   - Sign-in
 - **Sync:** the client uses the `y-websocket` provider (with tickets) for each loaded doc, with IndexedDB persistence on web and file persistence on native.

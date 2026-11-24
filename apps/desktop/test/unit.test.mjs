@@ -54,3 +54,13 @@ test('the right-click menu: text fields get spelling and editing, selected text 
   assert.deepEqual(s.contextMenuEntries({ ...base, isEditable: false, selectionText: 'hello' }), [{ kind: 'role', role: 'copy', enabled: true }]);
   assert.deepEqual(s.contextMenuEntries({ ...base, isEditable: false }), []);
 });
+
+test('F11 toggles fullscreen on Windows and Linux; macOS uses its menu (Ctrl+Cmd+F)', () => {
+  const key = (k, mods = {}) => ({ type: 'keyDown', key: k, control: false, alt: false, meta: false, shift: false, ...mods });
+  assert.equal(s.isFullScreenToggle(key('F11'), 'win32'), true);
+  assert.equal(s.isFullScreenToggle(key('F11'), 'linux'), true);
+  assert.equal(s.isFullScreenToggle(key('F11'), 'darwin'), false);
+  assert.equal(s.isFullScreenToggle({ ...key('F11'), type: 'keyUp' }, 'win32'), false);
+  assert.equal(s.isFullScreenToggle(key('F11', { control: true }), 'win32'), false);
+  assert.equal(s.isFullScreenToggle(key('F10'), 'win32'), false);
+});

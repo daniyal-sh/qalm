@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { persistClip } from '../src/editor/clipboard';
 import { desktop } from '../src/lib/desktop';
+import { useFullscreenShortcut } from '../src/lib/fullscreen';
 import { kvGet, kvSet } from '../src/lib/kv';
 import { quietNonPrimaryMouseUp } from '../src/lib/webMouse';
 import { SessionProvider, useSession } from '../src/state/session';
@@ -86,6 +87,7 @@ function Shell() {
   const { c, scheme } = useTheme();
   const [fontsLoaded, fontError] = useFonts({ Figtree_400Regular, Figtree_500Medium, Figtree_600SemiBold, Figtree_700Bold, GeistMono_400Regular });
   useDesktopDeepLinks(fontsLoaded || !!fontError);
+  useFullscreenShortcut();
   if (!fontsLoaded && !fontError) {
     return (
       <View style={{ flex: 1, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center' }}>

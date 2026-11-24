@@ -181,3 +181,22 @@ export function contextMenuEntries(p: ContextParams): ContextEntry[] {
   }
   return out;
 }
+
+/** The parts of Electron's `before-input-event` input the fullscreen shortcut looks at. */
+export interface KeyInput {
+  type: string;
+  key: string;
+  control: boolean;
+  alt: boolean;
+  meta: boolean;
+  shift: boolean;
+}
+
+/**
+ * F11 toggles window fullscreen on Windows and Linux, which have no menu bar to carry the shortcut. macOS uses the
+ * View menu's Ctrl+Cmd+F (and the green button), so this is false there.
+ */
+export function isFullScreenToggle(input: KeyInput, platform: string): boolean {
+  if (platform === 'darwin' || input.type !== 'keyDown') return false;
+  return input.key === 'F11' && !input.control && !input.alt && !input.meta;
+}

@@ -13,6 +13,7 @@ import {
   deepLinkToPath,
   filtersFor,
   findDeepLink,
+  isFullScreenToggle,
   mimeFor,
   openedMime,
   resolveWebPath,
@@ -230,6 +231,16 @@ function createWindow() {
   w.webContents.on('will-attach-webview', (e) => e.preventDefault());
   w.webContents.on('context-menu', (_e, params) => showContextMenu(w, params));
 
+  // Fullscreen: F11 on Windows/Linux (no menu bar there); macOS has View > Enter Full Screen (Ctrl+Cmd+F) and the
+  // green button. However the window gets there, the app hears about it and shows (or leaves) its focus layout.
+  w.webContents.on('before-input-event', (e, input) => {
+    if (!isFullScreenToggle(input, process.platform)) return;
+    e.preventDefault();
+    w.setFullScreen(!w.isFullScreen());
+  });
+  w.on('enter-full-screen', () => w.webContents.send('qalm:fullscreen', true));
+  w.on('leave-full-screen', () => w.webContents.send('qalm:fullscreen', false));
+
   void w.loadURL(startUrl());
 }
 
@@ -339,6 +350,19 @@ function registerIpc() {
       throw err;
     }
     return { saved: true };
+  });
+
+  ipcMain.handle('qalm:set-fullscreen', (e, on: unknown) => {
+    if (!senderOk(e)) throw new Error('forbidden');
+    if (typeof on !== 'boolean') throw new Error('setFullScreen: on must be a boolean');
+    const w = BrowserWindow.fromWebContents(e.sender);
+    if (!w) return false;
+    w.setFullScreen(on);
+    return w.isFullScreen();
+  });
+  ipcMain.handle('qalm:get-fullscreen', (e) => {
+    if (!senderOk(e)) throw new Error('forbidden');
+    return BrowserWindow.fromWebContents(e.sender)?.isFullScreen() ?? false;
   });
 
   ipcMain.on('qalm:info', (e) => {
