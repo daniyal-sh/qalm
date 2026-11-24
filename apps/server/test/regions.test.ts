@@ -77,6 +77,25 @@ describe('regions end to end', () => {
     n.pgc.close();
   });
 
+  it('a box crop draws a Markdown text box; comments reach agents as the Markdown they were written in', async () => {
+    const t = await signIn('markdown@example.com');
+    const n = await notebook(t, 'mdnb', 'Markdown');
+    const token = await connectAgent('markdown@example.com', { comment: true, transcribe: true });
+    const s = sessionOf('mdnb');
+    n.page.addItem({ id: 'tb', type: 'text', x: 50, y: 100, w: 240, text: '**Area** is $\\int_0^1 x^2\\,dx$\n- `done`', fontSize: 16, color: '#27272a', format: 'md' });
+    await until(async () => !!new Page(await serverDoc(`pg:mdnb:${n.pageId}`)).item('tb'));
+    // The crop is rendered by resvg with the Markdown fonts (bold, mono, maths); it comes back as an image.
+    const crop = await tool(token, 'read', { ref: 'p1@50,140,500,150', s });
+    expect(hasImage(crop)).toBe(true);
+    // An agent's Markdown comment is stored as written, and read back raw.
+    expect(textOf(await tool(token, 'comment', { ref: 'p1', text: 'Use **u-substitution**: $u = x^2$' }))).toBe('Commented on p1 as thread C1');
+    await until(() => n.page.comments().length === 1);
+    expect(n.page.comments()[0]!.text).toBe('Use **u-substitution**: $u = x^2$');
+    expect(textOf(await tool(token, 'read', { ref: 'C1', s }))).toContain('**u-substitution**');
+    n.nbc.close();
+    n.pgc.close();
+  });
+
   it('migrates a page from before regions when an agent reads it, and when it edits it', async () => {
     const t = await signIn('legacy@example.com');
     const n = await notebook(t, 'legnb', 'Legacy');

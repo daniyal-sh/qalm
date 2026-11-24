@@ -67,6 +67,8 @@ describe('parseMarkdown', () => {
     expect(maths('inline $$a+b$$ too')).toHaveLength(1);
     expect(maths('`$x$` is code')).toEqual([]);
     expect(parseMarkdown('$$\\frac{a}{b}$$')).toEqual([{ t: 'math', tex: '\\frac{a}{b}' }]);
+    // TeX is kept raw: Markdown escapes (`\,` `\{` `\*`) don't apply inside maths.
+    expect(maths('area $\\int_0^1 x^2\\,dx \\{a\\} a\\*b$')).toEqual([{ t: 'math', tex: '\\int_0^1 x^2\\,dx \\{a\\} a\\*b', m: {} }]);
   });
 
   it('gives comment previews their plain text', () => {

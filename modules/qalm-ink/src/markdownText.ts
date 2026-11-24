@@ -1,6 +1,6 @@
 import { layoutMarkdown, type MdFont, type TextItem } from '@qalm/core';
 import * as React from 'react';
-import { Skia, useTypeface, type SkCanvas, type SkFont, type SkPath, type SkPicture, type SkTypeface } from '@shopify/react-native-skia';
+import { FontHinting, Skia, useTypeface, type SkCanvas, type SkFont, type SkPath, type SkPicture, type SkTypeface } from '@shopify/react-native-skia';
 
 import figtree from '../assets/fonts/Figtree-Regular.ttf';
 import figtreeBold from '../assets/fonts/Figtree-Bold.ttf';
@@ -32,7 +32,15 @@ function fontOf(face: SkTypeface, size: number): SkFont {
   let bySize = fonts.get(face);
   if (!bySize) fonts.set(face, (bySize = new Map()));
   let f = bySize.get(size);
-  if (!f) bySize.set(size, (f = Skia.Font(face, size)));
+  if (!f) {
+    f = Skia.Font(face, size);
+    // Page units are scaled up on screen: hinted, whole-unit advances would make runs wider than the layout measured
+    // (a bold word ran into the next). Linear, subpixel metrics match the fonts' real advances.
+    f.setHinting(FontHinting.None);
+    f.setLinearMetrics(true);
+    f.setSubpixel(true);
+    bySize.set(size, f);
+  }
   return f;
 }
 
