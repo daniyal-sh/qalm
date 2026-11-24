@@ -97,6 +97,33 @@ object Laser {
    */
   fun toolFor(tool: String, eraserHeld: Boolean): String = if (eraserHeld && tool != "laser") "eraser" else tool
 
+  /** The fade in this many steps: each step of a trail is drawn as one path (InkOverlay laser.ts LASER_BANDS). */
+  const val BANDS = 8
+
+  /**
+   * The trail as runs to draw, oldest first: consecutive points of one press whose fade (by the newer point's age at
+   * [now]) falls in the same band; neighbouring runs share their joint point. Port of laser.ts `laserRuns`.
+   */
+  fun runs(pts: List<Pt>, now: Long): List<Pair<List<Pt>, Float>> {
+    val out = ArrayList<Pair<ArrayList<Pt>, Float>>()
+    var cur: Pair<ArrayList<Pt>, Float>? = null
+    for (i in 1 until pts.size) {
+      val q = pts[i]
+      if (q.start) {
+        cur = null
+        continue
+      }
+      val band = kotlin.math.ceil(alpha(now - q.t) * BANDS) / BANDS
+      if (band <= 0f) continue
+      if (cur == null || cur.second != band) {
+        cur = Pair(arrayListOf(pts[i - 1]), band)
+        out.add(cur)
+      }
+      cur.first.add(q)
+    }
+    return out
+  }
+
   /** 1 when new, 0 at FADE_MS. */
   fun alpha(age: Long): Float = (1f - age.toFloat() / FADE_MS).coerceIn(0f, 1f)
 }

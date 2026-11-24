@@ -101,6 +101,7 @@ export function Appear({
   duration = motion.base,
   scale,
   pointerEvents,
+  ready = true,
 }: {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
@@ -109,13 +110,16 @@ export function Appear({
   duration?: number;
   scale?: boolean;
   pointerEvents?: 'box-none' | 'none' | 'box-only' | 'auto';
+  /** The entrance waits for this (e.g. until the content has measured itself and can be placed). */
+  ready?: boolean;
 }) {
   const reduce = useReducedMotion();
   const v = React.useRef(new Animated.Value(reduce ? 1 : 0)).current;
   React.useEffect(() => {
+    if (!ready) return;
     if (reduce) return v.setValue(1);
     Animated.timing(v, { toValue: 1, duration, easing: easeOut, useNativeDriver: NATIVE_DRIVER }).start();
-  }, [v, reduce, duration]);
+  }, [v, reduce, duration, ready]);
   const d = distance ?? motion.rise;
   // The style's own transforms (e.g. the focus pill's shrink on a phone) and opacity (the pill stays hidden until it
   // has measured itself) stay; the entrance is added to them.

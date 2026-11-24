@@ -128,16 +128,26 @@ final class LaserView: UIView {
     ctx.setLineCap(.round)
     ctx.setLineJoin(.round)
     let now = ProcessInfo.processInfo.systemUptime
-    for pass in 0..<2 {
+    let runs = LaserView.runs(trail, now: now)
+    // Each layer on its own: a run of the trail in one fade band is one path (no joints painted twice), and each run
+    // first clears what it covers, so where two bands meet the newer one shows, not both (no beads at the joints).
+    for pass in 0..<2 where !runs.isEmpty {
       let colour = pass == 0 ? LaserView.glow : LaserView.core
       ctx.setLineWidth(pass == 0 ? 10 : 3)
-      for j in trail.indices.dropFirst() where !trail[j].start {
-        let k = max(0, min(1, 1 - (now - trail[j].t) / LaserView.fadeSeconds))
-        ctx.setStrokeColor(colour.withAlphaComponent(CGFloat(k) * (pass == 0 ? 0.35 : 1)).cgColor)
-        ctx.move(to: trail[j - 1].p)
-        ctx.addLine(to: trail[j].p)
+      ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+      for run in runs {
+        let path = CGMutablePath()
+        path.addLines(between: run.points)
+        ctx.setBlendMode(.destinationOut)
+        ctx.setStrokeColor(UIColor.black.cgColor)
+        ctx.addPath(path)
+        ctx.strokePath()
+        ctx.setBlendMode(.normal)
+        ctx.setStrokeColor(colour.withAlphaComponent(run.alpha * (pass == 0 ? 0.35 : 1)).cgColor)
+        ctx.addPath(path)
         ctx.strokePath()
       }
+      ctx.endTransparencyLayer()
     }
     if let d = dot {
       ctx.setFillColor(LaserView.glow.withAlphaComponent(0.35).cgColor)
@@ -145,6 +155,34 @@ final class LaserView: UIView {
       ctx.setFillColor(LaserView.core.cgColor)
       ctx.fillEllipse(in: CGRect(x: d.x - 4, y: d.y - 4, width: 8, height: 8))
     }
+  }
+
+  /** The fade in this many steps (laser.ts LASER_BANDS). */
+  static let bands = 8.0
+
+  /**
+   * The trail as runs to draw, oldest first: consecutive points of one press whose fade (by the newer point's age)
+   * falls in the same band; neighbouring runs share their joint point. Port of laser.ts `laserRuns`.
+   */
+  static func runs(_ trail: [Pt], now: TimeInterval) -> [(points: [CGPoint], alpha: CGFloat)] {
+    var out: [(points: [CGPoint], alpha: CGFloat)] = []
+    var open = false
+    for j in trail.indices.dropFirst() {
+      let q = trail[j]
+      if q.start {
+        open = false
+        continue
+      }
+      let fade = max(0, min(1, 1 - (now - q.t) / fadeSeconds))
+      let band = CGFloat((fade * bands).rounded(.up) / bands)
+      if band <= 0 { continue }
+      if !open || out[out.count - 1].alpha != band {
+        out.append((points: [trail[j - 1].p], alpha: band))
+        open = true
+      }
+      out[out.count - 1].points.append(q.p)
+    }
+    return out
   }
 
   override func removeFromSuperview() {

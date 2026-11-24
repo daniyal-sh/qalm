@@ -6,6 +6,7 @@ import { DEFAULT_PILL, pillCompact, PILL_MARGIN, PILL_MIN_SCALE } from '../src/e
 import { defaultRuler, dragRuler, keepInView, MIN_MM_TICK_PX, rotateRuler, rulerTicks, twoFingerRuler } from '../src/editor/ruler.logic';
 import { centredScroll, fitZoom, layoutPages } from '../src/editor/view';
 import { clampPresent, f5Action, presentKey } from '../src/editor/present.logic';
+import { LASER_BANDS, laserRuns, type LaserPt } from '../../../modules/qalm-ink/src/laser';
 
 const deg = (d: number) => (d * Math.PI) / 180;
 const r0: RulerPose = { cx: 400, cy: 300, angle: 0, length: 600, thickness: 72 };
@@ -131,5 +132,25 @@ describe('presentation keys', () => {
     expect(f5Action(true, true)).toBe('none');
     expect(f5Action(false, false)).toBe('start');
     expect(f5Action(false, true)).toBe('stop');
+  });
+});
+
+describe('laser trail runs (no beads at the joints)', () => {
+  const pt = (x: number, t: number, start = false): LaserPt => ({ x, y: 0, t, start });
+  it('draws a fresh trail as one run, and splits it only where its fade steps down', () => {
+    const fresh = Array.from({ length: 30 }, (_, i) => pt(i, 1000 - i, i === 0));
+    expect(laserRuns(fresh, 1000)).toHaveLength(1);
+    expect(laserRuns(fresh, 1000)[0]!.pts).toHaveLength(30);
+    // Spread over the whole fade: one run per band (at most LASER_BANDS), each joined to the next at a shared point.
+    const spread = Array.from({ length: 101 }, (_, i) => pt(i, i * 10, i === 0));
+    const runs = laserRuns(spread, 1000);
+    expect(runs.length).toBeLessThanOrEqual(LASER_BANDS);
+    for (let i = 1; i < runs.length; i++) expect(runs[i]!.pts[0]).toBe(runs[i - 1]!.pts[runs[i - 1]!.pts.length - 1]);
+    expect(runs.map((r) => r.alpha)).toEqual([...runs.map((r) => r.alpha)].sort((a, b) => a - b)); // oldest first
+  });
+  it('never joins two presses, and drops what has faded out', () => {
+    const two = [pt(0, 900, true), pt(1, 910), pt(5, 920, true), pt(6, 930)];
+    expect(laserRuns(two, 1000).map((r) => r.pts.map((q) => q.x))).toEqual([[0, 1], [5, 6]]);
+    expect(laserRuns([pt(0, 0, true), pt(1, 5)], 2000)).toEqual([]);
   });
 });

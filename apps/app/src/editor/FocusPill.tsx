@@ -135,6 +135,8 @@ export function FocusPill(p: FocusPillProps) {
   return (
     <>
       <Appear
+        // Slides in once it has measured itself (until then it can't be placed, and stays hidden).
+        ready={size.w > 0}
         from={p.place.edge === 'top' ? 'top' : p.place.edge === 'bottom' ? 'bottom' : p.place.edge}
         style={[
           styles.pill,

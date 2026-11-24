@@ -17,6 +17,7 @@ import {
   SHAPE_HOLD_MM,
   SHAPE_HOLD_MS,
 } from './InkOverlay.types';
+import { laserRuns, type LaserPt } from './laser';
 import { traceOutline } from './outlinePath';
 import { MM_PER_CSS_PX as MM_PER_PX, palmVerdict, pointerContact, secondFingerRetracts, touchContact } from './palm';
 import { fingerGesture, type FingerOwner } from './twoFingerPan';
@@ -37,13 +38,6 @@ const HANDOFF_FRAMES = 2;
 
 type Kind = 'ink' | 'erase' | 'lasso' | 'laser';
 
-/** A laser trail point: page units, performance.now() ms, and whether it starts a new segment (a new press). */
-interface LaserPt {
-  x: number;
-  y: number;
-  t: number;
-  start: boolean;
-}
 /** Laser widths in CSS px (they don't scale with zoom): the glow and the core of the trail, the dot's glow and core radii. */
 const LASER_GLOW_PX = 10;
 const LASER_CORE_PX = 3;
@@ -145,6 +139,7 @@ export function InkOverlay(props: InkOverlayProps) {
     laser: [] as LaserPt[],
     laserDot: null as { x: number; y: number } | null,
     laserRaf: 0,
+    laserCanvas: null as HTMLCanvasElement | null,
     draw: () => {},
   });
 
@@ -262,21 +257,42 @@ export function InkOverlay(props: InkOverlayProps) {
       if (s.laser.length > 1 || s.laserDot) {
         const now = performance.now();
         const px = dpr / k; // one CSS px in page units
-        for (const [colour, w, a] of [
-          [LASER_GLOW, LASER_GLOW_PX, 0.35],
-          [LASER_CORE, LASER_CORE_PX, 1],
-        ] as const) {
-          ctx.strokeStyle = colour;
-          ctx.lineWidth = w * px;
-          for (let i = 1; i < s.laser.length; i++) {
-            const q = s.laser[i]!;
-            if (q.start) continue;
-            const pr = s.laser[i - 1]!;
-            ctx.globalAlpha = a * Math.max(0, 1 - (now - q.t) / LASER_FADE_MS);
-            ctx.beginPath();
-            ctx.moveTo(pr.x, pr.y);
-            ctx.lineTo(q.x, q.y);
-            ctx.stroke();
+        if (s.laser.length > 1) {
+          // Each layer is drawn on its own canvas, then laid on the overlay: within a layer, each run of the trail in
+          // one fade band is one path (no joints painted twice), and a band first clears what it covers, so where two
+          // bands meet the newer one shows, not both (no beads at the joints).
+          const lc = (s.laserCanvas ??= document.createElement('canvas'));
+          if (lc.width !== w || lc.height !== h) {
+            lc.width = w;
+            lc.height = h;
+          }
+          const l = lc.getContext('2d')!;
+          const runs = laserRuns(s.laser, now);
+          for (const [colour, lw, a] of [
+            [LASER_GLOW, LASER_GLOW_PX, 0.35],
+            [LASER_CORE, LASER_CORE_PX, 1],
+          ] as const) {
+            l.setTransform(1, 0, 0, 1, 0, 0);
+            l.clearRect(0, 0, w, h);
+            l.setTransform(k, 0, 0, (cssH * dpr) / pageSize.h, 0, 0);
+            l.lineCap = 'round';
+            l.lineJoin = 'round';
+            l.lineWidth = lw * px;
+            l.strokeStyle = colour;
+            for (const run of runs) {
+              const path = new Path2D();
+              run.pts.forEach((q, i) => (i ? path.lineTo(q.x, q.y) : path.moveTo(q.x, q.y)));
+              l.globalCompositeOperation = 'destination-out';
+              l.globalAlpha = 1;
+              l.stroke(path);
+              l.globalCompositeOperation = 'source-over';
+              l.globalAlpha = a * run.alpha;
+              l.stroke(path);
+            }
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.globalAlpha = 1;
+            ctx.drawImage(lc, 0, 0);
+            ctx.setTransform(k, 0, 0, (cssH * dpr) / pageSize.h, 0, 0);
           }
         }
         if (s.laserDot && P.tool === 'laser') {

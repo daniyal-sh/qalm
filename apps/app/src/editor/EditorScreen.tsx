@@ -329,7 +329,16 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
 
   // Presentation (below): the page index shown, or null. Declared before the pinch: its callbacks become worklets that
   // capture what they use when the editor renders.
-  const [presentAt, setPresentAt] = React.useState<number | null>(null);
+  // The page is tracked by its id (pages added, moved or deleted on another device meanwhile), with its last index
+  // for when it is gone.
+  const [present, setPresent] = React.useState<{ id: string; at: number } | null>(null);
+  const presentAt = present === null ? null : ((i) => (i >= 0 ? i : clampPresent(present.at, pages.length)))(pages.findIndex((x) => x.id === present.id));
+  const setPresentAt = (i: number | null) => {
+    const id = i === null ? undefined : pagesNow.current[i]?.id;
+    setPresent(i === null || !id ? null : { id, at: i });
+  };
+  const pagesNow = React.useRef(pages);
+  pagesNow.current = pages;
   const presentRef = React.useRef(presentAt);
   presentRef.current = presentAt;
   const pinchScale = React.useRef(1);
@@ -807,11 +816,11 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const presenting = presentAt !== null;
   // Pages deleted meanwhile (on another device): stay on a page that exists ("5 / 4" never shows); none left, stop.
   React.useEffect(() => {
-    if (presentAt === null) return;
-    const at = clampPresent(presentAt, pages.length);
-    if (at === null) stopPresentingRef.current();
-    else if (at !== presentAt) setPresentAt(at);
-  }, [pages.length, presentAt]);
+    if (present === null) return;
+    if (presentAt === null) stopPresentingRef.current();
+    else if (pages[presentAt]?.id !== present.id || presentAt !== present.at) setPresentAt(presentAt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pages, present]);
 
   const mac = Platform.OS === 'web' && (desktop()?.platform === 'darwin' || (typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)));
   const fsKey = Platform.OS === 'web' ? ` (${fullscreenShortcut(mac)})` : '';
@@ -1328,9 +1337,9 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             {/* Floating toolbar; in fullscreen, the focus pill; presenting, only the page arrows and the laser */}
             {presenting ? (
               <PresentBar
-                index={Math.min(presentAt!, Math.max(0, pages.length - 1))}
+                index={presentAt!}
                 count={pages.length}
-                onPage={(d) => setPresentAt((x) => (x === null ? x : Math.max(0, Math.min(pages.length - 1, x + d))))}
+                onPage={(d) => presentAt !== null && setPresentAt(Math.max(0, Math.min(pages.length - 1, presentAt + d)))}
                 laserMode={tools.laserMode}
                 onLaserMode={(m) => changeTools({ laserMode: m, tool: 'laser' })}
                 onExit={stopPresenting}

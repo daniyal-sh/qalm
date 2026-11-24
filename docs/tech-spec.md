@@ -475,7 +475,8 @@ from the region images with its own vision. That keeps the app about 20 MB light
     next, ← ↑ Backspace PgUp previous, Home / End, K switches trail / dot, Esc or F5 stops (`present.logic.ts`); Space
     or Enter on a focused bar button only presses it. F5 never reloads the page, even in a text field (where it does
     nothing). While presenting, the pen button doesn't switch to the eraser and Ctrl+wheel / trackpad pinch don't zoom;
-    pages deleted on another device meanwhile keep the index on a page that exists (none left: it stops). Leaving
+    the page shown is tracked by its id, so pages added or moved elsewhere don't change it, and if it is deleted
+    elsewhere the nearest page that exists is shown (none left: it stops). Leaving
     fullscreen any other way stops it too; stopping restores the tool, the zoom and the page.
   - Desktop keys (web and Electron; not while typing): P pen, H highlighter, E eraser (again: whole stroke / partial),
     L lasso, T text, K laser (again: trail / dot), R ruler on / off, F5 present, F11 or Ctrl+Cmd+F fullscreen, Esc
@@ -624,8 +625,10 @@ that ink is all deleted, the thread shows only in the panel ("Ink removed").
   underneath (`forwardToInk`: a synthetic pointerdown, then the overlay captures the pointer). Zoom-proof: the line is
   mapped into each page's units when the stroke starts.
 - **Native:** the overlays snap. The pose is in React Native's `measureInWindow` coordinates, so Android measures its
-  own origin the same way (`getLocationOnScreen` less `getWindowVisibleDisplayFrame`, so a status bar doesn't shift
-  it) and iOS uses UIWindow coordinates (`convert(_:to: nil)`), which is what RN reports there. The ruler view itself is React Native, so on iPad and Android a pen landing
+  own origin with RN's own `RootViewUtil.getViewportOffset` (its place in the window, less the status bar only when
+  the app isn't edge-to-edge; Expo 58 is) and iOS uses UIWindow coordinates (`convert(_:to: nil)`), which is what RN
+  reports there. Both still need a check on a device. A native overlay gets the pose when it settles (80 ms), not at
+  pen-down mid-move as on web. The ruler view itself is React Native, so on iPad and Android a pen landing
   on the ruler's body moves it (only web forwards it); strokes starting outside the edge snap everywhere.
 
 ### Laser pointer
@@ -636,8 +639,10 @@ that ink is all deleted, the thread shows only in the panel ("Ink removed").
 - **Trail:** a red line, a 3 px core in brand `bad` (#b91c1c) over a 10 px glow in its dark tint (#f87171) at 35 %,
   each segment fading with its age and gone after **1 s** (`LASER_FADE_MS`), also after the pen lifts. **Dot:** a 4 px
   core in a 9 px glow under the pen, and under a hovering pen or mouse (the mouse cursor is hidden). Sizes are screen
-  px at any zoom. Web: canvas, requestAnimationFrame while fading; Android: the front-buffered layer redrawn with
-  `postOnAnimation`; iOS: a `LaserView` drawn with a CADisplayLink.
+  px at any zoom. The trail is drawn in 8 fade steps (`laserRuns` in `laser.ts`, ported to Kotlin and Swift): each
+  run of one press within one step is a single path, drawn on its own layer after clearing what it covers, so no joint
+  is painted twice (no beads). Web: canvas, requestAnimationFrame while fading; Android: the front-buffered layer
+  redrawn with `postOnAnimation`; iOS: a `LaserView` drawn with a CADisplayLink.
 
 ### Shape snapping (live: `recognizeShape`, `adjustShape`)
 GoodNotes-style, gated by the `snapShapes` setting (the app passes `recognizeShape` to the overlay only when it's on):

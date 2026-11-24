@@ -3,6 +3,7 @@ package app.qalm.ink
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -68,6 +69,17 @@ class RulerSnapTest {
     assertEquals("laser", Laser.toolFor("laser", eraserHeld = true))
     assertEquals("eraser", Laser.toolFor("pen", eraserHeld = true))
     assertEquals("pen", Laser.toolFor("pen", eraserHeld = false))
+  }
+
+  @Test fun laserRunsJoinWithoutOverlapAndNeverAcrossPresses() {
+    val fresh = (0 until 30).map { Laser.Pt(it.toFloat(), 0f, 1000L - it, it == 0) }
+    assertEquals(1, Laser.runs(fresh, 1000L).size)
+    val spread = (0..100).map { Laser.Pt(it.toFloat(), 0f, it * 10L, it == 0) }
+    val runs = Laser.runs(spread, 1000L)
+    assertTrue(runs.size <= Laser.BANDS)
+    for (i in 1 until runs.size) assertTrue(runs[i].first.first() === runs[i - 1].first.last())
+    val two = listOf(Laser.Pt(0f, 0f, 900, true), Laser.Pt(1f, 0f, 910, false), Laser.Pt(5f, 0f, 920, true), Laser.Pt(6f, 0f, 930, false))
+    assertEquals(listOf(listOf(0f, 1f), listOf(5f, 6f)), Laser.runs(two, 1000L).map { r -> r.first.map { it.x } })
   }
 
   @Test fun laserTrailFades() {

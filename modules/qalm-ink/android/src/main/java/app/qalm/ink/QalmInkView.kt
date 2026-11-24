@@ -9,7 +9,6 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
-import android.graphics.Rect
 import android.os.Build
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
@@ -19,6 +18,7 @@ import android.view.View
 import androidx.annotation.RequiresApi
 import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
 import androidx.input.motionprediction.MotionEventPredictor
+import com.facebook.react.uimanager.RootViewUtil
 import com.facebook.react.views.scroll.ReactHorizontalScrollView
 import com.facebook.react.views.scroll.ReactScrollView
 import expo.modules.kotlin.AppContext
@@ -361,13 +361,13 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   // ---- ruler: the window-dp pose, mapped onto this page ----
   /**
-   * This view's origin in React Native's window coordinates (px), as `measureInWindow` reports them: its place on
-   * screen less the window's visible display frame (so a status bar above the app doesn't shift the ruler).
+   * This view's origin in React Native's window coordinates (px), exactly as `measureInWindow` reports them: RN's own
+   * `RootViewUtil.getViewportOffset` (its place in the window; less the status bar and cutout only when the app isn't
+   * edge-to-edge, which Expo 58 is). Needs a check on a device with a status bar.
    */
   private fun rnWindowOrigin(): IntArray {
-    val o = IntArray(2).also { getLocationOnScreen(it) }
-    val frame = Rect().also { getWindowVisibleDisplayFrame(it) }
-    return intArrayOf(o[0] - frame.left, o[1] - frame.top)
+    val o = RootViewUtil.getViewportOffset(this)
+    return intArrayOf(o.x, o.y)
   }
 
   /**
@@ -565,6 +565,13 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
   private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+  /** Clears what a laser run covers in its layer (DST_OUT), before the run is drawn. */
+  private val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    style = Paint.Style.STROKE
+    strokeCap = Paint.Cap.ROUND
+    strokeJoin = Paint.Join.ROUND
+    xfermode = android.graphics.PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+  }
   /** Shapes: round caps and joins, as PageCanvas draws them. */
   private val shapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     style = Paint.Style.STROKE
@@ -633,17 +640,24 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   /** The laser: a soft glow (the dark theme's `bad` tint) under a solid `bad` core, each segment faded by age. [dp] in page units. */
   private fun paintLaser(canvas: Canvas, frame: Frame, dp: Float) {
-    val pts = frame.laser
-    for (pass in 0..1) {
-      shapePaint.color = if (pass == 0) LASER_GLOW else LASER_CORE
-      shapePaint.strokeWidth = (if (pass == 0) 10f else 3f) * dp
-      for (j in 1 until pts.size) {
-        val b = pts[j]
-        if (b.start) continue
-        val a = pts[j - 1]
-        val k = Laser.alpha(frame.laserNow - b.t)
-        shapePaint.alpha = Math.round(255 * k * (if (pass == 0) 0.35f else 1f))
-        canvas.drawLine(a.x, a.y, b.x, b.y, shapePaint)
+    // Each layer on its own: a run of the trail in one fade band is one path (no joints painted twice), and each run
+    // first clears what it covers, so where two bands meet the newer one shows, not both (no beads at the joints).
+    val runs = Laser.runs(frame.laser, frame.laserNow).map { (pts, alpha) ->
+      Path().apply { pts.forEachIndexed { i, p -> if (i == 0) moveTo(p.x, p.y) else lineTo(p.x, p.y) } } to alpha
+    }
+    if (runs.isNotEmpty()) {
+      for (pass in 0..1) {
+        val width = (if (pass == 0) 10f else 3f) * dp
+        val layer = canvas.saveLayer(null, null)
+        shapePaint.color = if (pass == 0) LASER_GLOW else LASER_CORE
+        shapePaint.strokeWidth = width
+        clearPaint.strokeWidth = width
+        for ((path, alpha) in runs) {
+          canvas.drawPath(path, clearPaint)
+          shapePaint.alpha = Math.round(255 * alpha * (if (pass == 0) 0.35f else 1f))
+          canvas.drawPath(path, shapePaint)
+        }
+        canvas.restoreToCount(layer)
       }
     }
     frame.laserDot?.let {
