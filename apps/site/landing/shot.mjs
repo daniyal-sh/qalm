@@ -1,5 +1,5 @@
 // One browser, several shots, then close. Usage: node shot.mjs <file.html or http://…> <outdir> <spec...>
-// spec = name:width:height:scheme[:full][:motion=reduce][:wait=ms][:scroll=selector]
+// spec = name:width:height:scheme[:full][:lazy][:motion=reduce][:wait=ms][:scroll=selector]
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 const require = createRequire(import.meta.url); // playwright-core from the repo's node_modules
@@ -23,6 +23,17 @@ try {
     page.on('pageerror', (e) => errs.push(String(e)));
     await page.goto(/^https?:/.test(file) ? file : pathToFileURL(file).href, { waitUntil: 'networkidle' });
     if (opts.scroll) await page.locator(opts.scroll).first().scrollIntoViewIfNeeded();
+    if (opts.lazy) {
+      // load every lazy image: walk down the page, wait for them, come back up
+      await page.evaluate(async () => {
+        for (let y = 0; y < document.documentElement.scrollHeight; y += innerHeight / 2) {
+          scrollTo(0, y);
+          await new Promise((r) => setTimeout(r, 120));
+        }
+        await Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => (i.onload = i.onerror = r)))));
+        scrollTo(0, 0);
+      });
+    }
     await page.waitForTimeout(+(opts.wait ?? 400));
     const sw = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth, document.documentElement.scrollHeight]);
     await page.screenshot({ path: `${outdir}/${name}.png`, fullPage: !!opts.full });

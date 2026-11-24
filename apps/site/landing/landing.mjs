@@ -105,6 +105,44 @@ export function renderLanding() {
     v.PAPERS = ['Blank', 'Ruled', 'Dotted', 'Grid', 'Cornell', 'Weekly'].map(P).join('');
   }
 
+  // ---- screenshots of the real app (apps/site/showcase → public/showcase; manifest.json has their sizes) ----
+  {
+    const manifest = JSON.parse(fs.readFileSync(new URL('../public/showcase/manifest.json', import.meta.url), 'utf8'));
+    /** A light/dark pair as one <picture> (AVIF, then WebP), following the visitor's colour scheme. */
+    const shot = (key, alt, sizes, { eager = false, cls = '' } = {}) => {
+      const m = manifest[key];
+      if (!m) throw new Error(`No showcase image ${key}: run apps/site/showcase/frame.mjs`);
+      const set = (theme, ext) => m.widths.map((w) => `/showcase/${m.path}-${theme}-${w}.${ext} ${w}w`).join(', ');
+      const dark = '(prefers-color-scheme: dark)';
+      return (
+        `<picture class="shot${cls ? ` ${cls}` : ''}">` +
+        `<source type="image/avif" media="${dark}" srcset="${set('dark', 'avif')}" sizes="${sizes}">` +
+        `<source type="image/webp" media="${dark}" srcset="${set('dark', 'webp')}" sizes="${sizes}">` +
+        `<source type="image/avif" srcset="${set('light', 'avif')}" sizes="${sizes}">` +
+        `<img src="/showcase/${m.path}-light-${m.widths[0]}.webp" srcset="${set('light', 'webp')}" sizes="${sizes}" width="${m.w}" height="${m.h}" alt="${alt}" ${eager ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async"></picture>`
+      );
+    };
+    const wide = '(max-width: 860px) 100vw, 1200px';
+    const half = '(max-width: 860px) 100vw, 600px';
+    v.SHOT_HERO = shot('hero', 'qalm on a laptop and a tablet: lecture slides annotated by hand, and a labelled diagram of an animal cell.', '(max-width: 1240px) 100vw, 1200px');
+    v.SHOTS_PEN = [
+      shot('colours-tablet', 'Choosing a pen colour on a tablet, over a hand-labelled cell diagram.', half),
+      shot('ruler-tablet', 'The ruler turned to the refracted ray in a physics diagram, with the ray drawn straight along its edge.', half),
+    ].join('');
+    v.SHOTS_NB = [
+      shot('library-desktop', 'The library: notebooks with coloured covers in folders, favourites and a notebook shared with AI.', half),
+      shot('image-tablet', 'A diagram of an animal cell, labelled in handwriting with snapped arrows.', half),
+    ].join('');
+    v.SHOT_LECTURE = shot('lecture-desktop', 'Replaying a recorded lecture: the slide’s handwriting at 29:17, the player bar and the transcript following along.', wide);
+    v.SHOTS_TOOLS = [
+      shot('present-desktop', 'Presenting the slides with the laser pointer.', half),
+      shot('markdown-tablet', 'A text box with Markdown and maths next to handwritten working on a slide.', half),
+      shot('lasso-tablet', 'Lasso selection with handles over a list of French verbs.', half),
+      shot('navigator-tablet', 'The page navigator with slide thumbnails.', half),
+    ].join('');
+    v.SHOT_AI = shot('ai-desktop', 'AI live with a tutor: a comment thread beside the ink, with a reply that has maths in it.', wide);
+  }
+
   // ---- features ----
   const FEATS = [
     ['PDF import', 'Slides, papers, worksheets. Write on every page.', '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>'],

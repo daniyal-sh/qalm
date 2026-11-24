@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://qalm.apollolearn.app"><img src="apps/site/public/og.png" alt="qalm: Finally, a handwriting app that doesn't suck. A notebook page of handwritten notes." width="720"></a>
+  <a href="https://qalm.apollolearn.app"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/hero-dark.png"><img src="apps/site/public/showcase/hero-light.png" alt="qalm on a laptop and a tablet: lecture slides annotated by hand, and a labelled diagram of an animal cell." width="860"></picture></a>
 </p>
 
 # qalm by Apollo
@@ -13,6 +13,39 @@ and pages that feel like paper. Free while in beta.
 [Website](https://qalm.apollolearn.app)
 
 iPad and Mac are coming soon.
+
+<table>
+<tr>
+<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/library-desktop-dark.png"><img src="apps/site/public/showcase/library-desktop-light.png" alt="The library: notebooks with coloured covers, folders and favourites."></picture><br><sub>Your library: covers, folders, favourites</sub></td>
+<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/pdf-desktop-dark.png"><img src="apps/site/public/showcase/pdf-desktop-light.png" alt="A lecture slide annotated by hand: a circled formula, arrows, a highlight and margin notes."></picture><br><sub>Write on imported PDFs</sub></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/image-tablet-dark.png"><img src="apps/site/public/showcase/image-tablet-light.png" alt="A cell diagram labelled in handwriting with snapped arrows."></picture><br><sub>Images, labelled in ink with snapped shapes</sub></td>
+<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/markdown-tablet-dark.png"><img src="apps/site/public/showcase/markdown-tablet-light.png" alt="A Markdown text box with maths beside handwritten working."></picture><br><sub>Text boxes with Markdown and maths</sub></td>
+</tr>
+</table>
+
+<details>
+<summary><b>More screenshots</b></summary>
+
+<table>
+<tr>
+<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/lasso-tablet-dark.png"><img src="apps/site/public/showcase/lasso-tablet-light.png" alt="Lasso selection with handles over a list of verbs."></picture><br><sub>Lasso: move, resize, rotate, recolour</sub></td>
+<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/navigator-tablet-dark.png"><img src="apps/site/public/showcase/navigator-tablet-light.png" alt="The page navigator with slide thumbnails."></picture><br><sub>Page navigator with thumbnails</sub></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/lecture-desktop-dark.png"><img src="apps/site/public/showcase/lecture-desktop-light.png" alt="Replaying a recorded lecture with the transcript."></picture><br><sub>Lecture mode: replay your ink in time with the audio</sub></td>
+<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/present-desktop-dark.png"><img src="apps/site/public/showcase/present-desktop-light.png" alt="Presenting slides with the laser pointer."></picture><br><sub>Present with a laser pointer</sub></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/ruler-tablet-dark.png"><img src="apps/site/public/showcase/ruler-tablet-light.png" alt="The ruler turned along a refracted ray, with the ray drawn along its edge."></picture><br><sub>A ruler for straight lines at any angle</sub></td>
+<td width="50%" valign="top"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/planner-tablet-dark.png"><img src="apps/site/public/showcase/planner-tablet-light.png" alt="A planner page with highlighter notes and a checklist."></picture><br><sub>Highlighters, paper styles and covers</sub></td>
+</tr>
+</table>
+
+</details>
+
+<sub>Every screenshot is the real app, captured from generated demo notebooks: [apps/site/showcase](apps/site/showcase).</sub>
 
 ## Features
 
@@ -38,6 +71,8 @@ iPad and Mac are coming soon.
 qalm has no AI of its own. Instead, **your** agent (Claude, or any MCP client) can follow along as you write: it reads
 your handwriting with its own vision, answers questions you ask on the page, and leaves comments next to your ink.
 **It can never change your ink.** Access is per notebook and off by default.
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/ai-desktop-dark.png"><img src="apps/site/public/showcase/ai-desktop-light.png" alt="A tutor agent following along: its reply, with maths, in the comments beside the ink." width="860"></picture></p>
 
 Connect in two steps:
 
