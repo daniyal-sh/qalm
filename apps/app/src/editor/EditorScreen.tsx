@@ -56,6 +56,7 @@ import { PageNavigator } from './PageNavigator';
 import { entryMirror, notebookFound, pendingScrollY, type PendingScroll } from './editor.logic';
 import { Thumbnails } from './thumbnails';
 import { CrossPageUndo } from './undoStack';
+import { useLectureEditor } from '../lecture/LectureEditor';
 import {
   anchoredScroll,
   baseWidth,
@@ -145,6 +146,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
 
   // ---- undo ----
   const undo = React.useMemo(() => new CrossPageUndo(), []);
+  /** A paused lecture recording (or playback) locks editing: no undo, redo, cut or delete either. */
+  const lectureLocked = React.useRef(false);
   const registry = React.useMemo(() => new UndoRegistry(undo), [undo]);
   // Re-render only when Undo/Redo become available or not, not on every stroke (that re-rendered the whole editor).
   const undoSub = React.useCallback((cb: () => void) => undo.onChange(cb), [undo]);
@@ -551,7 +554,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       }
       if (typing) return;
       const a = selRef.current;
-      // Presenting: arrows, space and page keys turn pages; K switches the laser; Esc stops.
+      // Presenting: arrows, space and page keys turn pages; K switches the laser; Esc stops. Checked before the lecture
+      // lock below, so Backspace and arrows still turn pages while a recording is paused.
       if (presentRef.current !== null) {
         if (mod || ev.altKey) return;
         const act = presentKey(ev.key, presentRef.current, pagesRef.current.length, !!target?.closest?.('button, [role="button"]'));
@@ -560,6 +564,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         if (act === 'stop') stopPresentingRef.current();
         else if (act === 'laser') changeTools({ laserMode: toolsRef.current.laserMode === 'dot' ? 'trail' : 'dot' });
         else setPresentAt(act.page);
+        return;
+      }
+      if (lectureLocked.current && ((mod && 'zyxdv'.includes(k)) || k === 'delete' || k === 'backspace')) {
+        ev.preventDefault();
         return;
       }
       if (mod && k === 'z') {
@@ -854,7 +862,17 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       paperSeen.current.set(p.id, k);
     }
   }, [pages, thumbs]);
+  /**
+   * A paused lecture recording (or a recording playing back) locks the notebook's content: page actions and image
+   * inserts too, not just the pen. True (and says so) when locked.
+   */
+  const lockedNow = () => {
+    if (!lectureLocked.current) return false;
+    showToast('Resume the recording (or close the player) to change the notebook');
+    return true;
+  };
   const duplicatePage = (index: number) =>
+    !lockedNow() &&
     void run('Duplicating page…', async () => {
       const src = pages[index];
       if (!notebook || !src) return;
@@ -876,6 +894,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   };
   /** Moves a page, keeping the page in view (and the spot on it) in view wherever it ends up. */
   const movePage = (from: number, to: number) => {
+    if (lockedNow()) return;
     const p = pages[from];
     if (!notebook || !p || from === to || to < 0 || to >= pages.length) return;
     const inView = slots[currentRef.current];
@@ -884,7 +903,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   };
 
   const addPage = (afterIndex?: number) => {
-    if (!notebook) return;
+    if (!notebook || lockedNow()) return;
     const after = afterIndex !== undefined ? pages[afterIndex] : pages[pages.length - 1];
     // A page after a PDF page gets the notebook's paper.
     const id = notebook.addPage(after && after.background.kind === 'paper' ? { size: after.size, paper: after.paper, paperColor: after.paperColor } : {}, afterIndex !== undefined ? afterIndex + 1 : undefined);
@@ -894,6 +913,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   };
 
   const deletePage = (index: number) => {
+    if (lockedNow()) return;
     if (!notebook || pages.length <= 1) return showToast('A notebook needs at least one page');
     const p = pages[index];
     if (!p) return;
@@ -944,7 +964,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
           onPress: () => notebook?.setMeta({ aiAccess: !meta?.aiAccess }),
         },
         { label: 'Export PDF', icon: 'file-text', onPress: () => void run('Exporting PDF…', () => exportNotebook(ctx, notebookId, 'pdf')) },
-        { label: 'Export .qalm backup', icon: 'archive', onPress: () => void run('Exporting…', () => exportNotebook(ctx, notebookId, 'qalm')) },
+        { label: 'Export .qalm backup', icon: 'archive', onPress: () => lecture.exportQalm() },
+        ...lecture.menuItems,
         { label: 'Full screen', icon: 'maximize', onPress: () => setFullscreen(true) },
         { label: 'Present', icon: 'monitor', description: Platform.OS === 'web' ? 'F5' : undefined, onPress: () => startPresenting() },
         { label: 'Settings', icon: 'settings', onPress: () => router.push('/settings') },
@@ -952,6 +973,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     });
 
   const insertImage = () =>
+    !lockedNow() &&
     void run('Adding image…', async () => {
       if (!notebook) return;
       const pageId = lastPage.current && pages.some((p) => p.id === lastPage.current) ? lastPage.current : currentPageId;
@@ -1089,6 +1111,34 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     rulerNow.current = rulerWindow;
   }
   const getRuler = React.useCallback(() => rulerNow.current, []);
+  // ---- lecture mode (docs/lecture-mode.md): Record, the pen lock while paused, playback ----
+  const lecture = useLectureEditor({
+    notebookId,
+    holdAi: aiLive.holdWhileBackgrounded,
+    notebook: notebook!,
+    pages,
+    current,
+    jumpTo: (i) => jumpToRef.current(i),
+    showToast,
+    run: (label, fn) => void run(label, fn),
+  });
+  lectureLocked.current = lecture.ctx.locked;
+  // Locking (Pause, or opening a recording) ends what could still edit: the lasso selection and its action bar, and an
+  // open text editor. (Undo/redo in the header and the focus pill are disabled while locked.)
+  React.useEffect(() => {
+    if (!lecture.ctx.locked) return;
+    setSelection(null);
+    setEditingText(null);
+  }, [lecture.ctx.locked]);
+  const lectureAttach = lecture.attachPage;
+  const reportPageAll = React.useCallback(
+    (pageId: string, data: PageData | null) => {
+      reportPage(pageId, data);
+      lectureAttach(pageId, data?.page ?? null);
+    },
+    [reportPage, lectureAttach],
+  );
+
   const edCtx = React.useMemo<EditorCtx | null>(
     () =>
       notebook
@@ -1114,13 +1164,14 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               selectThread(id);
               if (id) setCommentsOpen(true);
             },
-            reportPage,
+            reportPage: reportPageAll,
             touchPage,
             ruler: rulerWindow,
             getRuler,
+            lecture: lecture.ctx,
           }
         : null,
-    [notebook, notebookId, tools, setTool, onPenButton, input, notePenSeen, undo, registry, selection, editingText, activeCommentId, ui.comments, presenting, selectThread, reportPage, touchPage, rulerWindow],
+    [notebook, notebookId, tools, setTool, onPenButton, input, notePenSeen, undo, registry, selection, editingText, activeCommentId, ui.comments, presenting, selectThread, reportPageAll, touchPage, rulerWindow, lecture.ctx],
   );
 
   if (!h || !notebook || !meta || !edCtx) {
@@ -1148,8 +1199,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const hb = phone ? 40 : undefined;
   const undoRedo = (
     <>
-      <IconButton icon="rotate-ccw" label="Undo" size={hb} disabled={!undo.canUndo} onPress={() => undo.undo()} />
-      <IconButton icon="rotate-cw" label="Redo" size={hb} disabled={!undo.canRedo} onPress={() => undo.redo()} />
+      <IconButton icon="rotate-ccw" label="Undo" size={hb} disabled={!undo.canUndo || lecture.ctx.locked} onPress={() => undo.undo()} />
+      <IconButton icon="rotate-cw" label="Redo" size={hb} disabled={!undo.canRedo || lecture.ctx.locked} onPress={() => undo.redo()} />
     </>
   );
 
@@ -1183,6 +1234,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             </View>
           </View>
           {phone ? null : undoRedo}
+          {lecture.header}
           {ui.comments ? (
           <View>
             <IconButton icon="message-square" label={unread ? `Comments, ${unread} unread` : 'Comments'} size={hb} selected={panelShown} onPress={() => setCommentsOpen((x) => !x)} />
@@ -1363,15 +1415,15 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                   onChange={changeTools}
                   ruler={rulerOn}
                   onRuler={toggleRuler}
-                  canUndo={undo.canUndo}
-                  canRedo={undo.canRedo}
-                  onUndo={() => undo.undo()}
-                  onRedo={() => undo.redo()}
+                  canUndo={undo.canUndo && !lecture.ctx.locked}
+                  canRedo={undo.canRedo && !lecture.ctx.locked}
+                  onUndo={() => !lectureLocked.current && undo.undo()}
+                  onRedo={() => !lectureLocked.current && undo.redo()}
                   onExit={() => setFullscreen(false)}
                   exitLabel={`Exit full screen${Platform.OS === 'web' ? ' (Esc)' : ''}`}
                 />
               </View>
-            ) : (
+            ) : lecture.playing ? null : (
             <View style={styles.toolbarWrap} pointerEvents="box-none">
               <Toolbar
                 tools={tools}
@@ -1389,6 +1441,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               />
             </View>
             )}
+            {presenting ? lecture.presentIndicator : lecture.overlay}
 
             {/* While typing in a text box: the format bar, under the toolbar (above the keyboard on tablets). Never while
                 presenting (typing ends when presenting starts; the presentation bar is at the bottom). */}
@@ -1398,7 +1451,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               </View>
             ) : null}
 
-            {selection && selectionPage && !presenting ? (
+            {selection && selectionPage && !presenting && !lecture.ctx.locked ? (
               <View style={[styles.selWrap, { bottom: selBottom }]} pointerEvents="box-none">
                 <Appear style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
                   {recoloring ? (
@@ -1438,7 +1491,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                   )}
                 </Appear>
               </View>
-            ) : tools.tool === 'lasso' && clip ? (
+            ) : tools.tool === 'lasso' && clip && !lecture.ctx.locked ? (
               <View style={[styles.selWrap, { bottom: selBottom }]} pointerEvents="box-none">
                 <Appear style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
                   <Button label="Paste" icon="clipboard" size="sm" variant="ghost" onPress={sel.paste} />

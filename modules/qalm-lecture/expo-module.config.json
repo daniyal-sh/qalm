@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["QalmLectureModule"]
+  },
+  "android": {
+    "modules": ["app.qalm.lecture.QalmLectureModule"]
+  }
+}

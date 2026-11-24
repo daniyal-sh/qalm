@@ -6,6 +6,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensio
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DeleteAccountSheet } from '../src/account/DeleteAccountSheet';
+import { LectureSettings } from '../src/lecture/LectureSettings';
 import { formatBytes, summarizeUsage, type StorageUsage } from '../src/api/storage';
 import { aiScope, denyRequest, getAiOverview, grantSummary, revokeGrant, updateGrant, type AiOverview, type Grant } from '../src/api/ai';
 import { rejectedTouchText } from '../src/lib/palm';
@@ -20,11 +21,12 @@ import { Icon, type IconName } from '../src/ui/Icon';
 import { EmptyState, Panel, Row, SectionLabel, useToast } from '../src/ui/layout';
 import { Text } from '../src/ui/Text';
 
-type Section = 'account' | 'pen' | 'ai' | 'appearance';
+type Section = 'account' | 'pen' | 'ai' | 'lecture' | 'appearance';
 const SECTIONS: { id: Section; label: string; icon: IconName }[] = [
   { id: 'account', label: 'Account and sync', icon: 'user' },
   { id: 'pen', label: 'Pen and palm rejection', icon: 'edit-3' },
   { id: 'ai', label: 'AI access', icon: 'cpu' },
+  { id: 'lecture', label: 'Lecture mode', icon: 'mic' },
   { id: 'appearance', label: 'Appearance', icon: 'sun' },
 ];
 
@@ -530,6 +532,7 @@ export default function Settings() {
               {section === 'account' ? <AccountSection /> : null}
               {section === 'pen' ? <PenSection /> : null}
               {section === 'ai' ? <AiSection /> : null}
+              {section === 'lecture' ? <LectureSettings /> : null}
               {section === 'appearance' ? <AppearanceSection /> : null}
             </View>
           </ScrollView>

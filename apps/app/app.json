@@ -12,7 +12,10 @@
       "icon": "./assets/icons/icon.png",
       "bundleIdentifier": "com.apollo.qalm",
       "supportsTablet": true,
-      "requireFullScreen": false
+      "requireFullScreen": false,
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "qalm transcribes your lecture recordings on this iPad."
+      }
     },
     "android": {
       "package": "com.apollo.qalm",
@@ -42,12 +45,25 @@
           "imageWidth": 160,
           "resizeMode": "contain",
           "backgroundColor": "#f3f3f5",
-          "dark": { "image": "./assets/icons/splash-dark.png", "backgroundColor": "#151517" }
+          "dark": {
+            "image": "./assets/icons/splash-dark.png",
+            "backgroundColor": "#151517"
+          }
         }
       ],
       [
         "expo-image-picker",
-        { "photosPermission": "qalm uses your photos when you insert an image on a page." }
+        {
+          "photosPermission": "qalm uses your photos when you insert an image on a page."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "qalm records audio when you record a lecture.",
+          "enableBackgroundRecording": true,
+          "enableBackgroundPlayback": false
+        }
       ]
     ],
     "experiments": {

@@ -1,5 +1,5 @@
-import { exportPdf, LOCAL_ORIGIN, Notebook, packQalm, Page, summarizeThreads, unpackQalm, createNotebookDoc } from '@qalm/core';
-import type { Asset, ExportPdfOptions, NotebookInit, NotebookMeta, Size } from '@qalm/core';
+import { exportPdf, LOCAL_ORIGIN, Notebook, packQalm, packQalmStream, Page, summarizeThreads, unpackQalm, createNotebookDoc } from '@qalm/core';
+import type { Asset, ExportPdfOptions, LectureBundle, NotebookInit, NotebookMeta, Size } from '@qalm/core';
 import { PDFDocument } from 'pdf-lib';
 import * as Y from 'yjs';
 
@@ -45,20 +45,36 @@ export function buildPdf(src: NotebookSource, opts?: ExportPdfOptions): Promise<
   );
 }
 
-/** Full-fidelity `.qalm` backup (core `packQalm`). Assets that can't be read are left out. */
-export function buildQalm(src: NotebookSource): Promise<Uint8Array> {
+/**
+ * Full-fidelity `.qalm` backup (core `packQalm`). Assets that can't be read are left out. `lectures`: the lecture
+ * export (docs/lecture-mode.md §8); without it the file is the plain backup.
+ */
+export function buildQalm(src: NotebookSource, lectures?: LectureBundle[]): Promise<Uint8Array> {
   return withPages(src, async (pages) => {
-    const assets = new Map<string, Uint8Array>();
-    const get = assetGetter(src);
-    for (const a of src.notebook.assets()) {
-      try {
-        assets.set(a.id, await get(a.id));
-      } catch {
-        /* not downloaded and offline: skip */
-      }
-    }
-    return packQalm({ index: src.notebook.doc, pages, assets });
+    const assets = await readAssets(src);
+    return packQalm({ index: src.notebook.doc, pages, assets, ...(lectures?.length ? { lectures } : {}) });
   });
+}
+
+async function readAssets(src: NotebookSource): Promise<Map<string, Uint8Array>> {
+  const assets = new Map<string, Uint8Array>();
+  const get = assetGetter(src);
+  for (const a of src.notebook.assets()) {
+    try {
+      assets.set(a.id, await get(a.id));
+    } catch {
+      /* not downloaded and offline: skip */
+    }
+  }
+  return assets;
+}
+
+/**
+ * The lecture export (docs/lecture-mode.md §8) as a streamed zip (core `packQalmStream`): sessions are read one at a
+ * time and the file goes out in parts through `out`, so hours of audio are never held twice.
+ */
+export function buildQalmStream(src: NotebookSource, sessions: AsyncIterable<LectureBundle>, out: (part: Uint8Array) => void | Promise<void>): Promise<void> {
+  return withPages(src, async (pages) => packQalmStream({ index: src.notebook.doc, pages, assets: await readAssets(src) }, sessions, out));
 }
 
 export function exportFileName(title: string, ext: 'pdf' | 'qalm'): string {
@@ -76,6 +92,8 @@ export async function restoreQalm(
   writeDoc: (docId: string, update: Uint8Array) => Promise<void>,
   putAsset: (asset: Asset, bytes: Uint8Array) => Promise<void>,
   newId: () => string,
+  /** Lecture sessions in the file (a lecture export): restore them, or leave this out to skip them safely. */
+  restoreLectures?: (sessions: LectureBundle[], pageIds: Map<string, string>, notebookId: string) => Promise<void>,
 ): Promise<NotebookMeta> {
   const b = unpackQalm(bytes);
   const src = new Notebook(b.index);
@@ -113,6 +131,7 @@ export async function restoreQalm(
   }
   index.transact(() => index.getMap('meta').set('threadsIndexed', true), LOCAL_ORIGIN);
   await writeDoc(docIds.notebook(id), Y.encodeStateAsUpdate(index));
+  if (b.lectures?.length && restoreLectures) await restoreLectures(b.lectures, pageIds, id);
   return nb.meta();
 }
 

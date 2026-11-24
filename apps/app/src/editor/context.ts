@@ -3,6 +3,7 @@ import type { InkRuler } from 'qalm-ink';
 import * as React from 'react';
 import type * as Y from 'yjs';
 
+import type { LectureCtx } from '../lecture/LectureEditor';
 import type { InputPrefs } from '../theme/ThemeProvider';
 import type { FormatKind } from './format.logic';
 import type { CrossPageUndo } from './undoStack';
@@ -81,6 +82,8 @@ export interface EditorCtx {
   reportPage(pageId: string, data: PageData | null): void;
   /** Tells the editor which page was last written on (Ask, image insert). */
   touchPage(pageId: string): void;
+  /** Lecture mode: the pen lock while a recording is paused, and replayed ink during playback (docs/lecture-mode.md). */
+  lecture?: LectureCtx;
 }
 
 export const EditorContext = React.createContext<EditorCtx | null>(null);

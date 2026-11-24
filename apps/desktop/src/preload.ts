@@ -27,6 +27,12 @@ contextBridge.exposeInMainWorld('qalmDesktop', {
   /** Native save dialog, then writes the bytes. */
   saveFile: (name: string, bytes: Uint8Array, mime: string): Promise<{ saved: boolean }> =>
     ipcRenderer.invoke('qalm:save-file', name, bytes, mime),
+  /** A file written in parts: the save dialog (null when cancelled), then each part straight to disk, then close. */
+  saveStream: {
+    open: (name: string, mime: string): Promise<string | null> => ipcRenderer.invoke('qalm:save-stream-open', name, mime),
+    write: (id: string, bytes: Uint8Array): Promise<void> => ipcRenderer.invoke('qalm:save-stream-write', id, bytes),
+    close: (id: string, ok: boolean): Promise<{ saved: boolean }> => ipcRenderer.invoke('qalm:save-stream-close', id, ok),
+  },
   /** In-app route of each qalm:// link (e.g. `/auth/email/verify?token=…`). Returns an unsubscribe. */
   onDeepLink: (cb: (path: string) => void): (() => void) => {
     if (typeof cb !== 'function') throw new TypeError('onDeepLink: callback required');
@@ -36,6 +42,10 @@ contextBridge.exposeInMainWorld('qalmDesktop', {
       listeners.delete(cb);
     };
   },
+  /** Lecture mode, macOS: whether Apple's on-device recognizer helper is bundled. */
+  lectureTranscribeAvailable: (_lang: string): Promise<boolean> => ipcRenderer.invoke('qalm:lecture-asr-available'),
+  /** Lecture mode, macOS: transcribes one audio chunk on the device; segments with times relative to the chunk (ms). */
+  lectureTranscribe: (bytes: Uint8Array, mime: string, lang: string): Promise<unknown> => ipcRenderer.invoke('qalm:lecture-transcribe', bytes, mime, lang),
   /** Window fullscreen (BrowserWindow.setFullScreen). Resolves to the new state. */
   setFullScreen: (on: boolean): Promise<boolean> => ipcRenderer.invoke('qalm:set-fullscreen', on === true),
   /** Called with the current state, then on every change. Returns an unsubscribe. */

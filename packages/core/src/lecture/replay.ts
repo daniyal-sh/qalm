@@ -63,6 +63,19 @@ export class LectureReplay {
   private apply(e: LectureEvent): void {
     if (e.k !== 'add' && e.k !== 'erase' && e.k !== 'update') return;
     const st = this.state.get(e.p)!;
+    // A partial erase adds a stroke's pieces (`splitFrom`) and erases the stroke in one transaction: the pieces take
+    // the stroke's place in the z-order, as on the page (not on top of everything written since).
+    const splits = e.k === 'add' ? e.items.filter((it) => splitOf(it) && st.items.has(splitOf(it)!) && !st.items.has(it.id)) : [];
+    if (splits.length) {
+      const after = new Map<string, Item[]>();
+      for (const it of splits) after.set(splitOf(it)!, [...(after.get(splitOf(it)!) ?? []), it]);
+      const next = new Map<string, Item>();
+      for (const [id, it] of st.items) {
+        next.set(id, it);
+        for (const piece of after.get(id) ?? []) next.set(piece.id, piece);
+      }
+      st.items = next;
+    }
     for (const it of e.items) {
       if (e.k === 'erase') st.items.delete(it.id);
       else st.items.set(it.id, it);
@@ -98,16 +111,28 @@ export class LectureReplay {
   }
 }
 
+/** The stroke a piece came from (a partial erase), if it is one. */
+const splitOf = (it: Item): string | undefined => (it as { splitFrom?: unknown }).splitFrom as string | undefined;
+
 /**
  * When each item was written: its first `add` (not an undo or redo), minus the stroke's own length, so seeking there
- * plays the stroke from its first point.
+ * plays the stroke from its first point. A piece a partial erase left (`splitFrom`) was written when its stroke was:
+ * tapping it seeks there, not to the erase (pieces of pieces too). A piece of ink from before the session has no time.
  */
 export function strokeTimes(events: readonly LectureEvent[]): Map<string, number> {
   const out = new Map<string, number>();
-  for (const e of events) {
+  const pieces = new Set<string>();
+  for (const e of [...events].sort((a, b) => a.t - b.t)) {
     if (e.k !== 'add' || e.by) continue;
     for (const it of e.items) {
-      if (out.has(it.id)) continue;
+      if (out.has(it.id) || pieces.has(it.id)) continue;
+      const from = splitOf(it);
+      if (from) {
+        pieces.add(it.id);
+        const t = out.get(from);
+        if (t !== undefined) out.set(it.id, t);
+        continue;
+      }
       const len = it.type === 'stroke' && it.points.length ? it.points[it.points.length - 1]!.t : 0;
       out.set(it.id, Math.max(0, e.t - len));
     }

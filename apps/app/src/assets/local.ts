@@ -16,6 +16,11 @@ export function extFor(mime: string): string {
   if (mime === 'image/jpeg') return 'jpg';
   if (mime === 'image/webp') return 'webp';
   if (mime === 'image/gif') return 'gif';
+  // Lecture audio chunks (docs/lecture-mode.md §1).
+  if (mime.startsWith('audio/mp4')) return 'm4a';
+  // ADTS (the native recorder's crash-safe format): players go by the extension, so it must not claim to be M4A.
+  if (mime.startsWith('audio/aac')) return 'aac';
+  if (mime.startsWith('audio/webm')) return 'webm';
   return 'bin';
 }
 

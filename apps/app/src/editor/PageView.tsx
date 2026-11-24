@@ -249,13 +249,16 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   // Partial erase: the gesture so far, kept here (nothing is written until the pen lifts); the page shows it.
   const eraseRef = React.useRef<EraseSession | null>(null);
   const [eraseTick, setEraseTick] = React.useState(0);
+  // Lecture playback draws the ink as it was at the player's time (pages the session touched).
+  const replayed = ed.lecture?.replay?.get(info.id);
   const shown = React.useMemo(() => {
+    if (replayed) return replayed;
     let out: Item[] = eraseRef.current ? eraseRef.current.view(items) : items;
     if (live?.kind === 'text') out = out.map((it) => (it.id === live.id ? ({ ...it, ...live.patch } as Item) : it));
     if (editing) out = out.filter((it) => it.id !== editing);
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, live, editing, eraseTick]);
+  }, [items, live, editing, eraseTick, replayed]);
   const liveCanvas = React.useMemo(() => (live?.kind === 'sim' && sel ? { ids: sel, transform: live.sim } : undefined), [live, sel]);
 
   const drawn = React.useMemo(createDrawnIds, []);
@@ -267,12 +270,15 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   const commitTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const pageRef = React.useRef(page);
   pageRef.current = page;
+  // A lecture paused (or played back) since the gesture began: nothing lands (the timeline couldn't log it).
+  const lockedRef = React.useRef(false);
+  lockedRef.current = !!ed.lecture?.locked;
   const commitNow = React.useCallback(() => {
     if (commitTimer.current) clearTimeout(commitTimer.current);
     commitTimer.current = null;
     const session = eraseRef.current;
     eraseRef.current = null;
-    if (session && pageRef.current) commitErase(pageRef.current, session);
+    if (session && pageRef.current && !lockedRef.current) commitErase(pageRef.current, session);
     setEraseTick((x) => x + 1);
   }, []);
   React.useEffect(() => () => commitNow(), [commitNow]);
@@ -344,7 +350,10 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   if (!page) return <View style={{ width, height, backgroundColor: info.paperColor === 'night' ? '#1f1f23' : info.paperColor === 'cream' ? '#fbf7ee' : '#ffffff' }} />;
 
   const t = ed.tools;
-  const inkTool = t.tool === 'text' ? 'none' : t.tool;
+  // A paused lecture recording (or playback) locks the pen, the eraser (scribble-to-erase too: it is a pen stroke), the
+  // lasso and text. Not the laser pointer: it never writes to the page, so it works while paused and in a replay.
+  const locked = !!ed.lecture?.locked;
+  const inkTool = (locked && t.tool !== 'laser') || t.tool === 'text' ? 'none' : t.tool;
   const nightInk = inkOnPaper(t.penColor, info.paperColor);
 
   const tapText = (x: number, y: number) => {
@@ -398,6 +407,8 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
         adjustShape={adjustLiveShape}
         onPenSeen={ed.onPenSeen}
         onStrokeEnd={({ nativeEvent: e }) => {
+          // A stroke (or scribble) the pen began before a lecture paused: dropped, like everything while locked.
+          if (lockedRef.current) return void drawn.dismiss(e.id);
           ed.touchPage(info.id);
           // Scribble to erase: a quick zig-zag over ink deletes it (one undo step) and is not kept.
           // Not a stroke ruled along the ruler (back and forth along it would look like a scribble).
@@ -414,6 +425,12 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
           else page.addItem(stroke);
         }}
         onErase={({ nativeEvent: e }) => {
+          if (lockedRef.current) {
+            // Paused mid-gesture: the partial erase so far is dropped, not committed.
+            eraseRef.current = null;
+            setEraseTick((x) => x + 1);
+            return;
+          }
           if (t.eraserMode === 'partial') {
             const session = (eraseRef.current ??= new EraseSession(newId));
             if (eraseAlong(page, ed.undo, e.path, t.eraserRadius, 'partial', newId, session)) {
@@ -448,7 +465,17 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
         onPenButton={() => ed.onPenButton()}
       />
       <EraseFade fading={fading} size={info.size} onDone={fadeDone} />
-      {t.tool === 'text' ? (
+      {ed.lecture?.replay ? (
+        <Pressable
+          accessibilityLabel={`Page ${index + 1}: tap a stroke to hear when it was written`}
+          style={StyleSheet.absoluteFill}
+          onPress={(e) => {
+            const { pageX, pageY } = e.nativeEvent;
+            rootRef.current?.measureInWindow((x, y) => ed.lecture?.tapAt(info.id, (pageX - x) / scale, (pageY - y) / scale, TAP_TOLERANCE_PX / scale));
+          }}
+        />
+      ) : null}
+      {t.tool === 'text' && !locked ? (
         <Pressable
           accessibilityLabel={`Add text on page ${index + 1}`}
           style={StyleSheet.absoluteFill}
@@ -459,7 +486,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
           }}
         />
       ) : null}
-      {selItems.length && t.tool === 'lasso' ? (
+      {selItems.length && t.tool === 'lasso' && !locked ? (
         <SelectionFrame
           items={selItems}
           scale={scale}
@@ -481,7 +508,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
           />
         ) : null;
       })}
-      {editing ? (
+      {editing && !locked ? (
         <TextEditor
           key={editing}
           page={page}

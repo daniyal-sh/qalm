@@ -4,7 +4,7 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 import * as syncProtocol from 'y-protocols/sync';
 import type * as Y from 'yjs';
 
-import { syncSocketUrl } from './ticket';
+import { syncSocketUrl, TicketError } from './ticket';
 
 /** y-websocket message types (wire-compatible with y-websocket servers). */
 export const MESSAGE_SYNC = 0;
@@ -210,8 +210,13 @@ export class SyncProvider {
     let ticket: string;
     try {
       ticket = await this.opts.getTicket(this.docId);
-    } catch {
+    } catch (e) {
       this.opening = false;
+      // 410: the doc was deleted for good (a lecture session deleted on another device); never retry it.
+      if (e instanceof TicketError && e.status === 410) {
+        this.setStatus('offline');
+        return;
+      }
       this.scheduleRetry();
       return;
     }

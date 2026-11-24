@@ -1,7 +1,10 @@
 // Electron main process for qalm (tech-spec §6): serves the app's web export over app://qalm,
 // native open/save dialogs over IPC, qalm:// deep links (email magic-link sign-in), window state.
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, session, shell, type MenuItemConstructorOptions } from 'electron';
-import { promises as fs, cpSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { promises as fs, cpSync, createWriteStream, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
 import {
@@ -206,6 +209,8 @@ function createWindow() {
       sandbox: true,
       webSecurity: true,
       spellcheck: true,
+      // Lecture mode keeps recording (and rotating audio chunks) while the window is minimised.
+      backgroundThrottling: false,
     },
   });
   win = w;
@@ -282,8 +287,15 @@ function openExternalSafe(url: string) {
 
 function lockDownSession() {
   const ses = session.defaultSession;
-  // The app needs no camera, mic, location or notifications; clipboard writes go through the Edit menu / execCommand.
-  ses.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'clipboard-sanitized-write' || permission === 'fullscreen'));
+  // No camera, location or notifications; clipboard writes go through the Edit menu / execCommand. The microphone
+  // (audio only, never video) is for lecture recording, from our own pages.
+  ses.setPermissionRequestHandler((wc, permission, cb, details) => {
+    if (permission === 'media') {
+      const types = (details as { mediaTypes?: string[] }).mediaTypes ?? [];
+      return cb(isOwnUrl(wc.getURL()) && types.length > 0 && types.every((t) => t === 'audio'));
+    }
+    cb(permission === 'clipboard-sanitized-write' || permission === 'fullscreen');
+  });
 }
 
 // ---------- deep links ----------
@@ -307,6 +319,13 @@ function handleDeepLink(raw: string) {
 }
 
 // ---------- IPC (validated) ----------
+
+/** The macOS speech helper, if this build has one (it is built only on a Mac: native/mac-transcribe). */
+function macTranscriber(): string | null {
+  if (process.platform !== 'darwin') return null;
+  const p = app.isPackaged ? path.join(process.resourcesPath, 'mac-transcribe') : path.resolve(__dirname, '..', 'native', 'mac-transcribe', 'build', 'mac-transcribe');
+  return existsSync(p) ? p : null;
+}
 
 function senderOk(e: Electron.IpcMainInvokeEvent): boolean {
   return !!e.senderFrame && isOwnUrl(e.senderFrame.url);
@@ -352,6 +371,57 @@ function registerIpc() {
     return { saved: true };
   });
 
+  // A file written in parts (a lecture export, which can be hundreds of MB): the save dialog first, then each part
+  // goes straight to disk, so neither process holds the whole file. Written next to the target and renamed over it
+  // at the end; a failed or cancelled export leaves nothing behind.
+  const streams = new Map<string, { out: ReturnType<typeof createWriteStream>; tmp: string; target: string; sender: number }>();
+  ipcMain.handle('qalm:save-stream-open', async (e, name: unknown, mime: unknown) => {
+    if (!senderOk(e)) throw new Error('forbidden');
+    const a = validateSave(name, new Uint8Array(0), mime);
+    const ext = path.extname(a.name).slice(1);
+    const parent = BrowserWindow.fromWebContents(e.sender);
+    const opts: Electron.SaveDialogOptions = {
+      defaultPath: path.join(app.getPath('documents'), a.name),
+      filters: ext ? [{ name: ext.toUpperCase(), extensions: [ext] }, { name: 'All files', extensions: ['*'] }] : [],
+    };
+    const r = parent ? await dialog.showSaveDialog(parent, opts) : await dialog.showSaveDialog(opts);
+    if (r.canceled || !r.filePath) return null;
+    const id = randomUUID();
+    const tmp = `${r.filePath}.${process.pid}.${id.slice(0, 8)}.tmp`;
+    streams.set(id, { out: createWriteStream(tmp), tmp, target: r.filePath, sender: e.sender.id });
+    e.sender.once('destroyed', () => void closeStream(id, false));
+    return id;
+  });
+  ipcMain.handle('qalm:save-stream-write', async (e, id: unknown, bytes: unknown) => {
+    if (!senderOk(e)) throw new Error('forbidden');
+    const s = typeof id === 'string' ? streams.get(id) : undefined;
+    if (!s || s.sender !== e.sender.id) throw new Error('saveStream: unknown stream');
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength > 64 * 1024 * 1024) throw new Error('saveStream: bad part');
+    await new Promise<void>((resolve, reject) => s.out.write(bytes, (err) => (err ? reject(err) : resolve())));
+  });
+  const closeStream = async (id: string, ok: boolean): Promise<boolean> => {
+    const s = streams.get(id);
+    if (!s) return false;
+    streams.delete(id);
+    await new Promise<void>((resolve) => s.out.end(() => resolve()));
+    if (ok) {
+      try {
+        await fs.rename(s.tmp, s.target);
+        return true;
+      } catch {
+        /* falls through to the cleanup */
+      }
+    }
+    await fs.rm(s.tmp, { force: true }).catch(() => undefined);
+    return false;
+  };
+  ipcMain.handle('qalm:save-stream-close', async (e, id: unknown, ok: unknown) => {
+    if (!senderOk(e)) throw new Error('forbidden');
+    const s = typeof id === 'string' ? streams.get(id) : undefined;
+    if (!s || s.sender !== e.sender.id) return { saved: false };
+    return { saved: await closeStream(id as string, ok === true) };
+  });
+
   ipcMain.handle('qalm:set-fullscreen', (e, on: unknown) => {
     if (!senderOk(e)) throw new Error('forbidden');
     if (typeof on !== 'boolean') throw new Error('setFullScreen: on must be a boolean');
@@ -363,6 +433,33 @@ function registerIpc() {
   ipcMain.handle('qalm:get-fullscreen', (e) => {
     if (!senderOk(e)) throw new Error('forbidden');
     return BrowserWindow.fromWebContents(e.sender)?.isFullScreen() ?? false;
+  });
+
+  // Lecture mode on macOS: Apple's on-device recognizer through a small helper (native/mac-transcribe), when bundled.
+  ipcMain.handle('qalm:lecture-asr-available', (e) => {
+    if (!senderOk(e)) throw new Error('forbidden');
+    return !!macTranscriber();
+  });
+  ipcMain.handle('qalm:lecture-transcribe', async (e, bytes: unknown, mime: unknown, lang: unknown) => {
+    if (!senderOk(e)) throw new Error('forbidden');
+    const bin = macTranscriber();
+    if (!bin) throw new Error('No on-device recognizer');
+    if (!(bytes instanceof Uint8Array) || bytes.length > 16 * 1024 * 1024) throw new Error('lectureTranscribe: bad audio');
+    // The renderer sends WAV (decoded from MediaRecorder's WebM/Opus, which AVFoundation can't read).
+    if (typeof mime !== 'string' || !/^audio\/(wav|x-wav|mp4|aac)\b/.test(mime)) throw new Error('lectureTranscribe: send WAV (or AAC)');
+    const ext = /wav/.test(mime) ? 'wav' : 'm4a';
+    const file = path.join(os.tmpdir(), `qalm-lecture-${process.pid}-${Date.now()}.${ext}`);
+    await fs.writeFile(file, bytes);
+    try {
+      const out = await new Promise<string>((resolve, reject) =>
+        execFile(bin, [file, typeof lang === 'string' && /^[A-Za-z-]{0,16}$/.test(lang) ? lang : ''], { timeout: 5 * 60_000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) =>
+          err ? reject(err) : resolve(stdout),
+        ),
+      );
+      return JSON.parse(out) as unknown;
+    } finally {
+      await fs.rm(file, { force: true }).catch(() => undefined);
+    }
   });
 
   ipcMain.on('qalm:info', (e) => {

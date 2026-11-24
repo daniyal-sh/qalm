@@ -240,6 +240,29 @@ email-only sign-in, and `grants.notebook_ids` / `folder_ids` since grants cover 
 
 ## 6. Not verified, and known gaps
 
+- **Lecture mode** (`docs/lecture-mode.md`, PRs #62/#64/#67): verified end to end on the packaged Windows app with a fake
+  microphone (`pnpm --filter @qalm/desktop e2e:lecture` against `wrangler dev --local --var WHISPER_FAKE:1` on a free port). Unverified:
+  the iPad Swift (`modules/qalm-lecture/ios`, never compiled) and background recording on iPad; Android on-device
+  transcription and the recording foreground service on a device (the Kotlin compiles); the macOS speech helper
+  (`apps/desktop/native/mac-transcribe`, unbuilt); real Whisper on Workers AI (tests mock it); crops from a real
+  client's MCP view next to the lecture's.
+  Lecture output to MCP goes through one check, `AgentHub.lectureLive()` (`apps/server/src/agent.ts`), which is Play /
+  Pause AI's `isLive()`. While a lecture records, the editor holds AI sharing on in the background
+  (`lecture/aiHold.ts`); Pause or Stop of the recording releases it.
+  **Release-blocking device checks for lecture mode** (none can be done without the devices):
+  1. Background recording, 30+ minutes, screen off, on an iPad and an Android 14+ phone: one continuous ADTS chunk
+     while backgrounded, cut into 2-minute chunks when the app is back, no lost audio, AI sharing kept on (the hold).
+  2. iOS writes ADTS for a `.aac` file (AVAudioRecorder picks the file type from the extension) and AVPlayer plays it;
+     Android `aac_adts` plays in expo-audio's player; Workers AI Whisper accepts `audio/aac` (ADTS).
+  3. Kill the app mid-recording (both platforms): the next start recovers the cut-off chunk and stops the session.
+  4. Interruptions: a phone call and Siri pause the recording (expo-audio's status events) and release the AI hold;
+     Resume works after.
+  5. Android on-device transcription of a long chunk (streamed decode; no OOM) and of 2-minute pieces; iOS's.
+  6. The Android foreground service notification and the iOS red indicator; the keepalive's meta update while
+     backgrounded (JS timers running there, like the AI heartbeat).
+  7. The macOS helper reading the WAV the renderer decodes (Swift unbuilt).
+  8. A 1 h+ lecture export on a tablet (streamed to a file) and on the desktop (streamed over IPC).
+
 - **iOS has never been compiled.** There was no Mac or Xcode. The Swift code, including `QalmInkView.swift`,
   `Freehand.swift` and the `strokeWidth` rename, needs a Mac build and an iPad test.
 - **No real stylus testing anywhere.** Pressure, tilt, hover, the pen button, `FLAG_CANCELED` and front-buffered latency
