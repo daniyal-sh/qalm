@@ -16,6 +16,8 @@ const MSG_QUERY_AWARENESS = 3;
 export const COMPACT_EVERY = 200;
 /** Snapshot chunk size (SQLite rows in a Durable Object are limited to 2 MB). */
 const CHUNK = 1 << 20;
+/** How long after a write the room reports its stored size to D1 (doc_sizes), so bursts of strokes cost one write. */
+export const SIZE_REPORT_DELAY_MS = 5_000;
 
 interface Attachment {
   userId: string;
@@ -40,6 +42,9 @@ export class DocRoom extends DurableObject<Env> {
   doc = new Y.Doc({ gc: true });
   private sql: SqlStorage;
   private updateCount = 0;
+  /** Bytes this doc takes in storage: snapshot parts plus the update log (what counts towards the owner's cap). */
+  private storedBytes = 0;
+  private sizeAlarm = false;
   private docId: string | null = null;
   private ref: DocRef | null = null;
   private hub: AgentHub | null = null;
@@ -96,9 +101,13 @@ export class DocRoom extends DurableObject<Env> {
         o += p.data.byteLength;
       }
       Y.applyUpdate(this.doc, buf, 'load');
+      this.storedBytes = total;
     }
     const ups = this.sql.exec<{ data: ArrayBuffer }>('SELECT data FROM updates ORDER BY seq').toArray();
-    for (const u of ups) Y.applyUpdate(this.doc, new Uint8Array(u.data), 'load');
+    for (const u of ups) {
+      Y.applyUpdate(this.doc, new Uint8Array(u.data), 'load');
+      this.storedBytes += u.data.byteLength;
+    }
     this.updateCount = ups.length;
   }
 
@@ -112,6 +121,48 @@ export class DocRoom extends DurableObject<Env> {
       this.sql.exec('DELETE FROM updates');
     });
     this.updateCount = 0;
+    this.storedBytes = state.length;
+  }
+
+  // ---- stored size (storage cap) ----
+
+  /** Schedules one size report a few seconds out; later writes before it fires ride along. */
+  private sizeChanged(): void {
+    if (this.sizeAlarm) return;
+    this.sizeAlarm = true;
+    this.ctx.storage.setAlarm(Date.now() + SIZE_REPORT_DELAY_MS).catch((e: unknown) => {
+      this.sizeAlarm = false;
+      console.error('setAlarm failed', e);
+    });
+  }
+
+  override async alarm(): Promise<void> {
+    this.sizeAlarm = false;
+    await this.reportSize();
+  }
+
+  /** The user whose cap this doc counts against: the library's user, or the notebook's owner. */
+  private async ownerId(): Promise<string | null> {
+    const ref = this.ref;
+    if (!ref) return null;
+    if (ref.kind === 'lib') return ref.userId;
+    const row = await this.env.DB.prepare('SELECT owner_id FROM notebooks WHERE id = ?1').bind(ref.notebookId).first<{ owner_id: string }>();
+    return row?.owner_id ?? null;
+  }
+
+  /** Writes this doc's stored size to D1 (doc_sizes) if it changed since the last report. */
+  async reportSize(): Promise<number> {
+    const bytes = this.storedBytes;
+    if (!this.docId || this.kvGet<number>('reportedBytes') === bytes) return bytes;
+    const owner = await this.ownerId();
+    if (!owner) return bytes;
+    await this.env.DB.prepare(
+      'INSERT INTO doc_sizes (doc_id, user_id, bytes, updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(doc_id) DO UPDATE SET user_id = excluded.user_id, bytes = excluded.bytes, updated_at = excluded.updated_at',
+    )
+      .bind(this.docId, owner, bytes, Date.now())
+      .run();
+    this.kvPut('reportedBytes', bytes);
+    return bytes;
   }
 
   private onUpdate(update: Uint8Array, origin: unknown): void {
@@ -119,8 +170,10 @@ export class DocRoom extends DurableObject<Env> {
     if (update.byteLength > CHUNK) this.compact();
     else {
       this.sql.exec('INSERT INTO updates (data) VALUES (?)', update);
+      this.storedBytes += update.byteLength;
       if (++this.updateCount >= COMPACT_EVERY) this.compact();
     }
+    this.sizeChanged();
     const msg = encoding.createEncoder();
     encoding.writeVarUint(msg, MSG_SYNC);
     syncProtocol.writeUpdate(msg, update);
@@ -318,10 +371,14 @@ export class DocRoom extends DurableObject<Env> {
         /* closing */
       }
     }
+    await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     this.createTables();
     this.kvPut('docId', docId);
     this.updateCount = 0;
+    this.storedBytes = 0;
+    this.sizeAlarm = false;
+    await this.env.DB.prepare('DELETE FROM doc_sizes WHERE doc_id = ?1').bind(docId).run();
     this.hub = null;
     this.doc.destroy();
     this.doc = new Y.Doc({ gc: true });

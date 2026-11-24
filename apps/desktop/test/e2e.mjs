@@ -54,7 +54,8 @@ function emailFromLog(to, from) {
   const body = text.slice(at);
   const link = /(qalm:\/\/auth\/email\/verify\?token=\S+)/.exec(body)?.[1] ?? null;
   const code = /enter this code in qalm: (\d{6})/.exec(body)?.[1] ?? null;
-  return link && code ? { link, code } : null;
+  // Code mode needs only the code (the server's MAGIC_LINK_URL may point at the web app); link mode needs the qalm:// link.
+  return code && (link || signInMode === 'code') ? { link, code } : null;
 }
 // Hosts that are themselves Electron apps may leak ELECTRON_RUN_AS_NODE, which turns qalm.exe into plain Node.
 const env = { ...process.env, QALM_USER_DATA: userData };
@@ -81,7 +82,8 @@ try {
       const logStart = readFileSync(serverLog, 'utf8').length;
       await win.getByLabel('Email').first().fill(email);
       await win.getByText('Email me a sign-in link').first().click();
-      await win.getByText(`We sent a sign-in link and code to ${email}`).first().waitFor({ timeout: 20_000 });
+      await win.getByText('Check your email').first().waitFor({ timeout: 20_000 });
+      await win.getByText(email).first().waitFor({ timeout: 5_000 });
       let mail = null;
       for (let i = 0; i < 40 && !mail; i++) {
         mail = emailFromLog(email, logStart);
@@ -89,8 +91,8 @@ try {
       }
       if (!mail) throw new Error(`no sign-in email to ${email} in ${serverLog}`);
       if (signInMode === 'code') {
-        await win.getByLabel('Code or link from the email').first().fill(mail.code);
-        await win.getByRole('button', { name: 'Sign in', exact: true }).first().click();
+        // The sixth digit signs in by itself.
+        await win.getByLabel('6-digit code from the email').first().fill(mail.code);
       } else {
         const opener = spawn(exe, [mail.link], { env, stdio: 'ignore' });
         await new Promise((r) => opener.on('exit', r));
@@ -103,7 +105,8 @@ try {
   await library.waitFor({ timeout: 60_000 });
   log('library rendered at', win.url());
   if (signInMode !== 'skip') {
-    const signedIn = await win.evaluate(() => !!localStorage.getItem('qalm:tokens'));
+    // Tokens are kept per server (`qalm:tokens@<host>`).
+    const signedIn = await win.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('qalm:tokens')));
     if (!signedIn) throw new Error('the library opened, but no session was stored');
     log('session stored');
   }

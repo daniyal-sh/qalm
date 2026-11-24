@@ -5,14 +5,17 @@
 import { Library, type Folder, type LibraryEntry } from '@qalm/core';
 import * as React from 'react';
 
+import { confirmAccountDeletion, forgetAccountDocs, startAccountDeletion } from '../account/deletion';
 import { AssetService } from '../assets/assetService';
+import { pendingDeps } from '../auth/device';
+import { clearPending } from '../auth/pending';
 import { decodeJwt, TokenManager, type Tokens, type User } from '../auth/tokens';
 import { tokenStore } from '../auth/tokenStore';
 import { installBenchHook } from '../bench/hook';
 import { config } from '../config';
 import { kvGet, kvSet } from '../lib/kv';
 import { DocManager, docIds, openLoaded, type DocHandle, type RemoteFactory } from '../sync/docs';
-import { openPersistence } from '../sync/persistence';
+import { listLocalDocs, openPersistence, removeLocalDoc } from '../sync/persistence';
 import { watchNetwork } from '../sync/network';
 import { SyncProvider, type SyncStatus } from '../sync/provider';
 import { fetchTicket } from '../sync/ticket';
@@ -22,7 +25,8 @@ export const LOCAL_LIBRARY = 'lib:local';
 
 export interface Profile {
   email?: string;
-  provider?: 'apple' | 'google' | 'email';
+  /** Accounts sign in with email only (a link or a 6-digit code). */
+  provider?: 'email';
   name?: string;
 }
 
@@ -44,9 +48,11 @@ export interface Session {
    * signed-out notebooks are then only moved into the account when the user agrees (`localOffer`).
    */
   signInWithTokens(t: Tokens, profile: Profile, opts?: { verified?: boolean }): Promise<void>;
-  /** Apple / Google: POST the identity token to `path`. */
-  signInWith(path: string, body: unknown, profile: Profile): Promise<void>;
   signOut(): Promise<void>;
+  /** Settings → Delete account: emails a code to the account's address (`email` must match it). */
+  startDeleteAccount(email: string): Promise<void>;
+  /** Deletes the account on the server with the emailed code, then signs out and forgets its docs on this device. */
+  deleteAccount(code: string): Promise<void>;
   /** Signed-out notebooks on this device waiting for the user's OK to move into this account (0: none). */
   localOffer: number;
   moveLocal(): Promise<void>;
@@ -175,21 +181,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [dm, tm],
   );
 
-  const signInWith = React.useCallback(
-    async (path: string, body: unknown, p: Profile) => {
-      if (!tm) throw new Error('No server configured');
-      if (tm.user()) {
-        await dm.flushAll();
-        await tm.revoke();
-      }
-      await kvSet('profile', p);
-      setProfile(p);
-      const u = await tm.signIn(path, body);
-      await kvSet(unverifiedKey(u.id), undefined);
-    },
-    [dm, tm],
-  );
-
   const signOut = React.useCallback(async () => {
     await dm.flushAll();
     const id = tm?.user()?.id;
@@ -200,9 +191,39 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
   }, [dm, tm]);
 
+  const startDeleteAccount = React.useCallback(
+    async (email: string) => {
+      if (!tm?.user()) throw new Error('Not signed in');
+      await startAccountDeletion((p, i) => tm.fetch(p, i), email);
+    },
+    [tm],
+  );
+
+  const deleteAccount = React.useCallback(
+    async (code: string) => {
+      const me = tm?.user();
+      if (!tm || !me) throw new Error('Not signed in');
+      await confirmAccountDeletion((p, i) => tm.fetch(p, i), code);
+      // The account is gone on the server. Stop syncing, then forget it here: its docs, its tokens and its prefs.
+      // Notebooks in this device's signed-out library stay.
+      dm.setRemote(null);
+      const accountNotebooks = library?.entries().map((e) => e.id) ?? [];
+      const local = await openLoaded(dm, LOCAL_LIBRARY);
+      const localNotebooks = new Library(local.doc).entries().map((e) => e.id);
+      local.release();
+      await tm.signOut();
+      await forgetAccountDocs({ list: listLocalDocs, drop: (id) => dm.drop(id), remove: removeLocalDoc }, me.id, accountNotebooks, localNotebooks);
+      if (profile?.email) await clearPending(pendingDeps, profile.email).catch(() => undefined);
+      await kvSet(unverifiedKey(me.id), undefined);
+      await kvSet('profile', undefined);
+      setProfile(null);
+    },
+    [dm, tm, library, profile?.email],
+  );
+
   const value = React.useMemo<Session>(
-    () => ({ serverUrl, tm, user, profile, ready, skipped, setSkipped, dm, assets, library, signInWithTokens, signInWith, signOut, localOffer, moveLocal, dismissLocalOffer }),
-    [serverUrl, tm, user, profile, ready, skipped, setSkipped, dm, assets, library, signInWithTokens, signInWith, signOut, localOffer, moveLocal, dismissLocalOffer],
+    () => ({ serverUrl, tm, user, profile, ready, skipped, setSkipped, dm, assets, library, signInWithTokens, signOut, startDeleteAccount, deleteAccount, localOffer, moveLocal, dismissLocalOffer }),
+    [serverUrl, tm, user, profile, ready, skipped, setSkipped, dm, assets, library, signInWithTokens, signOut, startDeleteAccount, deleteAccount, localOffer, moveLocal, dismissLocalOffer],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

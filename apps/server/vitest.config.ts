@@ -17,7 +17,6 @@ export default defineConfig(async () => {
             WAIT_TIMEOUT_MS: '2500',
             MAX_ASSET_BYTES: '1024',
             MAX_USER_STORAGE_BYTES: '1500',
-            GOOGLE_AUDIENCES: 'qalm-test.apps.googleusercontent.com',
             // Pin anything a developer's local .dev.vars might set (vitest-pool-workers reads it), so tests are hermetic.
             MAGIC_LINK_URL: 'https://qalm.example/app/auth/email/verify',
             EMAIL_PROVIDER: 'console',

@@ -340,16 +340,36 @@ from the region images with its own vision. That keeps the app about 20 MB light
 - **Sync auth:** `POST /sync/ticket {docId}` with `Authorization: Bearer <accessToken>` returns a single-use ticket that expires in 30 s. Then
   `GET /sync/{docId}?ticket=…` upgrades. Access tokens never appear in URLs.
 - **R2** `ASSETS`: `PUT /assets/{sha256}` and `GET /assets/{sha256}` (Bearer auth; content-addressed).
+- **Storage cap** (`MAX_USER_STORAGE_BYTES`, default 250 MB = 250 000 000 bytes): counts the user's uploaded assets (`user_assets`, each
+  sha once per user) plus their notebook data. Notebook data is the bytes each `DocRoom` keeps in its SQLite storage (snapshot parts +
+  update log), tracked in memory as it persists and written to D1 `doc_sizes(doc_id, user_id, bytes)` by a DO alarm 5 s after a write (so
+  a burst of strokes costs one D1 write). The owner is the library's user or `notebooks.owner_id`. "Delete forever" removes the rows.
+  `GET /me/storage` → `{usedBytes, limitBytes, assetBytes, notebookBytes}`. A `PUT /assets` that doesn't fit gets **413** with
+  `{error, code: 'storage_full', …usage}`; sync is never refused, so ink is never blocked or lost (usage can go past the cap from ink alone).
+  The app checks `/me/storage` before a PDF, image or `.qalm` import and refuses with the same message; offline it imports locally and the
+  upload waits in the queue (a 413 stays queued).
 - **App API** (Bearer, CORS `*` for the web/Electron build): `GET /ai/grants`, `PATCH /ai/grants/{id} {canComment?, canTranscribe?, notebookIds?, folderIds?}`,
   `DELETE /ai/grants/{id}`, `GET /ai/requests`, `POST /ai/requests/{id}/deny`, `GET /ai/activity?limit=`, `GET /ai/presence?nb={notebookId}` (owner only:
   `{aiAccess, paused, agents: [{name, waiting, lastAt, canComment, canTranscribe}]}`, the agents with a pending `wait` or a call in the last
   60 s; empty while AI access is off; the editor polls it every 8 s), and `DELETE /notebooks/{id}` (owner only,
   "Delete forever": sets `notebooks.deleted_at`, refuses sync tickets from then on, and purges the notebook's `nb:`/`pg:` room storage, best effort).
   Moving to the trash is only `deletedAt` in the library doc, so restoring from the trash needs no server call.
-- **D1** tables: `users`, `sessions`, `magic_links`, `notebooks(id, owner_id, title, ai_access, deleted_at)`, `sync_tickets`, `email_sends`, OAuth tables, and
+- **D1** tables: `users`, `sessions`, `magic_links`, `notebooks(id, owner_id, title, ai_access, deleted_at)`, `sync_tickets`, `email_sends`, `user_assets`, `doc_sizes`, OAuth tables, and
   `grants(client_id, user_id, notebook_ids|folder_ids, can_comment, can_transcribe, expires_at)`.
-- **Auth:** `POST /auth/email/start`, `POST /auth/email/verify`, `POST /auth/apple`, `POST /auth/google`. These return `{accessToken (JWT, 1h), refreshToken}`,
+- **Auth (email only):** `POST /auth/email/start` and `POST /auth/email/verify` return `{accessToken (JWT, 1h), refreshToken}`. There is no Apple or
+  Google sign-in (removed; `users.apple_sub` / `google_sub` from `0001_init` are unused and left in place, since SQLite can't drop UNIQUE columns),
   `POST /auth/refresh` renews them and `POST /auth/logout` ends the session. In dev, emails are logged to the console.
+  - **Delete account** (Settings → Delete account, `apps/server/src/account.ts`, Bearer): `POST /account/delete/start {email}` (must be the
+    account's address; same rate limits) emails a 6-digit code stored as a `magic_links` row with `purpose = 'delete'` and its own hash
+    prefix; every sign-in query requires `purpose = 'signin'`, so neither code works for the other. `POST /account/delete {code}` (5 wrong
+    tries kill the code) sets `users.deleting_at`, then purges every notebook room (and the page rooms it knows), every room in `doc_sizes`
+    and the library room; deletes the R2 objects no other user has in `user_assets`; revokes every OAuth grant (OAUTH_KV); and deletes the
+    user's rows in `user_assets`, `doc_sizes`, `grants`, `auth_requests`, `activity`, `sessions`, `sync_tickets`, `notebooks`,
+    `magic_links`, `email_sends`, then `users` last. Every step is idempotent: once `deleting_at` is set, the same call with the same
+    access token finishes a partial run without a code, and a call after the user row is gone answers `{deleted: true}`. Sync tickets and
+    uploads require a live (not deleting) user, since access tokens stay valid for up to an hour. The app then stops syncing, removes the
+    account's library and notebook docs from this device (keeping notebooks still in the signed-out library), clears its token and prefs,
+    and shows "Your account was deleted" on the sign-in screen.
   - **Email links are bound to the device that asked.** The app sends `{email, nonceHash}` (sha256 of a random nonce it keeps for 15 min).
     The email has a link to the app's verify route (`MAGIC_LINK_URL`, normally the web app's `/auth/email/verify`; universal link / `qalm://` on native)
     and a 6-digit code. The app consumes it with `POST /auth/email/verify` `{token, nonce}` or `{email, code, nonce}` (5 wrong codes and that code is dead).

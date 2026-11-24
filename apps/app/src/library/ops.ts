@@ -53,11 +53,13 @@ export async function importPdf(ctx: Ctx, file: PickedFile, folderId: string | n
 
 /** Restores a `.qalm` backup as a new notebook (new ids), so it never collides with the original. */
 export async function importQalm(ctx: Ctx, file: PickedFile, folderId: string | null): Promise<string> {
+  // Checked once for the whole backup (its size stands in for its PDFs and images), so a restore never stops halfway.
+  await ctx.assets.ensureRoom(file.bytes.length);
   const meta: NotebookMeta = await restoreQalm(
     file.bytes,
     (docId, update) => writeDoc(ctx.dm, docId, update),
     async (asset, bytes) => {
-      await ctx.assets.put(bytes, asset.mime, asset.name);
+      await ctx.assets.putUnchecked(bytes, asset.mime, asset.name);
     },
     newId,
   );

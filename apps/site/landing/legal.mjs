@@ -9,7 +9,11 @@
 //   rotating, rate-limit records pruned after 1 h, the approval-page cookie 1 h).
 // - Agents: apps/server/src/grants.ts (approval ends 30 days after it is given), mcp.ts (wait, read, transcribe,
 //   comment; comment and transcribe each need their own permission), migrations (activity log, ai_access default off).
-// - Deletion: docs.ts deleteNotebook (pages purged, a tombstone row kept). No account deletion exists yet.
+// - Deletion: docs.ts deleteNotebook (pages purged, a tombstone row kept); account.ts deleteAccount (Settings → Delete
+//   account: emailed 6-digit code; rooms purged, unshared R2 objects, OAuth grants and every D1 row for the user deleted;
+//   the app then removes the account's docs and token on that device).
+// - Storage: apps/server/src/storage.ts (250 MB per account: imported files plus notebook data; at the cap only
+//   imports are refused).
 // - Device storage: apps/app/src/auth/tokenStore*.ts (keychain/keystore; localStorage on web), sync/persistence.web.ts
 //   (IndexedDB), lib/kv.web.ts (localStorage).
 // - Analytics: none in the code.
@@ -93,7 +97,7 @@ const privacySections = [
     title: 'Retention',
     body: 'We keep personal information only as long as needed for the purposes above:',
     items: [
-      'Your account and notebooks: until you delete them or ask us to delete your account. Notebooks in the trash stay there until you delete them forever.',
+      'Your account and notebooks: until you delete them, or delete your account (in Settings, or by asking us). Notebooks in the trash stay there until you delete them forever.',
       'A notebook you delete forever: its pages and ink are removed from our servers straight away. We keep a small record of it (its ID, your account, its title and when it was deleted) so the ID cannot be reused. PDFs and images you imported are stored separately and are not removed with the notebook yet; ask us and we will delete them.',
       'Sign-in links and codes: expire after 15 minutes and work once. A code stops working after 5 wrong tries.',
       'Signed-in devices: a device stays signed in for up to 60 days after it last renewed its sign-in. Signing out ends it straight away.',
@@ -102,7 +106,7 @@ const privacySections = [
       'Request logs: kept by Cloudflare for a short period under its own retention settings.',
       'Backups: Cloudflare keeps a short rolling history of our databases for recovery. Deleted data drops out of it as the history rolls over, within about 30 days.',
     ],
-    after: 'After an account is deleted we keep only a non-identifying record that a deletion happened, plus anything we must keep to meet a legal obligation or resolve a dispute.',
+    after: 'After an account is deleted we keep nothing about it, except anything we must keep to meet a legal obligation or resolve a dispute, and copies in backups and request logs until they expire.',
   },
   {
     title: 'Security',
@@ -141,7 +145,7 @@ const termsSections = [
   },
   {
     title: 'The service and price',
-    body: 'qalm is free while it is in beta. Imported files (PDFs and images) have a storage limit, currently 250 MB per account. Some features may be early, change, or be available only on some devices. If we introduce paid features in future, we will explain the price and terms before you are asked to pay, and nothing will be charged without your agreement.',
+    body: 'qalm is free while it is in beta. Each account has a storage limit, currently 250 MB, which covers the PDFs and images you import and your notebooks. At the limit you can’t import more files, but your handwriting and other edits keep syncing. Some features may be early, change, or be available only on some devices. If we introduce paid features in future, we will explain the price and terms before you are asked to pay, and nothing will be charged without your agreement.',
   },
   {
     title: 'Your content',
@@ -179,7 +183,7 @@ const termsSections = [
     title: 'Changes, suspension, and ending your account',
     body: [
       'We may change, add, or remove features and providers, and may suspend qalm for maintenance. We will give reasonable notice of changes that significantly reduce what you can do where we can.',
-      'You can stop using qalm and ask us to delete your account at any time. We may suspend or close an account that breaks these terms, creates a security risk, or where the law requires it. Where appropriate we will tell you why and give you a chance to respond.',
+      'You can stop using qalm and delete your account at any time, in Settings or by asking us. We may suspend or close an account that breaks these terms, creates a security risk, or where the law requires it. Where appropriate we will tell you why and give you a chance to respond.',
     ],
   },
   {
@@ -195,7 +199,7 @@ const termsSections = [
   },
   {
     title: 'Changes to these terms',
-    body: 'We may update these terms as qalm changes. We will show the new date at the top and, for significant changes, tell you in the app or by email before they take effect. If you keep using qalm after that, the updated terms apply; if you do not agree, you can stop using qalm and ask us to delete your account.',
+    body: 'We may update these terms as qalm changes. We will show the new date at the top and, for significant changes, tell you in the app or by email before they take effect. If you keep using qalm after that, the updated terms apply; if you do not agree, you can stop using qalm and delete your account.',
   },
 ];
 
@@ -206,7 +210,7 @@ const dataRightsSections = [
       'Access: get a copy of the personal information qalm holds about you.',
       'Correction: fix inaccurate account information.',
       'Export: receive your account records and notebooks in a structured, machine-readable format. You can also export any notebook yourself, at any time, as a PDF or a full .qalm backup.',
-      'Deletion: delete your account and everything in it.',
+      'Deletion: delete your account and everything in it. You can do this yourself in Settings → Delete account.',
       'Objection and restriction: object to processing based on our legitimate interests, or ask us to pause processing while a concern is resolved.',
       'Withdraw permission: turn AI access off for a notebook, or disconnect an agent in Settings, at any time.',
     ],
@@ -221,9 +225,9 @@ const dataRightsSections = [
   },
   {
     title: 'What deletion covers',
-    body: `qalm does not have a delete-account button yet. To delete your account, email ${privacyEmail} as described above. We then delete your account and sign-in sessions, your notebooks with their pages, ink, text, comments and readings, the files you imported, and your AI access settings, agent approvals and activity log, and we disconnect any agents. We keep only a non-identifying record that a deletion was completed. Deleted data leaves our backups as they roll over.`,
+    body: `To delete your account, open Settings → Account and sync → Delete account in the app. You type your email, we email you a 6-digit code, and entering it deletes your account for good. You can also email ${privacyEmail} as described above and we will do it for you. Either way, we delete your account and its sign-in sessions on every device, your notebooks with their pages, ink, text, comments and readings, the PDFs and images you imported (if another account imported the very same file, their copy stays for them), your storage records, and your AI access settings, agent approvals and activity log, and we disconnect any agents. Deletion can’t be undone. Deleted data leaves our backups as they roll over.`,
     items: [
-      'Copies on your devices stay until you sign out, clear the site’s data, or uninstall the app, because we cannot reach your devices to erase them.',
+      'The device you delete from signs out and removes its copy of the account’s notebooks. Copies on your other devices stay until you sign out there, clear the site’s data, or uninstall the app, because we cannot reach them to erase them.',
       'Deleting a notebook forever in the app removes its pages and ink from our servers straight away; see the Privacy Notice for the small record we keep.',
       'Anything an AI agent already received is held by your AI provider. Ask them to delete it under their own terms.',
     ],

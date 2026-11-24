@@ -23,13 +23,9 @@ export interface Env {
   EMAIL_PROVIDER?: string;
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
-  /** Comma-separated audiences (bundle ids / service ids) accepted in Apple identity tokens. */
-  APPLE_AUDIENCES?: string;
-  /** Comma-separated OAuth client ids accepted in Google identity tokens. */
-  GOOGLE_AUDIENCES?: string;
   /** Max asset upload size in bytes. Default 50 MB. */
   MAX_ASSET_BYTES?: string;
-  /** Per-user storage cap for assets in bytes (free beta). Default 1 GiB. */
+  /** Per-user storage cap in bytes (free beta): uploaded PDFs and images plus notebook data. Default 250 MB (250000000). */
   MAX_USER_STORAGE_BYTES?: string;
   /** Wake rules (ms). Defaults 6000 / 20000; long-poll limit 45000. Tests shorten them. */
   WAKE_IDLE_MS?: string;

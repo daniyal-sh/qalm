@@ -16,8 +16,10 @@ Keep it simple. Anything not listed here is out of v1.
 - Shell: React Native (iPad, Android) and Electron (Windows, macOS). Only the stroke in progress is native. All finished content is drawn by one Skia renderer everywhere.
 
 ## Accounts and backend
-- Sign in with Apple, Google or an email magic link.
-- Free while in beta, with capped storage. No payments in v1.
+- Sign in with email only, like Apollo: an emailed link or a 6-digit code. No passwords, no Apple or Google sign-in.
+  Accounts are qalm's own (its own D1); nothing is shared with Apollo.
+- Free while in beta, with 250 MB of storage per account (uploaded PDFs and images plus notebook data). At the cap, new
+  PDF and image imports are refused; handwriting and other edits keep syncing. No payments in v1.
 - Cloudflare: Workers + Durable Objects (sync, MCP), R2 (files), plus a database for accounts.
 - Notebooks are encrypted at rest. No end-to-end encryption.
 

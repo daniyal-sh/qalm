@@ -5,6 +5,8 @@ import * as React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { DeleteAccountSheet } from '../src/account/DeleteAccountSheet';
+import { formatBytes, summarizeUsage, type StorageUsage } from '../src/api/storage';
 import { denyRequest, getAiOverview, grantSummary, revokeGrant, toggleId, updateGrant, type AiOverview, type Grant } from '../src/api/ai';
 import { rejectedTouchText } from '../src/lib/palm';
 import { relativeTime } from '../src/library/actions';
@@ -29,8 +31,8 @@ const SECTIONS: { id: Section; label: string; icon: IconName }[] = [
 function AccountSection() {
   const s = useSession();
   const { c } = useTheme();
+  const [deleting, setDeleting] = React.useState(false);
   const who = s.profile?.email ?? s.profile?.name ?? (s.user ? 'Signed in' : 'Not signed in');
-  const via = s.profile?.provider === 'apple' ? 'Apple' : s.profile?.provider === 'google' ? 'Google' : s.profile?.provider === 'email' ? 'email link' : null;
   return (
     <View style={{ gap: 8 }}>
       <Panel>
@@ -38,15 +40,16 @@ function AccountSection() {
           <Avatar name={who} size={40} />
           <View style={{ flex: 1 }}>
             <Text variant="bodyStrong">{who}</Text>
-            <Text variant="meta">{s.user ? (via ? `Signed in with ${via}` : 'Signed in') : s.serverUrl ? 'Notebooks stay on this device until you sign in' : 'This build has no sync server'}</Text>
+            <Text variant="meta">{s.user ? 'Signed in with email' : s.serverUrl ? 'Notebooks stay on this device until you sign in' : 'This build has no sync server'}</Text>
           </View>
           {s.user ? <Pill label="Sync on" tone="good" dot /> : <Pill label="Local only" tone="neutral" />}
         </View>
       </Panel>
+      {s.user ? <StorageCard /> : null}
       {s.serverUrl ? (
         <Panel>
           {s.user ? (
-            <Row title="Sign out" description="Your notebooks stay in your account. Sign in again to see and sync them." last>
+            <Row title="Sign out" description="Your notebooks stay in your account. Sign in again to see and sync them.">
               <Button
                 label="Sign out"
                 variant="danger"
@@ -57,8 +60,13 @@ function AccountSection() {
                 }
               />
             </Row>
+          ) : null}
+          {s.user ? (
+            <Row title="Delete account" description="Deletes your account and everything in it, on every device. We'll email you a code to confirm." last>
+              <Button label="Delete account…" variant="danger" onPress={() => setDeleting(true)} />
+            </Row>
           ) : (
-            <Row title="Sign in to sync" description="Use Apple, Google or an email link. Notebooks you made here come with you." last>
+            <Row title="Sign in to sync" description="We email you a sign-in link and a code. Notebooks you made here come with you." last>
               <Button label="Sign in" variant="primary" onPress={() => router.push('/sign-in')} />
             </Row>
           )}
@@ -67,7 +75,75 @@ function AccountSection() {
       <Text variant="meta" tone="faint" style={{ paddingHorizontal: 4, color: c.faint }}>
         {BRAND.systemName} · free while in beta
       </Text>
+      <DeleteAccountSheet visible={deleting} onClose={() => setDeleting(false)} />
     </View>
+  );
+}
+
+/** Settings → Account: how much of the account's storage (PDFs, images and notebook data) is used. */
+function StorageCard() {
+  const s = useSession();
+  const { c } = useTheme();
+  const [usage, setUsage] = React.useState<StorageUsage | null>(null);
+  const [failed, setFailed] = React.useState(false);
+  const load = React.useCallback(() => {
+    setFailed(false);
+    s.assets
+      .storage()
+      .then((u) => setUsage(u))
+      .catch(() => setFailed(true));
+  }, [s.assets]);
+  React.useEffect(load, [load, s.user?.id]);
+
+  const sum = usage ? summarizeUsage(usage) : null;
+  const fill = sum?.warn ? c.warn : c.accent;
+  return (
+    <Panel>
+      <View style={{ padding: 16, gap: 10 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+          <Text variant="bodyStrong">Storage</Text>
+          {sum ? (
+            <Text variant="smallStrong" style={{ color: sum.warn ? c.warn : c.ink2 }} accessibilityLabel={`Storage: ${sum.label} used`}>
+              {sum.label}
+            </Text>
+          ) : failed ? null : (
+            <ActivityIndicator size="small" color={c.faint} />
+          )}
+        </View>
+        <View
+          style={[styles.track, { backgroundColor: c.line2 }]}
+          accessibilityRole="progressbar"
+          accessibilityValue={sum ? { min: 0, max: 100, now: Math.round(sum.fraction * 100) } : undefined}
+        >
+          {sum ? <View style={[styles.fill, { backgroundColor: fill, width: `${Math.max(sum.fraction > 0 ? 1 : 0, sum.fraction * 100)}%` }]} /> : null}
+        </View>
+        {failed ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <Text variant="meta">Couldn't load your storage. Check your connection.</Text>
+            <Button label="Retry" variant="ghost" size="sm" onPress={load} />
+          </View>
+        ) : usage ? (
+          <Text variant="meta">
+            PDFs and images {formatBytes(usage.assetBytes)} · Notebooks {formatBytes(usage.notebookBytes)}
+          </Text>
+        ) : null}
+        {sum?.full ? (
+          <View style={[styles.storageNote, { backgroundColor: c.warnSoft, borderColor: c.line }]}>
+            <Icon name="alert-triangle" size={14} color={c.warn} />
+            <Text variant="small" style={{ color: c.warn, flex: 1 }}>
+              Your storage is full. New PDF and image imports are paused; handwriting and text keep syncing. Delete PDFs or images you don't need to make room.
+            </Text>
+          </View>
+        ) : sum?.warn ? (
+          <View style={[styles.storageNote, { backgroundColor: c.warnSoft, borderColor: c.line }]}>
+            <Icon name="info" size={14} color={c.warn} />
+            <Text variant="small" style={{ color: c.warn, flex: 1 }}>
+              You've used over 90% of your {formatBytes(usage!.limitBytes)}. At the limit, new PDF and image imports stop; handwriting always keeps syncing.
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    </Panel>
   );
 }
 
@@ -463,6 +539,9 @@ export default function Settings() {
 }
 
 const styles = StyleSheet.create({
+  track: { height: 4, borderRadius: radius.pill, overflow: 'hidden' },
+  fill: { height: 4, borderRadius: radius.pill },
+  storageNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 10, borderRadius: radius.control, borderWidth: StyleSheet.hairlineWidth },
   header: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, minHeight: 56, borderBottomWidth: StyleSheet.hairlineWidth },
   nav: { width: 260, padding: 10, gap: 2, borderRightWidth: StyleSheet.hairlineWidth },
   navItem: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, paddingHorizontal: 10, borderRadius: radius.control },

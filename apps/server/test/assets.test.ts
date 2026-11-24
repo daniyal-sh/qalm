@@ -49,7 +49,7 @@ describe('assets', () => {
     expect((await call(`/assets/${h}`, { token: b.accessToken })).status).toBe(200);
     // The test cap is 1500 bytes per user: a has 1000 used.
     const more = new Uint8Array(600).fill(9);
-    expect((await call(`/assets/${await sha(more)}`, { method: 'PUT', token: a.accessToken, body: more })).status).toBe(507);
+    expect((await call(`/assets/${await sha(more)}`, { method: 'PUT', token: a.accessToken, body: more })).status).toBe(413);
     const fits = new Uint8Array(400).fill(9);
     expect((await call(`/assets/${await sha(fits)}`, { method: 'PUT', token: a.accessToken, body: fits })).status).toBe(201);
   });

@@ -22,7 +22,9 @@
   "vars": {
     "EMAIL_PROVIDER": "console",
     // App sign-in links in emails open the web app's verify route, which POSTs the token back (see .dev.vars.example).
-    "MAGIC_LINK_URL": "https://qalm.apollolearn.app/app/auth/email/verify"
+    "MAGIC_LINK_URL": "https://qalm.apollolearn.app/app/auth/email/verify",
+    // Per-user storage cap in bytes: uploaded PDFs and images plus notebook data (250 MB in the free beta).
+    "MAX_USER_STORAGE_BYTES": "250000000"
   },
   "observability": { "enabled": true },
 
@@ -50,7 +52,8 @@
         "PUBLIC_URL": "https://qalm-api-staging.apollolearn.workers.dev",
         "MAGIC_LINK_URL": "https://qalm-web-staging.apollolearn.workers.dev/app/auth/email/verify",
         "EMAIL_PROVIDER": "resend",
-        "EMAIL_FROM": "qalm <qalm@apollolearn.app>"
+        "EMAIL_FROM": "qalm <qalm@apollolearn.app>",
+        "MAX_USER_STORAGE_BYTES": "250000000"
       },
       "observability": { "enabled": true }
     },
@@ -79,7 +82,8 @@
         "PUBLIC_URL": "https://qalm-api.apollolearn.app",
         "MAGIC_LINK_URL": "https://qalm.apollolearn.app/app/auth/email/verify",
         "EMAIL_PROVIDER": "resend",
-        "EMAIL_FROM": "qalm <qalm@apollolearn.app>"
+        "EMAIL_FROM": "qalm <qalm@apollolearn.app>",
+        "MAX_USER_STORAGE_BYTES": "250000000"
       },
       "observability": { "enabled": true }
     }
