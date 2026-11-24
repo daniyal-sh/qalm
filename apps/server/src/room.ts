@@ -3,7 +3,7 @@ import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import { AI_LIVE, AI_LIVE_TTL_MS, AI_PAUSE, AI_PAUSED, Notebook, Page, inkInBox, migratePage, summarizeThreads, type ThreadSummary } from '@qalm/core';
+import { AI_LIVE, AI_LIVE_TTL_MS, AI_PAUSE, AI_PAUSED, AI_STOP, Notebook, Page, inkInBox, migratePage, summarizeThreads, type ThreadSummary } from '@qalm/core';
 import { num, type Env } from './env';
 import { parseDocId, nbDocId, pgDocId, room, type DocRef } from './docs';
 import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit, type AgentWho, type PageEdit, type Presence } from './agent';
@@ -322,11 +322,12 @@ export class DocRoom extends DurableObject<Env> {
   }
 
   private onText(ws: WebSocket, message: string): void {
-    if (this.ref?.kind !== 'nb' || (message !== AI_LIVE && message !== AI_PAUSE)) return;
+    if (this.ref?.kind !== 'nb' || (message !== AI_LIVE && message !== AI_PAUSE && message !== AI_STOP)) return;
     const was = this.liveUntil() > 0;
-    if (message === AI_LIVE) {
+    if (message !== AI_PAUSE) {
+      // A heartbeat, or this device alone stopping (backgrounded, notebook closing): other devices keep playing.
       const att = ws.deserializeAttachment() as Attachment;
-      ws.serializeAttachment({ ...att, liveUntil: Date.now() + num(this.env.AI_LIVE_TTL_MS, AI_LIVE_TTL_MS) });
+      ws.serializeAttachment({ ...att, liveUntil: message === AI_LIVE ? Date.now() + num(this.env.AI_LIVE_TTL_MS, AI_LIVE_TTL_MS) : 0 });
     } else {
       // Pause on one device pauses them all, and the others' editors switch to paused.
       for (const s of this.ctx.getWebSockets()) {

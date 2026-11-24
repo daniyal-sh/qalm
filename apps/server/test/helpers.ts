@@ -163,6 +163,12 @@ export class YClient {
     this.ws.send('ai:pause');
   }
 
+  /** Stops this device only (backgrounded, notebook closing): other devices keep playing. */
+  stop() {
+    this.stopBeat();
+    this.ws.send('ai:stop');
+  }
+
   /** Stops heartbeats without saying so: the device went to sleep. */
   stopBeat() {
     if (this.beat) clearInterval(this.beat);

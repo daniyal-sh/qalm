@@ -309,7 +309,10 @@ describe('mcp', () => {
     off.nb.setMeta({ aiAccess: true });
     await serverAi('allcnb', true);
     await until(async () => (await aiRow('allcnb')) === 1);
-    expect(textOf(await tool(token, 'wait'))).toContain('"Journal"');
+    // Listed at once, without its title until the student presses Play in it.
+    expect(textOf(await tool(token, 'wait'))).toContain(`s=${sessionOf('allcnb')} paused`);
+    off.nbc.play();
+    await until(async () => textOf(await tool(token, 'wait')).includes('"Journal" live'));
     b.nb.setMeta({ aiAccess: false });
     await serverAi('allbnb', false);
     const r = await tool(token, 'read', { ref: 'outline', s: sessionOf('allbnb') });

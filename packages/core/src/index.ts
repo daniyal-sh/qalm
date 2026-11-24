@@ -1,6 +1,6 @@
 export * from './types';
 export { LOCAL_ORIGIN } from './origin';
-export { AI_LIVE, AI_PAUSE, AI_PAUSED, AI_LIVE_EVERY_MS, AI_LIVE_TTL_MS } from './aiLive';
+export { AI_LIVE, AI_PAUSE, AI_STOP, AI_PAUSED, AI_LIVE_EVERY_MS, AI_LIVE_TTL_MS } from './aiLive';
 export { encodePoints, decodePoints } from './points';
 export { Notebook, createNotebookDoc, type NotebookInit } from './model/notebook';
 export { Page, readingsOf, freshCover } from './model/page';

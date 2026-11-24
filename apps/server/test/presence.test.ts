@@ -75,7 +75,7 @@ describe('Play / Pause AI (server-verified liveness)', () => {
     expect(textOf(r)).toContain(PAUSED);
     const t0 = Date.now();
     expect(textOf(await tool(token, 'wait', { s }))).toBe(`#q s=${s} paused`);
-    expect(Date.now() - t0).toBeGreaterThan(2000); // parked for the whole long-poll, not a busy loop
+    expect(Date.now() - t0).toBeGreaterThan(3500); // parked for the whole long-poll, not a busy loop
     // While live, the whole notebook is readable.
     n.nbc.play();
     await until(async () => !(await tool(token, 'read', { ref: 'outline', s })).isError);
@@ -90,13 +90,13 @@ describe('Play / Pause AI (server-verified liveness)', () => {
     const token = await connectAgent('expiry@example.com', { comment: true, transcribe: true }, 'Claude');
     const s = sessionOf('exnb');
     expect((await tool(token, 'read', { ref: 'outline', s })).isError).toBeFalsy();
-    // Heartbeats stop without a Pause: a pending wait ends as paused once the 1.2 s test window lapses.
+    // Heartbeats stop without a Pause: a pending wait ends as paused once the 2.5 s test window lapses (the test long-poll is 4 s).
     const waiting = tool(token, 'wait', { s });
     await pause(100);
     const t0 = Date.now();
     n.nbc.stopBeat();
     expect(textOf(await waiting)).toBe(`#q s=${s} paused`);
-    expect(Date.now() - t0).toBeLessThan(2000);
+    expect(Date.now() - t0).toBeLessThan(3800);
     expect(textOf(await tool(token, 'read', { ref: 'outline', s }))).toContain(PAUSED);
     // Playing again, then the socket closes (notebook closed, signed out, connection lost): paused at once.
     n.nbc.play();
@@ -118,11 +118,17 @@ describe('Play / Pause AI (server-verified liveness)', () => {
     await until(live);
     // One device closes (say a second tab): the other keeps it live, past the TTL, on its own heartbeats.
     n.nbc.close();
-    await pause(1500);
+    await pause(3000);
     expect(await live()).toBe(true);
-    // A reconnect is a new socket that plays on its own heartbeat. Pause on the tablet pauses the laptop too.
+    // A reconnect is a new socket that plays on its own heartbeat. One device stopping alone (backgrounded) leaves
+    // the other playing; Pause on the tablet pauses the laptop too.
     const laptop = await YClient.connect(t.accessToken, 'nb:dvnb');
     laptop.play();
+    tablet.stop();
+    await pause(100);
+    expect(await live()).toBe(true);
+    expect(laptop.texts).not.toContain('ai:paused');
+    tablet.play();
     tablet.pause();
     await until(() => laptop.texts.includes('ai:paused'));
     expect(await live()).toBe(false);
@@ -135,10 +141,12 @@ describe('Play / Pause AI (server-verified liveness)', () => {
   it('comments the student writes while paused are held until Play', async () => {
     const t = await signIn('held@example.com');
     const n = await notebook(t, 'hdnb', 'Held');
-    n.page.addItem(stroke('a', 50, 100, 200, 120));
     const token = await connectAgent('held@example.com', { comment: true, transcribe: true }, 'Claude');
     const s = sessionOf('hdnb');
-    expect(textOf(await tool(token, 'wait', { s }))).toContain('first look');
+    const first = tool(token, 'wait', { s });
+    await pause(50);
+    n.page.addItem(stroke('a', 50, 100, 200, 120));
+    expect(textOf(await first)).toContain('first look');
     n.nbc.pause();
     n.page.addComment({ author: { kind: 'user', name: 'You' }, text: 'can you check this?', anchor: [40, 90, 220, 130], anchorIds: ['a'] });
     expect(textOf(await tool(token, 'wait', { s }))).toBe(`#q s=${s} paused`);

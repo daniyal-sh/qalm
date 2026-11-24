@@ -3,10 +3,12 @@
  * devices is playing the notebook. It is ephemeral and server-verified, never a synced flag: while playing, the
  * editor sends `AI_LIVE` as a text frame on the notebook's sync socket (`nb:{id}`) every `AI_LIVE_EVERY_MS`, and the
  * notebook's room counts it as live until `AI_LIVE_TTL_MS` after the last one, or until that socket closes.
- * `AI_PAUSE` stops sharing on every device at once; the room tells the other sockets with `AI_PAUSED`.
+ * `AI_PAUSE` (the Pause button) stops sharing on every device at once; the room tells the other sockets with
+ * `AI_PAUSED`. `AI_STOP` stops only this device (backgrounded, notebook closed), so another device can keep playing.
  */
 export const AI_LIVE = 'ai:live';
 export const AI_PAUSE = 'ai:pause';
+export const AI_STOP = 'ai:stop';
 /** Server → the notebook's other sockets: someone pressed Pause. */
 export const AI_PAUSED = 'ai:paused';
 export const AI_LIVE_EVERY_MS = 15_000;
