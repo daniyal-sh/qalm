@@ -16,9 +16,23 @@ only *records* what happened. Agents still never change ink.
 **States:** `recording` → `paused` ⇄ `recording` → `stopped`. One session records at a time per device.
 
 - **Record** starts a session on the current notebook. Audio and the ink log start together at `t = 0`.
-- **Pause** stops the audio **and locks the pen**: the overlay gets `tool: 'none'`, undo/redo and selection edits are
-  disabled, and a banner says **"Recording paused · resume to write"**. Nothing can be written while paused, so the
-  timeline never needs a wall-clock gap.
+- **Pause** stops the audio **and locks the pen**: the overlay gets `tool: 'none'`, undo/redo (header, focus pill and
+  shortcuts) are disabled, a lasso selection is cleared with its action bar (and Paste), an open text box is closed,
+  and a banner says **"Recording paused · resume to write"**. Nothing can be written while paused, so the timeline
+  never needs a wall-clock gap. Playback locks the same way.
+- Pause and Resume are transitions (`pausing`, `resuming`) that keep the pen locked until the mic has stopped or is
+  recording again; a second press meanwhile does nothing, and Stop waits for them. Every mic operation (start, stop,
+  chunk rotation, release) runs on one chain, so a pause during a rotation can't stop the mic twice.
+- A mic that won't start (on Resume, or for the next chunk of a rotation) leaves the recording **paused**, with a
+  message; Stop also works from `starting` and `resuming`. An OS interruption (a call, Siri, another app taking the
+  mic, media services reset: the recorder's status events), or a mic the keepalive finds no longer recording, pauses
+  it too. Paused releases the AI background hold (below).
+- Page actions (add, duplicate, move, delete) and image inserts are refused while paused or replaying. Locked means
+  the pen, highlighter, eraser (partial too: a gesture under way when the lock comes is dropped, not committed),
+  scribble-to-erase (it is a pen stroke), lasso and text; **not the laser pointer**, which never writes to the page.
+- **Presentation view** (F5): the lecture overlay (paused banner, player bar, sheets) is hidden; a recording shows only
+  as a small corner mark (red dot and time, or "Paused"). The presentation keys (arrows, Space/Enter, Backspace, K,
+  Esc) are handled before the lecture lock, so pages still turn while a recording is paused.
 - **Resume** continues the same timeline (`t` carries on from where it paused).
 - **Stop** ends the session. The last audio chunk is saved, the last timeline chunk flushed, and (with cloud
   transcription) the last chunk transcribed.
@@ -31,21 +45,45 @@ recording, frozen while paused. Every event and every audio chunk is stamped wit
 | Platform | Recorder | Format |
 |---|---|---|
 | Web, Electron | `MediaRecorder` on `getUserMedia({audio: {channelCount: 1}})` | `audio/webm;codecs=opus`, 32 kbps |
-| iPad | `expo-audio` | AAC (`.m4a`), 32 kbps, mono, 22.05 kHz |
-| Android | `expo-audio` | AAC (`.m4a`), 32 kbps, mono, 22.05 kHz |
+| iPad | `expo-audio` (AVAudioRecorder) | AAC in **ADTS** (`.aac`, `audio/aac`), 32 kbps, mono, 22.05 kHz |
+| Android | `expo-audio` (MediaRecorder, `aac_adts`) | AAC in **ADTS** (`.aac`, `audio/aac`), 32 kbps, mono, 22.05 kHz |
+
+Native files are ADTS, not M4A: ADTS is a stream of self-describing frames with no index written at the end, so a file
+cut off by a crash or an OS kill still plays, and it can be cut at any frame into standalone pieces.
 
 Audio is recorded in **chunks of 2 minutes** (`AUDIO_CHUNK_MS`). Each chunk is a complete, standalone file (the
 recorder is stopped and restarted), so a crash loses at most one chunk, each chunk can be transcribed on its own, and
 nothing has to be re-muxed. A chunk records its start `t0` and length `dur` on the timeline; the few milliseconds between
-chunks are silence on playback. Pause ends the current chunk; resume starts a new one.
+chunks are silence on playback. Pause ends the current chunk; resume starts a new one. Chunks are **not rotated while
+the native app is in the background**: the chunk keeps recording and rotates when the app is back (see below). A
+chunk longer than 2½ minutes is **cut into 2-minute pieces** when it ends (at ADTS frames), and each piece is stored,
+uploaded and transcribed as its own chunk; so stored chunks are never longer than 2 minutes, a cloud upload never
+nears the 8 MB limit, and the Android recognizer decodes a piece at a time (it also streams; §4). Each recorder file is
+deleted once its bytes are in the assets (and transcribed): audio is never kept twice (nor in an iPad backup).
 
-**Background:** recording continues when the app is in the background.
+**Crash recovery:** the live mark of a recording (per account, on the device) holds the file the current chunk is
+written to. At the next start, a session left live is checked with the server (`GET /lectures/{nb}/{sid}`: deleted on
+another device? then it stays deleted and only the file goes), its leftover file is cut into pieces and added (queued
+for cloud transcription if the session used it), and the session is stopped at its last event. Offline, nothing is
+decided until a later start. While recording, a keepalive updates the session doc's length every minute, so the server
+doesn't expire a long background stretch as a crashed app (§3).
+
+**Background:** recording continues when the app is in the background. **AI sharing too (owner decision):** while a
+lecture records and AI is playing, leaving the app doesn't pause AI. The recorder holds the open notebook's Play / Pause
+AI (`AiLive.holdWhileBackgrounded('lecture')`, bound in `lecture/aiHold.ts`) while it is starting, recording or
+resuming; Pause or Stop releases it, and a release while in the background stops sharing then.
 - **Android:** `expo-audio` with `enableBackgroundRecording` (a `microphone` foreground service with the system
   notification "qalm is recording", `FOREGROUND_SERVICE_MICROPHONE`). The system mic indicator shows.
 - **iPad:** `UIBackgroundModes: audio` and an active `AVAudioSession` (`playAndRecord`); the system shows the red
   recording indicator.
 - **Web and desktop:** `MediaRecorder` keeps recording while the tab or window is minimised. Electron's window sets
   `backgroundThrottling: false` so chunk rotation and uploads keep their timers.
+- **Why no rotation in the background (iPad, Android):** rotation stops one recorder and starts another. Android 14
+  doesn't allow starting the microphone foreground service from the background, JS timers may not fire there, and iOS
+  may deactivate the audio session between recorders. So the running chunk simply continues (crash-safe ADTS), the
+  next rotation happens on return, and the long chunk is cut into 2-minute pieces when it ends. Native rotation (a
+  timer in the foreground service, or AVAudioRecorder segments) was not done: it can't be made safe without a device.
+  **Unverified on devices**: this needs an iPad and an Android 14+ phone before release (#67's checklist).
 
 ## 2. Timeline events
 
@@ -71,9 +109,14 @@ JSON objects, one per line (JSONL), in time order:
   (x, y in PDF points rounded to 0.01; pressure, tilt and azimuth to 0.001; t whole ms since the stroke began). A
   stroke's start on the timeline is the event's `t` minus its last point's `t`.
 - One Yjs transaction is one event per kind (a lasso move of 40 strokes is one `update`).
+- A **partial erase** (#68) writes nothing while the eraser is down; at pen-up one transaction replaces each touched
+  stroke by its pieces, so the timeline gets one `erase` (the strokes, with their points) and one `add` (the pieces,
+  plain strokes with `splitFrom: originalId`) at the same `t`. Scribble-to-erase is a normal erase transaction.
 - **Replay** (`LectureReplay`, core): the state at `t` is the page's `base` ink (read from the page doc, or from the
   first `before`/`erase` that carries it) with every event up to `t` applied. Erased strokes come back before their
-  erase time. `strokeTimes()` maps each stroke id to the `t` it was written (tap-to-seek).
+  erase time. Pieces of a partial erase take their stroke's place in the z-order (not the top). `strokeTimes()` maps
+  each stroke id to the `t` it was written (tap-to-seek); a piece maps to its stroke's time (pieces of pieces too), so
+  tapping it seeks to when the ink was written, not to the erase.
 
 ## 3. Region crops
 
@@ -113,19 +156,27 @@ timeline (ms).
 
 - **Default, on-device** (`modules/qalm-lecture`): each finished audio chunk is transcribed on the device, then its
   segments are shifted by the chunk's `t0`.
-  - **iPad:** `SFSpeechRecognizer` with `requiresOnDeviceRecognition = true` on the chunk file (SpeechAnalyzer where
-    available, iOS 26+); word timings from `bestTranscription.segments`, grouped into lines at gaps ≥ 0.8 s.
+  - **iPad:** `SFSpeechRecognizer` with `requiresOnDeviceRecognition = true` on the chunk file; word timings from
+    `bestTranscription.segments`, grouped into lines at gaps ≥ 0.8 s. (SpeechAnalyzer, iOS 26+, can replace it
+    later behind the same module API.)
   - **Mac (desktop):** the same recognizer in a tiny Swift helper (`apps/desktop/native/mac-transcribe`) that Electron
-    runs on each chunk; it is bundled only when built on a Mac.
+    runs on each chunk; it is bundled only when built on a Mac. The renderer first decodes the chunk (WebM/Opus, which
+    AVFoundation can't read) with Web Audio to 16 kHz mono WAV, and the helper reads that.
   - **Android:** `SpeechRecognizer.createOnDeviceSpeechRecognizer` (Android 13+, where
-    `isOnDeviceRecognitionAvailable` and the language is installed), fed the chunk decoded to 16 kHz PCM through
+    `isOnDeviceRecognitionAvailable` and the language is installed), fed the chunk as a **stream**: MediaCodec decodes
+    it buffer by buffer and a small resampler turns each buffer into 16 kHz mono PCM straight into the pipe (memory
+    stays a few buffers whatever the length; any error, out of memory included, fails that chunk, never the app), through
     `EXTRA_AUDIO_SOURCE`; word timings (`EXTRA_REQUEST_WORD_TIMING`) on Android 14+, otherwise segment times spread
     over the chunk.
   - **Windows and web:** there is no on-device recognizer. Settings says so and offers to switch to cloud; sessions
     record without a transcript until then.
 - **Settings → "Cloud transcription (Whisper)"** (off by default): each finished chunk (every 2 minutes and at stop) is
   sent to `POST /lectures/transcribe`, which runs Whisper on Workers AI (`@cf/openai/whisper-large-v3-turbo`) and
-  returns segments with word timings. A chunk that can't be sent (offline) is queued and retried.
+  returns segments with word timings. A chunk that can't be sent (offline, rate-limited, a server error) is queued
+  per account and tried again after a recording, at app start and on Retry; after 5 tries (or at once for an error that
+  won't go away by itself, like the monthly quota) it is listed as failed, and the Lectures list shows "transcription
+  failed" with **Retry**. The queue is cleared at sign-out (after a drain in flight ends) and account deletion; a drain
+  stops if the account changes.
 
 **Server endpoint** `POST /lectures/transcribe?lang=xx` (Bearer, live user), body = one audio chunk (`audio/webm`,
 `audio/ogg`, `audio/mp4`, `audio/mpeg` or `audio/wav`, ≤ 8 MB) → `{segments, durationMs, usedMinutes, limitMinutes}`.
@@ -166,7 +217,10 @@ lib:{userId}
   goes when no other user holds it either). A page asset (PDF, image) of any of the user's notebooks with the same
   bytes keeps it too. Lecture audio uploads name their session (`X-Qalm-Lecture: lec:{nb}:{sid}`): the reference is
   recorded at once, and an upload that lands after the delete gets 410 and is not stored. The app removes the
-  library entry, its local copies, its queued uploads and any queued transcription for it.
+  library entry, its local copies, its queued uploads and any queued transcription for it. The session being recorded
+  can't be deleted (Stop first). A device whose sync ticket for a session answers 410 (deleted elsewhere) removes it
+  too, and if it is recording that session, abandons the recording without writing anything more (so it can't come
+  back through the library).
 - `GET /lectures/{notebookId}/{sessionId}` → `{deleted}`: a device asks before it touches a session again (e.g. stopping
   one its crash left live), so a session deleted elsewhere stays deleted.
 - **Delete forever** of a notebook deletes each of its sessions the same way (their audio and crops stop counting
@@ -185,7 +239,10 @@ speed 1× / 1.5× / 2×, and close.
   pen is locked (`tool: 'none'`) while replaying.
 - **Tap a stroke** to jump the audio to when it was written.
 - The **transcript panel** follows along (the current line highlighted, auto-scrolled); tapping a line seeks to it.
-- Audio plays chunk by chunk (`audio` list), switching at chunk ends; a missing chunk plays as silence.
+- Audio plays chunk by chunk (`audio` list), switching at chunk ends; a missing chunk plays as silence. The time follows
+  the chunk actually loaded in the player; while the next one downloads or loads, it runs on the clock (no jump, no
+  skipped chunk). After a seek the player's position is ignored until it reaches the target, so a seek back sticks.
+- Only the player bar and the record clock re-render with time; the editor re-renders when the replayed ink changes.
 
 ## 7. AI over MCP
 
@@ -215,8 +272,9 @@ Still four tools (`wait`, `read`, `transcribe`, `comment`); lecture data is read
 
 ## 8. Export
 
-The export menu's **Export .qalm backup** asks first when the notebook has sessions: **"Include lecture recordings"**
-(off by default).
+The editor's **Export .qalm backup** asks first when the notebook has sessions: **"Include lecture recordings"**
+(off by default). The library's notebook menu has a separate **Export with lecture recordings** next to the plain
+backup.
 - **Off:** today's `.qalm`, byte-for-byte the same code path. Nothing from sessions is in it (the index and page docs
   hold none).
 - **On:** the same files plus, per session, `lecture/{sessionId}/`:
@@ -226,14 +284,25 @@ The export menu's **Export .qalm backup** asks first when the notebook has sessi
   - `audio/{n}-{t0}.{webm|m4a}`: the chunks, in order;
   - `crops/{n}-{t}.png` and `crops/{n}-{t}.json` (`{t, text, regions}`);
   - `transcript.json`: `[{t0, t1, text, words?}]`.
+- The export is written as a **streamed zip**, one session at a time (core `packQalmStream`): on iPad and Android each
+  part goes straight to the file, in a browser the parts become a Blob, so hours of audio are never held twice.
 - **Import** restores the sessions into the new notebook (new session ids, page ids remapped, audio and crops added as
   assets) when signed in; signed out (or an older app) they are skipped safely: unknown zip entries are ignored.
+  Malformed transcript lines, crops and events are dropped, not imported. Crop region labels belong to the old
+  notebook's registry, so they are kept only as the original's: `R7` becomes `(R7 orig)`.
 
 ## 9. Sizes (measured)
 
-See the table in the final report and `packages/core/test/lecture.size.test.ts`: per hour of lecture, audio is
-~14.4 MB (32 kbps), the timeline ~1–3 MB deflated for 2,000–4,000 strokes, crops ~5–10 MB (one PNG per pause), the
-transcript ~0.1 MB. About 20–30 MB per hour: the 250 MB cap holds roughly 8–12 hours.
+Per hour of lecture:
+
+| Part | Size | How it was measured |
+|---|---|---|
+| Audio | 11–14.4 MB | 32 kbps is 14.4 MB/h at most; Opus is variable-rate: the desktop e2e (Chromium's fake mic) stored 47 kB for 15.4 s, about 11 MB/h |
+| Timeline | ~3.4 MB | `packages/core/test/lecture.size.test.ts`: 3,000 strokes of ~70 points (240 Hz pen), 10% erased, flushed every ~5 strokes, deflated |
+| Crops | ~1–3 MB (estimate) | one PNG per writing pause (≤ 3 a minute with the 20 s limit); the e2e's two small-stroke crops were 1.4 kB each, a row of real handwriting is ~5–15 kB |
+| Transcript | ~0.1–0.3 MB | ~9,000 spoken words with word timings, in the session doc |
+
+About 16–21 MB per hour, so the 250 MB cap holds roughly 12–15 hours of lectures (plus the notebooks' own data).
 
 ## 10. Not in v1
 

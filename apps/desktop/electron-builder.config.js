@@ -16,7 +16,11 @@ module.exports = {
   directories: { output: 'release', buildResources: 'resources' },
   files: ['dist/**/*.js', 'package.json'],
   // The Expo web export, served by the app:// protocol from resources/web.
-  extraResources: [{ from: '../app/dist', to: 'web', filter: ['**/*'] }],
+  extraResources: [
+    { from: '../app/dist', to: 'web', filter: ['**/*'] },
+    // Lecture mode's on-device transcription on macOS, when it was built on a Mac (native/mac-transcribe/build.sh).
+    ...(require('node:fs').existsSync(`${__dirname}/native/mac-transcribe/build/mac-transcribe`) ? [{ from: 'native/mac-transcribe/build/mac-transcribe', to: 'mac-transcribe' }] : []),
+  ],
   asar: true,
   npmRebuild: false,
   protocols: [{ name: 'qalm', schemes: ['qalm'] }],
@@ -40,6 +44,11 @@ module.exports = {
     gatekeeperAssess: false,
     entitlements: 'resources/entitlements.mac.plist',
     entitlementsInherit: 'resources/entitlements.mac.plist',
+    // Lecture recording: the microphone and on-device speech recognition.
+    extendInfo: {
+      NSMicrophoneUsageDescription: 'qalm records audio for lecture recordings.',
+      NSSpeechRecognitionUsageDescription: 'qalm transcribes lecture recordings on this Mac.',
+    },
     notarize,
   },
   dmg: { artifactName: 'Apollo-qalm-${version}-${arch}.${ext}' },

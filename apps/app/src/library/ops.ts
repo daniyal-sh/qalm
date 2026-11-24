@@ -1,16 +1,17 @@
 /** Library operations that touch docs, assets and files (wrapping the pure helpers in actions.ts and export/). */
-import { Notebook, type Library, type NotebookMeta } from '@qalm/core';
+import { LectureDoc, Notebook, lectureBundleOf, lectureDocFromBundle, lectureDocId, type LectureBundle, type Library, type NotebookMeta } from '@qalm/core';
 import { Alert, Platform } from 'react-native';
 import * as Y from 'yjs';
 
 import type { AssetService } from '../assets/assetService';
-import { buildPdf, buildPdfNotebook, buildQalm, exportFileName, pdfPageSizes, restoreQalm, type NotebookSource } from '../export/notebookExport';
-import { saveFile } from '../export/save';
+import { buildPdf, buildPdfNotebook, buildQalm, buildQalmStream, exportFileName, pdfPageSizes, restoreQalm, type NotebookSource } from '../export/notebookExport';
+import { saveFile, saveFileStream } from '../export/save';
 import { toPng } from '../export/toPng';
 import { newId } from '../lib/id';
 import { stripExt, type PickedFile } from '../lib/mime';
 import { docIds, openLoaded, type DocManager } from '../sync/docs';
-import { removeLocalDoc } from '../sync/persistence';
+import { listLocalDocs, removeLocalDoc } from '../sync/persistence';
+import { markImportedCrop } from '../lecture/imported';
 import { buildNotebook, copyInto, entryFor, type NewNotebookForm } from './actions';
 
 export interface Ctx {
@@ -62,9 +63,26 @@ export async function importQalm(ctx: Ctx, file: PickedFile, folderId: string | 
       await ctx.assets.putUnchecked(bytes, asset.mime, asset.name);
     },
     newId,
+    // Lecture recordings (an export with them): restored into the new notebook when signed in (lecture mode is
+    // account-only); otherwise skipped.
+    ctx.server ? (sessions, pageIds, notebookId) => restoreLectures(ctx, sessions, pageIds, notebookId) : undefined,
   );
   ctx.library.putEntry(entryFor(meta, folderId));
   return meta.id;
+}
+
+async function restoreLectures(ctx: Ctx, sessions: LectureBundle[], pageIds: Map<string, string>, notebookId: string): Promise<void> {
+  for (const imported of sessions) {
+    const b: LectureBundle = { ...imported, crops: imported.crops.map((c) => ({ ...c, crop: markImportedCrop(c.crop) })) };
+    const sessionId = newId();
+    const audioShas: string[] = [];
+    for (const a of b.audio) audioShas.push(a.bytes ? (await ctx.assets.putUnchecked(a.bytes, a.chunk.mime, 'lecture audio')).sha256 : '');
+    const cropShas: string[] = [];
+    for (const c of b.crops) cropShas.push(c.png ? (await ctx.assets.putUnchecked(c.png, 'image/png', 'lecture crop')).sha256 : '');
+    const doc = lectureDocFromBundle(b, { sessionId, notebookId, pageIds, audioShas, cropShas });
+    await writeDoc(ctx.dm, lectureDocId(notebookId, sessionId), doc);
+    ctx.library.putLecture(new LectureDoc(doc).summary());
+  }
 }
 
 /** Applies a meta patch to the index doc and mirrors title/cover/aiAccess into the library entry. */
@@ -103,6 +121,14 @@ export async function deleteForever(ctx: Ctx, id: string): Promise<void> {
   }
   await ctx.dm.drop(nbId);
   await removeLocalDoc(nbId).catch(() => undefined);
+  // Its lecture sessions: the local docs (listed or not) and the library's list.
+  const lecIds = new Set(ctx.library.lectures(id).map((l) => lectureDocId(id, l.id)));
+  for (const d of await listLocalDocs().catch(() => [] as string[])) if (d.startsWith(`lec:${id}:`)) lecIds.add(d);
+  for (const d of lecIds) {
+    await ctx.dm.drop(d);
+    await removeLocalDoc(d).catch(() => undefined);
+  }
+  for (const l of ctx.library.lectures(id)) ctx.library.removeLecture(l.id);
   ctx.library.removeEntry(id);
 }
 
@@ -124,6 +150,33 @@ function notice(title: string, body: string): void {
   else Alert.alert(title, body);
 }
 
+/** A lecture export: the sessions to include and how to read their audio and crop bytes. */
+export interface LectureExport {
+  lectures: string[];
+  assetBytes(sha: string, mime: string): Promise<Uint8Array | null>;
+}
+
+/**
+ * The sessions' bundles, one at a time (only one session's audio is in memory), with whatever audio and crops this
+ * device can read (missing ones are listed, not stored).
+ */
+export async function* lectureBundles(ctx: Pick<Ctx, 'dm'>, nb: Notebook, x: LectureExport): AsyncGenerator<LectureBundle> {
+  const nbId = nb.meta().id;
+  const pos = new Map(nb.pages().map((p, i) => [p.id, i + 1]));
+  for (const sid of x.lectures) {
+    const h = await openLoaded(ctx.dm, lectureDocId(nbId, sid), 3000);
+    let b: LectureBundle;
+    try {
+      b = lectureBundleOf(new LectureDoc(h.doc), sid, (p) => pos.get(p) ?? 0);
+    } finally {
+      h.release();
+    }
+    for (const a of b.audio) a.bytes = (await x.assetBytes(a.chunk.sha, a.chunk.mime)) ?? undefined;
+    for (const c of b.crops) if (c.crop.sha) c.png = (await x.assetBytes(c.crop.sha, 'image/png')) ?? undefined;
+    yield b;
+  }
+}
+
 /** A question with Retry and OK: the browser's confirm on web, an Alert on native. Resolves true for Retry. */
 function askRetry(title: string, body: string): Promise<boolean> {
   if (Platform.OS === 'web') return Promise.resolve(!!(globalThis as { confirm?: (m: string) => boolean }).confirm?.(`${title}\n\n${body}\n\nRetry?`));
@@ -141,7 +194,7 @@ export const MATHS_FALLBACK_NOTICE = {
   body: 'The PDF was exported with its maths as plain TeX. Check your connection and export again to get the formulas.',
 } as const;
 
-export async function exportNotebook(ctx: Pick<Ctx, 'dm' | 'assets'>, id: string, kind: 'pdf' | 'qalm'): Promise<void> {
+export async function exportNotebook(ctx: Pick<Ctx, 'dm' | 'assets'>, id: string, kind: 'pdf' | 'qalm', lectures?: LectureExport): Promise<void> {
   const h = await openLoaded(ctx.dm, docIds.notebook(id), 3000);
   let released = false;
   try {
@@ -149,11 +202,17 @@ export async function exportNotebook(ctx: Pick<Ctx, 'dm' | 'assets'>, id: string
     const src = notebookSource(ctx, nb);
     const skipped: string[] = [];
     let mathsAsTex = false;
+    const name = exportFileName(nb.meta().title, kind);
+    if (kind === 'qalm' && lectures?.lectures.length) {
+      // With recordings: a streamed zip, written out as it is made (docs/lecture-mode.md §8).
+      await saveFileStream(name, 'application/x-qalm', (out) => buildQalmStream(src, lectureBundles(ctx, nb, lectures), out));
+      return;
+    }
     const bytes =
       kind === 'pdf'
         ? await buildPdf(src, { toPng, onSkippedImage: (id) => skipped.push(id), onMathUnavailable: () => (mathsAsTex = true) })
         : await buildQalm(src);
-    await saveFile(exportFileName(nb.meta().title, kind), kind === 'pdf' ? 'application/pdf' : 'application/x-qalm', bytes);
+    await saveFile(name, kind === 'pdf' ? 'application/pdf' : 'application/x-qalm', bytes);
     if (skipped.length) {
       const names = skipped.map((id) => nb.asset(id)?.name ?? 'image');
       const n = skipped.length;
@@ -165,7 +224,7 @@ export async function exportNotebook(ctx: Pick<Ctx, 'dm' | 'assets'>, id: string
     if (mathsAsTex && (await askRetry(MATHS_FALLBACK_NOTICE.title, MATHS_FALLBACK_NOTICE.body))) {
       h.release();
       released = true;
-      await exportNotebook(ctx, id, kind);
+      await exportNotebook(ctx, id, kind, lectures);
     }
   } finally {
     if (!released) h.release();

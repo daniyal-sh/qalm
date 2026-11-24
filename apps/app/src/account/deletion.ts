@@ -52,15 +52,15 @@ export async function confirmAccountDeletion(fetchFn: AuthedFetch, code: string)
 }
 
 /**
- * The local docs that belong to the deleted account: its library, and the notebooks (index and pages) in it that
- * aren't also in this device's signed-out library.
+ * The local docs that belong to the deleted account: its library, and the notebooks (index, pages and lecture
+ * sessions) in it that aren't also in this device's signed-out library.
  */
 export function accountDocIds(localDocs: string[], userId: string, accountNotebooks: string[], localNotebooks: string[]): string[] {
   const keep = new Set(localNotebooks);
   const nbs = new Set(accountNotebooks.filter((id) => !keep.has(id)));
   return localDocs.filter((d) => {
     if (d === `lib:${userId}`) return true;
-    const m = /^(?:nb|pg):([^:]+)/.exec(d);
+    const m = /^(?:nb|pg|lec):([^:]+)/.exec(d);
     return !!m && nbs.has(m[1]!);
   });
 }

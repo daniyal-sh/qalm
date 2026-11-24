@@ -22,6 +22,7 @@ import {
   parseCropRegions,
   parseLectureRef,
   parseT,
+  splitStroke,
   strokeTimes,
   transcriptLine,
   unpackQalm,
@@ -420,5 +421,50 @@ describe('lecture review fixes', () => {
     expect(Object.keys(lectureFiles(b)).every((n) => n.startsWith('lecture/sess-9/'))).toBe(true);
     expect(() => lectureFiles({ ...b, id: '' })).toThrow();
     expect(() => lectureFiles({ ...b, id: '../x' })).toThrow();
+  });
+});
+
+describe('lecture × partial erase (#68)', () => {
+  it('replays a partial erase in place and seeks a piece to its stroke’s write time', () => {
+    const { page, events, at } = session();
+    at(1000);
+    page.addItem(stroke('a', 100, 100, 300, 120));
+    at(2000);
+    page.addItem(stroke('b', 100, 200, 300, 220));
+    at(3000);
+    page.addItem(stroke('c', 100, 300, 300, 320));
+    // Erase through the middle of 'a': one transaction replaces it by its two pieces (the eraser commits at pen-up).
+    at(8000);
+    const a = page.item('a') as StrokeItem;
+    const pieces = splitStroke(a, [{ x: 200, y: 90 }, { x: 200, y: 130 }], 6, (() => {
+      let n = 0;
+      return () => `a${++n}`;
+    })())!;
+    expect(pieces.length).toBe(2);
+    expect(pieces.every((p) => p.splitFrom === 'a')).toBe(true);
+    page.applyErase({ split: [{ id: 'a', pieces }], remove: [] });
+    const kinds = events.map((e) => `${e.k}@${e.t}`);
+    expect(kinds.slice(-2).sort()).toEqual(['add@8000', 'erase@8000']); // one erase + one add, at the same time
+
+    const replay = new LectureReplay(events, (_p, id) => page.item(id) ?? undefined);
+    const ids = (t: number) => (replay.at(t).get('pg1') ?? []).map((i) => i.id);
+    expect(ids(5000)).toEqual(['old', 'a', 'b', 'c']);
+    // The pieces stand where 'a' stood (under 'b' and 'c'), not on top of everything.
+    expect(ids(9000)).toEqual(['old', 'a1', 'a2', 'b', 'c']);
+    expect(ids(5000)).toEqual(['old', 'a', 'b', 'c']); // seeking back brings 'a' whole again
+
+    // Tap-to-seek: a piece seeks to when 'a' was written, not to the erase. A piece of a piece too.
+    const times = strokeTimes(events);
+    expect(times.get('a1')).toBe(times.get('a'));
+    expect(times.get('a2')).toBe(times.get('a'));
+    at(9000);
+    const a1 = page.item('a1') as StrokeItem;
+    const sub = splitStroke(a1, [{ x: 140, y: 90 }, { x: 140, y: 130 }], 4, (() => {
+      let n = 0;
+      return () => `a1-${++n}`;
+    })())!;
+    page.applyErase({ split: [{ id: 'a1', pieces: sub }], remove: [] });
+    const again = strokeTimes(events);
+    for (const p of sub) expect(again.get(p.id)).toBe(times.get('a'));
   });
 });

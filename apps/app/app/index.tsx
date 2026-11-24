@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_TITLE, folderCounts, visibleEntries, type LibraryFilter } from '../src/library/actions';
 import { CoverSheet, DEFAULT_FORM, FolderTile, MoveSheet, NameSheet, NewNotebookSheet, NotebookCard } from '../src/library/components';
 import { createNotebook, deleteForever, exportNotebook, importPdf, importQalm, updateNotebookMeta, type Ctx } from '../src/library/ops';
+import { lectureAssetBytes, retryTranscriptions, stopLeftoverSessions } from '../src/lecture/store';
 import { pickFile } from '../src/lib/files';
 import { isPdf, isQalm } from '../src/lib/mime';
 import { useLibraryData, useSession } from '../src/state/session';
@@ -68,6 +69,12 @@ export default function LibraryScreen() {
   const { c } = useTheme();
   const s = useSession();
   const { library, entries, folders } = useLibraryData();
+  // Signed in: a lecture this device left live (crash, closed tab) is stopped, then chunks waiting for cloud
+  // transcription (recorded offline) go.
+  React.useEffect(() => {
+    if (s.user) void stopLeftoverSessions(s).finally(() => retryTranscriptions(s));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.user?.id]);
   const win = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const wide = win.width >= 900;
@@ -165,6 +172,10 @@ export default function LibraryScreen() {
           },
           { label: 'Export PDF', icon: 'file-text', onPress: () => void run('Exporting…', () => exportNotebook(ctx, e.id, 'pdf')) },
           { label: 'Export .qalm backup', icon: 'archive', onPress: () => void run('Exporting…', () => exportNotebook(ctx, e.id, 'qalm')) },
+          // Lecture recordings go into a .qalm only when asked (docs/lecture-mode.md §8).
+          ...(library?.lectures(e.id).some((l) => l.state === 'stopped')
+            ? [{ label: 'Export with lecture recordings', icon: 'mic' as const, onPress: () => void run('Exporting…', () => exportNotebook(ctx, e.id, 'qalm', { lectures: library.lectures(e.id).filter((l) => l.state === 'stopped').map((l) => l.id), assetBytes: (sha, mime) => lectureAssetBytes(s, sha, mime) })) }]
+            : []),
           { label: 'Delete', icon: 'trash-2', tone: 'bad', onPress: () => ctx.library.updateEntry(e.id, { deletedAt: Date.now() }) },
         ];
     setMenu({ anchor, items });

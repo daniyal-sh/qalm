@@ -9,6 +9,8 @@ import { localUri, readLocal, saveLocal, sha256 } from './local';
 interface Pending {
   sha: string;
   mime: string;
+  /** Lecture audio: its session doc id, sent as `X-Qalm-Lecture` (a session deleted meanwhile refuses it: 410). */
+  lecture?: string;
 }
 
 /**
@@ -48,13 +50,25 @@ export class AssetService {
   }
 
   /** `put` without the storage check (the caller already checked, e.g. for a whole .qalm restore). */
-  async putUnchecked(bytes: Uint8Array, mime: string, name: string, extra: Partial<Asset> = {}): Promise<Asset> {
+  async putUnchecked(bytes: Uint8Array, mime: string, name: string, extra: Partial<Asset> = {}, opts: { lecture?: string } = {}): Promise<Asset> {
     const sha = await sha256(bytes);
     await saveLocal(sha, mime, bytes);
     const pending = (await kvGet<Pending[]>('assets:pending')) ?? [];
-    if (!pending.some((p) => p.sha === sha)) await kvSet('assets:pending', [...pending, { sha, mime }]);
+    if (!pending.some((p) => p.sha === sha)) await kvSet('assets:pending', [...pending, { sha, mime, ...(opts.lecture ? { lecture: opts.lecture } : {}) }]);
     void this.uploadPending();
     return { id: newId(), sha256: sha, mime, name, bytes: bytes.length, ...extra };
+  }
+
+  /** Assets dropped while an upload pass runs: it must not put them back in the queue. */
+  private dropped = new Set<string>();
+
+  /** A deleted lecture session's queued uploads go (by sha, and any tagged with its doc id): never sent, never counted. */
+  async dropPending(shas: readonly string[], lecture?: string): Promise<void> {
+    const gone = (p: Pending) => shas.includes(p.sha) || (!!lecture && p.lecture === lecture);
+    const pending = (await kvGet<Pending[]>('assets:pending')) ?? [];
+    for (const p of pending) if (gone(p)) this.dropped.add(p.sha);
+    const left = pending.filter((p) => !gone(p));
+    if (left.length !== pending.length) await kvSet('assets:pending', left);
   }
 
   /** A uri the renderer can load (file:// on native, blob: on web), downloading first if needed. */
@@ -110,18 +124,22 @@ export class AssetService {
           try {
             const bytes = await readLocal(p.sha, p.mime);
             if (!bytes) continue;
+            if (this.dropped.has(p.sha)) continue;
             const res = await tm.fetch(`/assets/${p.sha}`, {
               method: 'PUT',
-              headers: { 'content-type': p.mime },
+              headers: { 'content-type': p.mime, ...(p.lecture ? { 'x-qalm-lecture': p.lecture } : {}) },
               body: bytes as unknown as BodyInit,
             });
-            // 413 (storage full): kept and retried later, once there's room again.
-            if (!res.ok && res.status !== 409) left.push(p);
+            // 413 (storage full): kept and retried later, once there's room again. 410: its lecture was deleted.
+            if (!res.ok && res.status !== 409 && res.status !== 410) left.push(p);
           } catch {
             left.push(p);
           }
         }
-        await kvSet('assets:pending', left);
+        // Assets queued meanwhile are kept; ones dropped meanwhile are not.
+        const now = (await kvGet<Pending[]>('assets:pending')) ?? [];
+        const fresh = now.filter((x) => !pending.some((y) => y.sha === x.sha));
+        await kvSet('assets:pending', [...left, ...fresh].filter((x) => !this.dropped.has(x.sha)));
       } finally {
         this.uploading = null;
       }

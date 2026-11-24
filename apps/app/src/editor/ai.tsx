@@ -89,13 +89,16 @@ export function useAiLive(
       setCtl(null);
     };
   }, [provider, enabled]);
+  // Stable per AiLive instance: a hold taken in an effect isn't released and re-taken on every render (a release in
+  // the background would stop sharing).
+  const holdWhileBackgrounded = React.useCallback((reason: string) => ctl?.holdWhileBackgrounded(reason) ?? (() => undefined), [ctl]);
   // `force` re-renders on every change, so `playing` here is always current.
   return {
     playing: !!ctl?.playing,
     pausePending: !!ctl?.pausePending,
     play: () => ctl?.play(),
     pause: () => ctl?.pause() ?? false,
-    holdWhileBackgrounded: (reason) => ctl?.holdWhileBackgrounded(reason) ?? (() => undefined),
+    holdWhileBackgrounded,
   };
 }
 

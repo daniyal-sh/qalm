@@ -16,9 +16,11 @@ import { config } from '../config';
 import { kvGet, kvSet } from '../lib/kv';
 import { DocManager, docIds, openLoaded, type DocHandle, type RemoteFactory } from '../sync/docs';
 import { listLocalDocs, openPersistence, removeLocalDoc } from '../sync/persistence';
+import { drainDone, lectureGone, notifyLectureGone, setLectureGoneHandler, stopRecordingNow } from '../lecture/store';
+import { clearQueue } from '../lecture/transcribe';
 import { watchNetwork } from '../sync/network';
 import { SyncProvider, type SyncStatus } from '../sync/provider';
-import { fetchTicket } from '../sync/ticket';
+import { fetchTicket, TicketError } from '../sync/ticket';
 import { hasLocalLibrary, localToMove, moveLocalLibrary } from './localLibrary';
 
 export const LOCAL_LIBRARY = 'lib:local';
@@ -66,7 +68,12 @@ const Ctx = React.createContext<Session | null>(null);
 
 function remoteFor(tm: TokenManager, serverUrl: string): RemoteFactory {
   const authed = (p: string, i?: RequestInit) => tm.fetch(p, i);
-  return (docId, doc) => (docId === LOCAL_LIBRARY ? null : new SyncProvider(doc, docId, { serverUrl, getTicket: (id) => fetchTicket(authed, id), watchNetwork }));
+  return (docId, doc) => (docId === LOCAL_LIBRARY ? null : new SyncProvider(doc, docId, { serverUrl, getTicket: (id) =>
+      fetchTicket(authed, id).catch((e: unknown) => {
+        // A lecture session deleted on another device (410): removed here too, and a recording of it abandoned.
+        if (e instanceof TicketError && e.status === 410 && id.startsWith('lec:')) notifyLectureGone(id);
+        throw e;
+      }), watchNetwork }));
 }
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
@@ -182,8 +189,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = React.useCallback(async () => {
+    // A lecture recording is stopped and saved first; a transcription drain in flight finishes; then this account's
+    // queued transcriptions go (never sent as another account).
+    await stopRecordingNow();
+    await drainDone().catch(() => undefined);
     await dm.flushAll();
     const id = tm?.user()?.id;
+    if (id) await clearQueue(id).catch(() => undefined);
     // Ends the server session too (best effort: offline still signs out here).
     await tm?.logout();
     if (id) await kvSet(unverifiedKey(id), undefined);
@@ -204,6 +216,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const me = tm?.user();
       if (!tm || !me) throw new Error('Not signed in');
       await confirmAccountDeletion((p, i) => tm.fetch(p, i), code);
+      await stopRecordingNow();
+      await clearQueue(me.id).catch(() => undefined);
       // The account is gone on the server. Stop syncing, then forget it here: its docs, its tokens and its prefs.
       // Notebooks in this device's signed-out library stay.
       dm.setRemote(null);
@@ -225,6 +239,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     () => ({ serverUrl, tm, user, profile, ready, skipped, setSkipped, dm, assets, library, signInWithTokens, signOut, startDeleteAccount, deleteAccount, localOffer, moveLocal, dismissLocalOffer }),
     [serverUrl, tm, user, profile, ready, skipped, setSkipped, dm, assets, library, signInWithTokens, signOut, startDeleteAccount, deleteAccount, localOffer, moveLocal, dismissLocalOffer],
   );
+  // A lecture session deleted on another device (its ticket answered 410) is removed here, wherever the app is.
+  React.useEffect(() => {
+    setLectureGoneHandler((docId) => void lectureGone(value, docId));
+    return () => setLectureGoneHandler(null);
+  }, [value]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
