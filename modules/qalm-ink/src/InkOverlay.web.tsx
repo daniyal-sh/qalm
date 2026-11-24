@@ -8,11 +8,16 @@ import {
   type InkPenStyle,
   type InkPoint,
   type InkSmoothing,
+  type ShapePreview,
+  SHAPE_HOLD_MM,
+  SHAPE_HOLD_MS,
 } from './InkOverlay.types';
 import { traceOutline } from './outlinePath';
 import { MM_PER_CSS_PX as MM_PER_PX, palmVerdict, pointerContact, touchContact } from './palm';
-/** Movement smaller than this counts as holding still (heldMs). */
-const HOLD_MOVE_MM = 1;
+/** A snapped shape pulses this long (web has no haptics): a halo that shrinks and fades. */
+const PULSE_MS = 260;
+/** The halo starts this wide (CSS px) beyond the line. */
+const PULSE_PX = 7;
 const LASSO_COLOR = '#4338ca'; // brand accent
 /** A finished stroke whose id never reaches committedIds (e.g. snapped to a shape) is dropped after this. */
 const PENDING_FALLBACK_MS = 4000;
@@ -43,6 +48,11 @@ interface Live {
   holdX: number;
   holdY: number;
   holdT: number;
+  /** Index of the point where the hold began (the stroke handed to `recognizeShape` ends there). */
+  holdIdx: number;
+  holdTimer: ReturnType<typeof setTimeout> | null;
+  /** Snapped while held: the shape under the pen, adjusted as the pen drags (`from` is where the pen was then). */
+  snap: { base: ShapePreview; cur: ShapePreview; from: [number, number]; at: number } | null;
   erasedUpTo: number;
 }
 
@@ -53,6 +63,8 @@ interface Finished {
   color: string;
   alpha: number;
   path: Path2D;
+  /** A shape: stroked at this width (page units) instead of filled. */
+  lineWidth?: number;
 }
 
 function uuid(): string {
@@ -67,6 +79,12 @@ function uuid(): string {
 function afterFrames(n: number, fn: () => void) {
   if (n <= 0) fn();
   else requestAnimationFrame(() => afterFrames(n - 1, fn));
+}
+
+function shapePath(shape: ShapePreview): Path2D {
+  const path = new Path2D();
+  for (const pl of shape.polylines) pl.forEach(([x, y], i) => (i ? path.lineTo(x, y) : path.moveTo(x, y)));
+  return path;
 }
 
 function outlinePath(live: Live, pts: InkPoint[]): Path2D {
@@ -138,15 +156,41 @@ export function InkOverlay(props: InkOverlayProps) {
       const k = (cssW * dpr) / pageSize.w; // page unit → device px
       ctx.setTransform(k, 0, 0, (cssH * dpr) / pageSize.h, 0, 0);
 
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
       for (const f of s.finished) {
         ctx.globalAlpha = f.alpha;
-        ctx.fillStyle = f.color;
-        ctx.fill(f.path);
+        if (f.lineWidth) {
+          ctx.strokeStyle = f.color;
+          ctx.lineWidth = f.lineWidth;
+          ctx.stroke(f.path);
+        } else {
+          ctx.fillStyle = f.color;
+          ctx.fill(f.path);
+        }
       }
       ctx.globalAlpha = 1;
 
       const live = s.live;
-      if (live?.kind === 'ink') {
+      if (live?.kind === 'ink' && live.snap) {
+        // The snapped shape under the pen, as PageCanvas will draw it (round caps and joins, the pen's width).
+        const paint = inkPaint(live.tool, live.color);
+        const path = shapePath(live.snap.cur);
+        const age = performance.now() - live.snap.at;
+        if (age < PULSE_MS) {
+          const f = 1 - age / PULSE_MS;
+          ctx.globalAlpha = 0.22 * f;
+          ctx.strokeStyle = paint.rgb;
+          ctx.lineWidth = live.width + ((2 * PULSE_PX * dpr) / k) * f;
+          ctx.stroke(path);
+          requestAnimationFrame(() => s.draw());
+        }
+        ctx.globalAlpha = paint.alpha;
+        ctx.strokeStyle = paint.rgb;
+        ctx.lineWidth = live.width;
+        ctx.stroke(path);
+        ctx.globalAlpha = 1;
+      } else if (live?.kind === 'ink') {
         const paint = inkPaint(live.tool, live.color);
         ctx.globalAlpha = paint.alpha;
         ctx.fillStyle = paint.rgb;
@@ -241,16 +285,53 @@ export function InkOverlay(props: InkOverlayProps) {
       propsRef.current.onErase({ nativeEvent: { path } });
     };
 
+    /** Snaps the stroke to a shape if it looks like one (the pen has held still since `holdIdx`). */
+    const trySnap = (live: Live) => {
+      live.holdTimer = null;
+      const recognize = propsRef.current.recognizeShape;
+      if (s.live !== live || live.snap || !recognize) return;
+      const shape = recognize(live.points.slice(0, live.holdIdx + 1).map(({ x, y }) => ({ x, y })));
+      if (!shape) return; // not a shape: nothing happens, the pen keeps drawing
+      const last = live.points[live.points.length - 1]!;
+      live.snap = { base: shape, cur: shape, from: [last.x, last.y], at: performance.now() };
+      live.predicted = [];
+      canvas.dataset.shape = shape.kind; // for tests: the shape under the pen
+      draw();
+    };
+
+    /** (Re)starts the hold clock: pen strokes only, when live shapes are on. */
+    const armHold = (live: Live) => {
+      if (live.holdTimer) clearTimeout(live.holdTimer);
+      live.holdTimer = null;
+      if (live.kind !== 'ink' || live.tool !== 'pen' || live.snap || !propsRef.current.recognizeShape) return;
+      live.holdTimer = setTimeout(() => trySnap(live), SHAPE_HOLD_MS);
+    };
+
+    const stopHold = (live: Live | null) => {
+      if (live?.holdTimer) clearTimeout(live.holdTimer);
+      if (live) live.holdTimer = null;
+      delete canvas.dataset.shape;
+    };
+
     const addPoint = (live: Live, ev: PointerEvent) => {
       const pt = toPoint(ev, live);
+      if (live.snap) {
+        // Adjusting: the stroke stays as it was drawn; the shape follows the pen.
+        const adjust = propsRef.current.adjustShape;
+        if (adjust) live.snap.cur = adjust(live.snap.base, live.snap.from, [pt.x, pt.y]);
+        return;
+      }
       const prev = live.points[live.points.length - 1];
       if (prev && prev.x === pt.x && prev.y === pt.y) return;
       live.points.push(pt);
+      // Holding still: within SHAPE_HOLD_MM of where the hold began (not of the previous point, so a slow drift ends it).
       const mmPerUnit = (live.rect.width / propsRef.current.pageSize.w) * MM_PER_PX;
-      if (Math.hypot(pt.x - live.holdX, pt.y - live.holdY) * mmPerUnit > HOLD_MOVE_MM) {
+      if (live.points.length === 1 || Math.hypot(pt.x - live.holdX, pt.y - live.holdY) * mmPerUnit > SHAPE_HOLD_MM) {
         live.holdX = pt.x;
         live.holdY = pt.y;
         live.holdT = pt.t;
+        live.holdIdx = live.points.length - 1;
+        armHold(live);
       }
     };
 
@@ -276,17 +357,19 @@ export function InkOverlay(props: InkOverlayProps) {
         holdX: 0,
         holdY: 0,
         holdT: 0,
+        holdIdx: 0,
+        holdTimer: null,
+        snap: null,
         erasedUpTo: 0,
       };
       s.live = live;
       addPoint(live, ev);
-      live.holdX = live.points[0]?.x ?? 0;
-      live.holdY = live.points[0]?.y ?? 0;
       canvas.setPointerCapture(ev.pointerId);
       draw();
     };
 
     const retract = () => {
+      stopHold(s.live);
       s.live = null;
       draw();
     };
@@ -296,6 +379,7 @@ export function InkOverlay(props: InkOverlayProps) {
       if (!live) return;
       s.live = null;
       addPoint(live, ev);
+      stopHold(live);
       const P = propsRef.current;
       if (live.kind === 'erase') {
         emitErase(live, true);
@@ -305,11 +389,14 @@ export function InkOverlay(props: InkOverlayProps) {
         const id = uuid();
         const last = live.points[live.points.length - 1]!;
         const heldMs = Math.max(0, Math.round(Math.max(last.t, ev.timeStamp - live.t0) - live.holdT));
+        const shape = live.snap?.cur;
         s.finished.push({
           id,
           color: inkPaint(live.tool, live.color).rgb,
           alpha: inkPaint(live.tool, live.color).alpha,
-          path: outlinePath(live, live.points), // exactly what PageCanvas will draw: no predicted points
+          // Exactly what PageCanvas will draw: the shape, or the stroke without predicted points.
+          path: shape ? shapePath(shape) : outlinePath(live, live.points),
+          lineWidth: shape ? live.width : undefined,
         });
         setTimeout(() => {
           const before = s.finished.length;
@@ -326,6 +413,7 @@ export function InkOverlay(props: InkOverlayProps) {
             heldMs,
             style: live.style,
             smoothing: live.smoothing,
+            ...(shape ? { shape: { kind: shape.kind, pts: shape.pts } } : null),
           },
         });
       }
@@ -377,7 +465,7 @@ export function InkOverlay(props: InkOverlayProps) {
         }
         const coalesced = ev.getCoalescedEvents?.() ?? [];
         for (const c of coalesced.length ? coalesced : [ev]) addPoint(live, c);
-        live.predicted = live.kind === 'ink' ? (ev.getPredictedEvents?.() ?? []).map((p) => toPoint(p, live)) : [];
+        live.predicted = live.kind === 'ink' && !live.snap ? (ev.getPredictedEvents?.() ?? []).map((p) => toPoint(p, live)) : [];
         if (live.kind === 'erase') emitErase(live, false);
         draw();
         return;

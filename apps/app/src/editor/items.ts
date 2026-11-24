@@ -1,6 +1,6 @@
 import { newIdFallback } from '../lib/id';
 import type { CrossPageUndo } from './undoStack';
-import { frameBBox, inkOnPaper, itemDistance, moveBy, selectionFrame, swatchOfInk, transformItem, type BBox, type InkPoint, type Item, type Page, type PaperColor, type PenStyle, type Smoothing, type StrokeItem, type TextItem } from '@qalm/core';
+import { adjustShape, frameBBox, inkOnPaper, recognizeShape, shapePolylines, type ShapeItem, type ShapeKind, itemDistance, moveBy, selectionFrame, swatchOfInk, transformItem, type BBox, type InkPoint, type Item, type Page, type PaperColor, type PenStyle, type Smoothing, type StrokeItem, type TextItem } from '@qalm/core';
 
 /** Text box line height (matches core's TEXT_LINE_HEIGHT). */
 export const TEXT_LINE_HEIGHT = 1.3;
@@ -52,6 +52,37 @@ export function makeStroke(e: {
     // Pen strokes keep the style and smoothing they were drawn with, so later default changes never alter them.
     ...(e.tool === 'pen' ? { style: e.style ?? 'fountain', smoothing: e.smoothing ?? 0 } : null),
   };
+}
+
+/** A shape recognised while the pen is down, with its outline (qalm-ink's `ShapePreview`). */
+export interface LiveShape {
+  kind: string;
+  pts: [number, number][];
+  polylines: [number, number][][];
+}
+
+const preview = (kind: ShapeKind, pts: [number, number][]): LiveShape => ({ kind, pts, polylines: shapePolylines({ kind, pts }) });
+
+/** The overlay's `recognizeShape`: core's recogniser, no hold gate (the overlay timed the hold). */
+export function liveShape(points: { x: number; y: number }[]): LiveShape | null {
+  const s = recognizeShape(points);
+  return s ? preview(s.kind, s.pts) : null;
+}
+
+/** The overlay's `adjustShape` (web): the shape for the pen at `to`, having snapped with the pen at `from`. */
+export function adjustLiveShape(shape: LiveShape, from: [number, number], to: [number, number]): LiveShape {
+  return preview(shape.kind as ShapeKind, adjustShape({ kind: shape.kind as ShapeKind, pts: shape.pts }, from, to));
+}
+
+/**
+ * Stores a stroke that snapped to a shape while held: first the stroke as drawn, then the shape in its place (same
+ * id, so the overlay hands off without a flicker). Two transactions, so two undo steps: one undo brings the
+ * hand-drawn stroke back, a second removes it.
+ */
+export function commitSnapped(page: Page, stroke: StrokeItem, shape: { kind: string; pts: [number, number][] }): void {
+  page.addItem(stroke);
+  const item: ShapeItem = { id: stroke.id, type: 'shape', kind: shape.kind as ShapeKind, pts: shape.pts, color: stroke.color, width: stroke.width };
+  page.addItem(item);
 }
 
 /** Selection transforms live in core (move, uniform scale and rotation about an origin). */
