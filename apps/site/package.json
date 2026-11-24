@@ -11,11 +11,15 @@
     "preview": "wrangler dev --port 8790",
     "deploy:staging": "node scripts/build.mjs && wrangler deploy --env staging",
     "deploy:prod": "node scripts/build.mjs && wrangler deploy --env production",
-    "test": "node --test test/worker.test.mjs"
+    "test": "node --test test/worker.test.mjs",
+    "showcase": "node showcase/capture.mjs",
+    "showcase:frame": "node showcase/frame.mjs"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "perfect-freehand": "^1.2.3",
     "playwright-core": "1.65.1",
+    "sharp": "^0.35.5",
     "wrangler": "^4.166.0"
   }
 }

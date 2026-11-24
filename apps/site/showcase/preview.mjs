@@ -2,13 +2,12 @@
 // node apps/site/showcase/preview.mjs  -> out/preview-*.png
 import { createRequire } from 'node:module';
 import { writeFileSync } from 'node:fs';
-import * as Y from 'yjs';
 import { loadCore, OUT } from './core.mjs';
 import { Hand, highlight } from './hand.mjs';
 
 const require = createRequire(import.meta.url);
 const sharp = require('sharp');
-const { Page, renderPageSvg } = await loadCore();
+const { Y, Page, renderPageSvg } = await loadCore();
 
 export async function previewPage(name, info, page, scale = 2) {
   const svg = renderPageSvg(info, page);

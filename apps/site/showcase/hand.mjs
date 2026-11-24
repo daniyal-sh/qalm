@@ -97,7 +97,7 @@ const EXTRA = {
   '≤': { adv: 360, d: 'M 320 330 L 40 230 L 320 130 M 40 60 L 320 60' },
   '✓': { adv: 380, d: 'M 20 160 C 60 120 100 70 130 0 C 190 170 270 330 370 470' },
   '•': { adv: 200, d: 'M 100 170 C 70 170 60 140 70 120 C 80 100 120 100 130 125 C 140 150 120 170 95 165' },
-  '★': { adv: 400, d: 'M 200 480 L 255 330 L 400 320 L 285 220 L 330 60 L 200 160 L 70 60 L 115 220 L 0 320 L 145 330 Z' },
+  '★': { adv: 420, d: 'M 60 0 L 210 470 L 360 0 L 0 300 L 420 300 L 60 0' },
   '∂': { adv: 320, d: 'M 70 470 C 160 560 280 520 280 300 C 280 100 210 0 130 0 C 50 0 30 80 40 140 C 60 230 160 260 270 220' },
 };
 
@@ -134,6 +134,8 @@ export function loadFont(name) {
     if (glyphs.has(ch) && !(ch in fixes)) continue;
     glyphs.set(ch, { adv: g.adv * k, paths: parsePath(g.d).map((p) => p.map(([x, y]) => [x * k, y * k])) });
   }
+  // Typographic characters the fonts lack, written the way a hand writes them
+  for (const [ch, as] of [['−', '-'], ['’', "'"], ['‘', "'"]]) if (!glyphs.has(ch) && glyphs.has(as)) glyphs.set(ch, glyphs.get(as));
   const f = { name, xh: realXh, glyphs, space: glyphs.get(' ')?.adv ?? defAdv };
   fonts.set(name, f);
   return f;
@@ -244,7 +246,7 @@ export function bboxOf(points, width) {
 function tokens(text) {
   const out = [];
   for (let i = 0; i < text.length; ) {
-    const m = /^([^_]){([^}]*)}/.exec(text.slice(i));
+    const m = /^([\^_])\{([^}]*)\}/.exec(text.slice(i));
     if (m) {
       for (const ch of m[2]) out.push({ ch, sup: m[1] === '^' ? 1 : -1 });
       i += m[0].length;

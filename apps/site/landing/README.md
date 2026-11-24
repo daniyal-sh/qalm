@@ -54,4 +54,5 @@ node apps/site/landing/shot.mjs <page.html or http://…> <outDir> \
   full-390-dark:390:844:dark:full:motion=reduce
 ```
 
-A spec is `name:width:height:light|dark`, then optional `full`, `motion=reduce`, `wait=ms`, `dpr=2`, `scroll=selector`.
+A spec is `name:width:height:light|dark`, then optional `full`, `lazy` (scroll through first so lazy images load),
+`motion=reduce`, `wait=ms`, `dpr=2`, `scroll=selector`.

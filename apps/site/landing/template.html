@@ -175,6 +175,13 @@ a.plat:hover{border-color:var(--ink-2)}
 .plat.soon svg{color:var(--faint)}
 .plat.soon .go{color:var(--muted);font-weight:500}
 
+/* screenshots of the real app (apps/site/showcase): framed, transparent around the frame */
+.hero .hero-shot{display:block;margin-top:clamp(40px,6vw,88px)}
+.shot{display:block}
+.shot img{display:block;width:100%;height:auto}
+.shots{display:grid;gap:clamp(8px,2vw,24px);margin-top:clamp(24px,4vw,48px)}
+.shots.two{grid-template-columns:repeat(2,minmax(0,1fr));align-items:center}
+
 /* ---------- responsive ---------- */
 @media (max-width:1100px){
   .platforms{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -188,7 +195,7 @@ a.plat:hover{border-color:var(--ink-2)}
   .hero .wrap{grid-template-columns:1fr;}
   .hero .copy{max-width:720px}
   .stage{max-width:760px}
-  .pen-grid,.nb-grid,.ai-card{grid-template-columns:1fr}
+  .pen-grid,.nb-grid,.ai-card,.shots.two{grid-template-columns:1fr}
   .intro{grid-template-columns:1fr;align-items:start}
 }
 @media (max-width:860px){
@@ -280,6 +287,7 @@ a.plat:hover{border-color:var(--ink-2)}
         </div>
       </figure>
     </div>
+    <div class="wrap hero-shot">{{SHOT_HERO}}</div>
   </section>
 
   <!-- ================= PEN ================= -->
@@ -352,6 +360,8 @@ a.plat:hover{border-color:var(--ink-2)}
       <div class="nibs">
         {{NIBS}}
       </div>
+      <div class="shots two">{{SHOTS_PEN}}</div>
+
       <p class="extras">Also: hover preview, tilt shading, and the pen button or a double-tap for the eraser, if your pen has them.</p>
     </div>
   </section>
@@ -404,9 +414,26 @@ a.plat:hover{border-color:var(--ink-2)}
         </div>
       </div>
 
+      <div class="shots two">{{SHOTS_NB}}</div>
+
       <div class="feat">
         {{FEATURES}}
       </div>
+    </div>
+  </section>
+
+  <!-- ================= LECTURES AND PRESENTING ================= -->
+  <section class="band" id="lectures" aria-labelledby="lec-title">
+    <div class="wrap">
+      <div class="intro">
+        <div>
+          <p class="kicker"><span class="n">03</span>Lectures and presenting</p>
+          <h2 id="lec-title">Record the lecture. Replay your notes.</h2>
+        </div>
+        <p>Record while you write. Play it back later and your ink comes back stroke by stroke, in time with the audio, with the transcript alongside. Tap a stroke to hear what was said as you wrote it.</p>
+      </div>
+      <div class="shots one">{{SHOT_LECTURE}}</div>
+      <div class="shots two">{{SHOTS_TOOLS}}</div>
     </div>
   </section>
 
@@ -415,7 +442,7 @@ a.plat:hover{border-color:var(--ink-2)}
     <div class="wrap">
       <div class="intro">
         <div>
-          <p class="kicker"><span class="n">03</span>Sync</p>
+          <p class="kicker"><span class="n">04</span>Sync</p>
           <h2 id="sync-title">Same notebook, every screen.</h2>
         </div>
         <p>Start on your tablet in class, finish on your laptop at home. It all syncs through your account, and you can keep writing offline.</p>
@@ -438,7 +465,7 @@ a.plat:hover{border-color:var(--ink-2)}
       </div>
 
       <div class="facts">
-        <div><h3>Sign in your way</h3><p>Apple, Google or an email link. Or skip it and just write.</p></div>
+        <div><h3>Sign in your way</h3><p>An email link or a 6-digit code. Or skip it and just write.</p></div>
         <div><h3>Kept safe</h3><p>Encrypted at rest on our servers.</p></div>
         <div><h3>Yours to take</h3><p>Export as a PDF, or a full .qalm backup.</p></div>
       </div>
@@ -450,7 +477,7 @@ a.plat:hover{border-color:var(--ink-2)}
     <div class="wrap">
       <div class="card ai-card">
         <div>
-          <p class="kicker"><span class="n">04</span>Optional extra</p>
+          <p class="kicker"><span class="n">05</span>Optional extra</p>
           <h2 id="ai-title">Bring your own AI, if you want.</h2>
           <p class="lead">Connect an agent you already use, like Claude, over MCP. It reads along as you write and leaves comments beside your ink. It only gets small crops of what changed, never whole pages.</p>
           <ul class="rules">
@@ -474,6 +501,7 @@ a.plat:hover{border-color:var(--ink-2)}
           </div>
         </div>
       </div>
+      <div class="shots one">{{SHOT_AI}}</div>
     </div>
   </section>
 

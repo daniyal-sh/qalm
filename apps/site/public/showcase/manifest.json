@@ -1,0 +1,101 @@
+{
+  "colours-tablet": {
+    "path": "framed/colours-tablet",
+    "w": 1600,
+    "h": 1171,
+    "widths": [
+      960,
+      1600
+    ]
+  },
+  "ruler-tablet": {
+    "path": "framed/ruler-tablet",
+    "w": 1600,
+    "h": 1171,
+    "widths": [
+      960,
+      1600
+    ]
+  },
+  "library-desktop": {
+    "path": "framed/library-desktop",
+    "w": 1600,
+    "h": 1046,
+    "widths": [
+      960,
+      1600
+    ]
+  },
+  "image-tablet": {
+    "path": "framed/image-tablet",
+    "w": 1600,
+    "h": 1171,
+    "widths": [
+      960,
+      1600
+    ]
+  },
+  "lecture-desktop": {
+    "path": "framed/lecture-desktop",
+    "w": 1600,
+    "h": 1046,
+    "widths": [
+      960,
+      1600
+    ]
+  },
+  "present-desktop": {
+    "path": "framed/present-desktop",
+    "w": 1600,
+    "h": 1046,
+    "widths": [
+      960,
+      1600
+    ]
+  },
+  "lasso-tablet": {
+    "path": "framed/lasso-tablet",
+    "w": 1600,
+    "h": 1171,
+    "widths": [
+      960,
+      1600
+    ]
+  },
+  "markdown-tablet": {
+    "path": "framed/markdown-tablet",
+    "w": 1600,
+    "h": 1171,
+    "widths": [
+      960,
+      1600
+    ]
+  },
+  "navigator-tablet": {
+    "path": "framed/navigator-tablet",
+    "w": 1600,
+    "h": 1171,
+    "widths": [
+      960,
+      1600
+    ]
+  },
+  "ai-desktop": {
+    "path": "framed/ai-desktop",
+    "w": 1600,
+    "h": 1046,
+    "widths": [
+      960,
+      1600
+    ]
+  },
+  "hero": {
+    "path": "hero",
+    "w": 2400,
+    "h": 1327,
+    "widths": [
+      1200,
+      2400
+    ]
+  }
+}
