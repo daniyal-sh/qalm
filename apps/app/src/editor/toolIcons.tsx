@@ -16,7 +16,9 @@ export type ToolIconName =
   | 'ballpoint'
   | 'brush'
   | 'shapes'
-  | 'rect-select';
+  | 'rect-select'
+  | 'erase-stroke'
+  | 'erase-partial';
 
 const STROKE = 1.8;
 
@@ -92,6 +94,23 @@ function Shape({ name, color }: { name: ToolIconName; color: string }) {
           <Rect x={3.4} y={3.4} width={17.2} height={17.2} rx={2.4} {...p} />
           <Circle cx={8.6} cy={8.6} r={1.6} {...p} />
           <Path d="M20.6 15.2 16 10.6 5.4 20.6" {...p} />
+        </>
+      );
+    case 'erase-stroke':
+      // The whole squiggle goes (dashed), whatever part the eraser touches.
+      return (
+        <>
+          <Path d="M3.4 14.6c2.2-5.6 4.6-5.6 6.8 0s4.6 5.6 6.8 0c.9-2.2 2-3.4 3.6-3.6" {...p} strokeDasharray="2.2 2.6" />
+          <Circle cx={13.6} cy={16.4} r={2.8} {...p} />
+        </>
+      );
+    case 'erase-partial':
+      // The squiggle with a gap where the eraser passed.
+      return (
+        <>
+          <Path d="M3.4 14.6c1.8-4.6 3.8-5.4 5.6-2.4" {...p} />
+          <Path d="M15.4 17.6c.6-.8 1.1-1.8 1.6-3 .9-2.2 2-3.4 3.6-3.6" {...p} />
+          <Circle cx={12.2} cy={15.4} r={2.8} {...p} />
         </>
       );
     case 'shapes':

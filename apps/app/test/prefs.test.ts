@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { autoDrawWith, loadInputPrefs, withPenSeen } from '../src/lib/inputPrefs';
 import type { InputPrefs } from '../src/theme/ThemeProvider';
 
-const DEFAULTS: InputPrefs = { drawWith: 'any', drawWithAuto: true, penSeen: false, hand: 'right', palm: 'standard', penGesture: 'eraser', smoothing: 'medium' };
+const DEFAULTS: InputPrefs = { drawWith: 'any', drawWithAuto: true, penSeen: false, hand: 'right', palm: 'standard', penGesture: 'eraser', smoothing: 'medium', scribbleErase: true };
 
 describe('saved input prefs', () => {
   it('keeps the palm level by name when its millimetres change', () => {

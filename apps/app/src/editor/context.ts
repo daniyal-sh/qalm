@@ -4,6 +4,7 @@ import type * as Y from 'yjs';
 
 import type { InputPrefs } from '../theme/ThemeProvider';
 import type { CrossPageUndo } from './undoStack';
+import type { EraserMode } from './items';
 import type { ToolId } from './view';
 
 export interface ToolState {
@@ -14,6 +15,8 @@ export interface ToolState {
   hlColor: string;
   hlWidth: number;
   eraserRadius: number;
+  /** Rub out whole strokes (the default) or only where the eraser passes. Remembered with the other tool settings. */
+  eraserMode: EraserMode;
   /** Hold the pen still at the end of a stroke to snap it to a shape. */
   snapShapes: boolean;
   /** Lasso: draw a loop around things, or drag a rectangle over them. Tapping selects either way. */

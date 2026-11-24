@@ -206,6 +206,9 @@ function PenSection() {
             ]}
           />
         </Row>
+        <Row title="Scribble to erase" description="Scribble quickly over ink with the pen to delete it">
+          <Toggle label="Scribble to erase" value={input.scribbleErase} onChange={(scribbleErase) => setInput({ scribbleErase })} />
+        </Row>
         <Row title="Pen button, squeeze or double-tap" description="What the pen's shortcut does" last>
           <Segmented<PenGesture>
             value={input.penGesture}

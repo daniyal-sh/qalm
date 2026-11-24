@@ -1,6 +1,6 @@
 import { newIdFallback } from '../lib/id';
 import type { CrossPageUndo } from './undoStack';
-import { adjustShape, frameBBox, inkOnPaper, recognizeShape, shapePolylines, type ShapeItem, type ShapeKind, itemDistance, moveBy, selectionFrame, swatchOfInk, transformItem, type BBox, type InkPoint, type Item, type Page, type PaperColor, type PenStyle, type Smoothing, type StrokeItem, type TextItem } from '@qalm/core';
+import { adjustShape, detectScribble, emptyPlan, frameBBox, hitTestErase, planPartialErase, inkOnPaper, recognizeShape, shapePolylines, type ShapeItem, type ShapeKind, itemDistance, moveBy, selectionFrame, swatchOfInk, transformItem, type BBox, type InkPoint, type Item, type Page, type PaperColor, type PenStyle, type Smoothing, type StrokeItem, type TextItem } from '@qalm/core';
 
 /** Text box line height (matches core's TEXT_LINE_HEIGHT). */
 export const TEXT_LINE_HEIGHT = 1.3;
@@ -83,6 +83,38 @@ export function commitSnapped(page: Page, stroke: StrokeItem, shape: { kind: str
   page.addItem(stroke);
   const item: ShapeItem = { id: stroke.id, type: 'shape', kind: shape.kind as ShapeKind, pts: shape.pts, color: stroke.color, width: stroke.width };
   page.addItem(item);
+}
+
+/** The eraser: rubs out whole strokes, or only where it passes (strokes split into pieces, shapes erased whole). */
+export type EraserMode = 'stroke' | 'partial';
+
+/**
+ * One eraser segment (the overlay's onErase). Every segment of one gesture joins one undo entry, so one undo brings
+ * back everything the gesture erased (a split stroke as it was). Returns whether anything changed.
+ */
+export function eraseAlong(page: Page, undo: Pick<CrossPageUndo, 'merging'>, path: { x: number; y: number }[], radius: number, mode: EraserMode, makeId: () => string = newIdFallback): boolean {
+  if (mode === 'partial') {
+    const plan = planPartialErase(page.items(), path, radius, makeId);
+    if (emptyPlan(plan)) return false;
+    undo.merging('erase', () => page.applyErase(plan));
+    return true;
+  }
+  const ids = hitTestErase(page.items(), path, radius);
+  if (!ids.length) return false;
+  undo.merging('erase', () => page.removeItems(ids));
+  return true;
+}
+
+/**
+ * Scribble to erase: a pen stroke that is a quick zig-zag over ink deletes that ink (one undo step) and is not kept.
+ * Returns the deleted items (for the fade), or null when the stroke is ink to keep.
+ */
+export function scribbleErase(page: Page, points: InkPoint[], width: number): Item[] | null {
+  const ids = detectScribble(page.items(), points, width);
+  if (!ids) return null;
+  const gone = ids.map((id) => page.item(id)).filter((it): it is Item => !!it);
+  page.removeItems(ids);
+  return gone;
 }
 
 /** Selection transforms live in core (move, uniform scale and rotation about an origin). */

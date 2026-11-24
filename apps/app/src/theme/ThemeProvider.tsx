@@ -26,6 +26,8 @@ export interface InputPrefs {
   penGesture: PenGesture;
   /** Pen stroke smoothing (tech-spec §2). Stored on each new stroke as a level, see `smoothingLevel`. */
   smoothing: SmoothingPref;
+  /** A quick zig-zag scribbled with the pen over ink deletes that ink (on by default). */
+  scribbleErase: boolean;
 }
 
 export type SmoothingPref = 'low' | 'medium' | 'high';
@@ -40,6 +42,7 @@ export const DEFAULT_INPUT: InputPrefs = {
   palm: 'standard',
   penGesture: 'eraser',
   smoothing: 'medium',
+  scribbleErase: true,
 };
 
 interface Prefs {

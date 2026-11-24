@@ -3,6 +3,7 @@ import { LOCAL_ORIGIN } from '../origin';
 import { encodePoints, decodePoints } from '../points';
 import { itemBBox, unionBBox } from '../geometry/bbox';
 import { boxGap, NEAR, pageUnit, ROW_GAP, ROW_OVERLAP } from '../geometry/regions';
+import type { ErasePlan } from '../geometry/erase';
 import { newId } from '../ids';
 import type { Author, BBox, Comment, InkPoint, Item, Reading, ReadingSrc } from '../types';
 
@@ -259,6 +260,62 @@ export class Page {
         this.order.delete(j, i - j + 1);
         i = j;
       }
+    });
+  }
+
+  /**
+   * Replaces items by others in one transaction (one undo step), e.g. a stroke by the pieces a partial erase left
+   * (`with: []` removes it). The new items take the old one's place in the z-order. It goes through the same paths as
+   * `addItem` and `removeItems` (new ids added, old ids removed), so anything that follows the page's items, readings or
+   * an agent's regions sees an erase and new ink. Readings of a replaced stroke read its pieces instead, and go stale
+   * (the ink they read changed); comment threads on it follow its pieces too (and keep the old id, for undo).
+   */
+  replaceItems(replacements: readonly { id: string; with: readonly Item[] }[]): void {
+    const reps = replacements.filter((r) => this.itemMap.has(r.id));
+    if (!reps.length) return;
+    this.tx(() => {
+      const byOld = new Map(reps.map((r) => [r.id, r.with.map((it) => it.id)]));
+      // Readings first, before this transaction notes any ink (see inkChanges): they read the pieces from now on.
+      this.readingMap.forEach((m) => {
+        const ids = m.get('ids');
+        if (!Array.isArray(ids) || !ids.some((id) => byOld.has(id as string))) return;
+        const next = (ids as string[]).flatMap((id) => byOld.get(id) ?? [id]);
+        if (next.length) {
+          m.set('ids', [...new Set(next)]);
+          m.set('stale', true);
+        }
+      });
+      this.commentMap.forEach((m) => {
+        const ids = m.get('anchorIds');
+        if (!Array.isArray(ids) || !ids.some((id) => byOld.has(id as string))) return;
+        m.set('anchorIds', [...new Set((ids as string[]).flatMap((id) => [id, ...(byOld.get(id) ?? [])]))]);
+      });
+      this.dirty();
+      for (const r of reps) {
+        const at = this.order.toArray().indexOf(r.id);
+        for (const item of r.with) {
+          this.noteInk(item.id);
+          const m = new Y.Map<unknown>();
+          this.itemMap.set(item.id, m);
+          m.set('id', item.id);
+          m.set('type', item.type);
+          setFields(m, item as unknown as Record<string, unknown>);
+        }
+        const ids = r.with.map((it) => it.id);
+        if (!ids.length) continue;
+        if (at >= 0) this.order.insert(at, ids);
+        else this.order.push(ids);
+      }
+      this.removeItems(reps.map((r) => r.id));
+    });
+  }
+
+  /** Applies a partial-erase pass (`planPartialErase`) in one transaction: strokes split, shapes removed. */
+  applyErase(plan: ErasePlan): void {
+    if (!plan.split.length && !plan.remove.length) return;
+    this.tx(() => {
+      this.replaceItems(plan.split.map((s) => ({ id: s.id, with: s.pieces })));
+      if (plan.remove.length) this.removeItems(plan.remove);
     });
   }
 

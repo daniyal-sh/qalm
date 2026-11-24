@@ -76,6 +76,7 @@ const DEFAULT_TOOLS: ToolState = {
   hlColor: HIGHLIGHTER_COLORS[0].hex,
   hlWidth: HIGHLIGHTER_WIDTH,
   eraserRadius: 10,
+  eraserMode: 'stroke',
   snapShapes: true,
   lassoMode: 'free',
 };
@@ -101,7 +102,9 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const [tools, setTools] = React.useState<ToolState>(DEFAULT_TOOLS);
   const prevTool = React.useRef<ToolId>('pen');
   React.useEffect(() => {
-    void kvGet<Partial<ToolState>>('tools').then((t) => t && setTools((x) => ({ ...x, ...t, tool: x.tool })));
+    void kvGet<Partial<ToolState>>('tools').then(
+      (t) => t && setTools((x) => ({ ...x, ...t, tool: x.tool, eraserMode: t.eraserMode === 'partial' ? 'partial' : 'stroke' })),
+    );
   }, []);
   const changeTools = React.useCallback((p: Partial<ToolState>) => {
     setTools((x) => {
@@ -112,6 +115,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   }, []);
   const toolRef = React.useRef(tools.tool);
   toolRef.current = tools.tool;
+  const toolsRef = React.useRef(tools);
+  toolsRef.current = tools;
   const setTool = React.useCallback(
     (t: ToolId) => {
       if (t !== toolRef.current) prevTool.current = toolRef.current;
@@ -529,7 +534,15 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
       } else if (mod) return;
       else if (k === 'p') setTool('pen');
       else if (k === 'h') setTool('highlighter');
-      else if (k === 'e') setTool('eraser');
+      else if (k === 'e') {
+        // E picks the eraser; pressed again, it switches between whole stroke and partial.
+        if (toolsRef.current.tool !== 'eraser') setTool('eraser');
+        else {
+          const mode = toolsRef.current.eraserMode === 'partial' ? 'stroke' : 'partial';
+          changeTools({ eraserMode: mode });
+          showToast(mode === 'partial' ? 'Eraser: partial' : 'Eraser: whole stroke');
+        }
+      }
       else if (k === 'l') setTool('lasso');
       else if (k === 't') setTool('text');
       else if (!ev.altKey) {
