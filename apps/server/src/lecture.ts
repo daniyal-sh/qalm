@@ -14,9 +14,11 @@ import {
   encodeQinkUpdate,
   lectureLabel,
   migratePage,
+  pageInk,
   parseCropRegions,
   renderRegionsSvg,
   type InkSeen,
+  type RegionRow,
   type LectureCrop,
   type LectureMeta,
   type QinkLectures,
@@ -46,16 +48,40 @@ export interface LectureInfo {
   seenAt?: number;
   /** Set by the notebook room when a live session went silent (crashed app, closed tab): it shows as stopped. */
   expired?: boolean;
+  /**
+   * The notebook room saw it recording or paused at least once. A session that only ever arrived stopped (an import,
+   * or one finished offline) never sends its transcript to agents as live lines.
+   */
+  liveSeen?: boolean;
+}
+
+/** A crop whose labels and ink-seen state are saved but whose PNG and session-doc entry are still to be stored. */
+interface PendingCrop { crop: LectureCrop; rows: RegionRow[] | null; pageIds: string[] }
+
+/** A page's ink at the session start, as the agent-style "seen" state, from the session's `base` event for it. */
+export interface BaseSeen { ids: string[]; early: Record<string, string> }
+
+function seedSeen(page: Page, base: BaseSeen | undefined): InkSeen | undefined {
+  if (!base) return undefined; // the session never logged this page's base ink: a first look
+  const now = pageInk(page);
+  const out: InkSeen = {};
+  for (const id of base.ids) {
+    // The base item as it was then: its copy from the first erase or update that touched it, else as it is now.
+    const sig = base.early[id] ?? now[id];
+    if (sig) out[id] = sig;
+  }
+  return out;
 }
 
 /**
  * A session's crop state in its notebook room (kv `lecture:{sid}`). `failures` / `retryAt`: a crop that failed backs
  * off instead of being retried on every pen-up; after `CROP_MAX_FAILURES` the pending changes are skipped.
  */
-interface CropState { deliveredAt: number; lastCropAt: number; rev: number; flushed?: boolean; deleted?: boolean; failures?: number; retryAt?: number }
+interface CropState { deliveredAt: number; lastCropAt: number; rev: number; flushed?: boolean; deleted?: boolean; failures?: number; retryAt?: number; pending?: PendingCrop }
 
-const CROP_MAX_FAILURES = 4;
-const cropBackoffMs = (failures: number) => Math.min(10 * 60_000, 15_000 * 2 ** (failures - 1));
+/** 15 s, 30 s, 1, 2, 4, 8 and 10 minutes between tries (about 26 minutes in all), then the changes are given up. */
+const CROP_MAX_FAILURES = 8;
+const cropBackoffMs = (env: Env, failures: number) => Math.min(10 * 60_000, num(env.LECTURE_CROP_BACKOFF_MS, 15_000) * 2 ** (failures - 1));
 /** A recording session that reported nothing for this long (no strokes, no audio chunk every 2 min) is expired. */
 export const LECTURE_SILENT_RECORDING_MS = 15 * 60_000;
 /** A paused one gets longer (a break), then it is expired too. */
@@ -90,6 +116,8 @@ export class LectureCrops {
 
   label(sid: string): string {
     const l = this.labels();
+    const known = l.byId[sid];
+    if (known) return known;
     const label = lectureLabel(l, sid);
     this.r.kvPut('lectureLabels', l);
     return label;
@@ -108,8 +136,9 @@ export class LectureCrops {
       !!prev && !prev.expired && prev.state === info.state && prev.count === info.count && prev.lastT === info.lastT &&
       prev.durationMs === info.durationMs && prev.title === info.title && prev.startedAt === info.startedAt;
     // Only rewrite the kv when something agents or crops see changed (seenAt is refreshed at most once a minute).
-    if (!same || t - (prev.seenAt ?? 0) > 60_000) {
-      all[sid] = { ...info, seenAt: t };
+    const liveSeen = !!prev?.liveSeen || info.state !== 'stopped';
+    if (!same || t - (prev.seenAt ?? 0) > 60_000 || !!prev.liveSeen !== liveSeen) {
+      all[sid] = { ...info, seenAt: t, liveSeen };
       this.r.kvPut('lectures', all);
     }
     this.label(sid);
@@ -171,24 +200,35 @@ export class LectureCrops {
     let next = this.expire(now());
     const later = (at: number) => (next = next === null ? at : Math.min(next, at));
     for (const [sid, info] of Object.entries(this.lectures())) {
-      const st = this.r.kvGet<CropState>(`lecture:${sid}`);
-      if (!st || st.flushed) continue;
-      // A stopped session gets one last crop as it stops (force), never later ones.
-      if (info.state === 'stopped' && force !== sid) {
+      let st = this.r.kvGet<CropState>(`lecture:${sid}`);
+      if (!st || st.deleted || (st.flushed && !st.pending)) continue;
+      const t = now();
+      if (st.retryAt && t < st.retryAt) {
+        later(st.retryAt); // backing off; a stop meanwhile keeps its last crop for the retry
+        continue;
+      }
+      // A crop whose storage failed: retry only the storage (its labels and ink-seen are already saved).
+      if (st.pending) {
+        try {
+          st = await this.storePending(sid, st);
+        } catch (e) {
+          this.failed(sid, st, info, t, e, later);
+          continue;
+        }
+        if (st.flushed) continue;
+      }
+      // A stopped session gets one last crop as it stops (force, or the retry of a failed one), never later ones.
+      const stopped = info.state === 'stopped';
+      if (stopped && force !== sid && !st.failures) {
         this.r.kvPut(`lecture:${sid}`, { ...st, flushed: true });
         continue;
       }
-      const ids = Object.entries(changed).filter(([, at]) => at > st.deliveredAt).map(([id]) => id);
+      const ids = Object.entries(changed).filter(([, at]) => at > st!.deliveredAt).map(([id]) => id);
       if (!ids.length) {
-        if (info.state === 'stopped') this.r.kvPut(`lecture:${sid}`, { ...st, flushed: true });
+        if (stopped) this.r.kvPut(`lecture:${sid}`, { ...st, flushed: true, failures: 0 });
         continue;
       }
-      const t = now();
-      if (st.retryAt && t < st.retryAt) {
-        later(st.retryAt);
-        continue;
-      }
-      const ready = force === sid || info.state !== 'recording' ? t : Math.max(lastUpdate + cfg.idleMs, st.lastCropAt + cfg.minIntervalMs);
+      const ready = force === sid || info.state !== 'recording' || st.failures ? t : Math.max(lastUpdate + cfg.idleMs, st.lastCropAt + cfg.minIntervalMs);
       if (t < ready) {
         later(ready);
         continue;
@@ -196,28 +236,89 @@ export class LectureCrops {
       try {
         await this.crop(sid, info, st, ids, t);
       } catch (e) {
-        const failures = (st.failures ?? 0) + 1;
-        console.error(`lecture crop failed (${sid}, ${failures}x)`, e);
-        if (failures >= CROP_MAX_FAILURES) {
-          // Give up on these changes (the timeline still has every stroke); later ink gets crops again.
-          this.r.kvPut(`lecture:${sid}`, { ...st, deliveredAt: t, failures: 0, retryAt: 0, ...(info.state === 'stopped' ? { flushed: true } : {}) });
-        } else {
-          const retryAt = t + cropBackoffMs(failures);
-          this.r.kvPut(`lecture:${sid}`, { ...st, failures, retryAt });
-          later(retryAt);
-        }
+        this.failed(sid, this.r.kvGet<CropState>(`lecture:${sid}`) ?? st, info, t, e, later);
       }
     }
     return next;
   }
 
+  /** A crop (or its storage) failed: back off, or after CROP_MAX_FAILURES give the pending changes up. */
+  private failed(sid: string, st: CropState, info: LectureInfo, t: number, e: unknown, later: (at: number) => void): void {
+    const failures = (st.failures ?? 0) + 1;
+    console.error(`lecture crop failed (${sid}, ${failures}x)`, e);
+    if (failures >= CROP_MAX_FAILURES) {
+      // Give up on these changes (the timeline still has every stroke); later ink gets crops again.
+      const { pending: _drop, ...rest } = st;
+      this.r.kvPut(`lecture:${sid}`, { ...rest, deliveredAt: Math.max(st.deliveredAt, t), failures: 0, retryAt: 0, ...(info.state === 'stopped' ? { flushed: true } : {}) });
+      return;
+    }
+    const retryAt = t + cropBackoffMs(this.env, failures);
+    this.r.kvPut(`lecture:${sid}`, { ...st, failures, retryAt });
+    later(retryAt);
+  }
+
+  /**
+   * One crop. Everything that reads and writes the notebook-wide region registry and the session's ink-seen state
+   * happens with no await in between (another call could allocate labels meanwhile), and is saved together with the
+   * crop as `pending`; the PNG and the session doc entry are made after, by `storePending`, which a failure retries.
+   */
   private async crop(sid: string, info: LectureInfo, st: CropState, pageIds: string[], at: number): Promise<void> {
-    testCropHook?.(pageIds);
+    testCropHook?.(pageIds, 'start');
     const nb = new Notebook(this.r.doc);
     const live = new Set(nb.pages().map((p) => p.id));
+    const ids = pageIds.filter((id) => live.has(id));
+    const pages = await this.loadPages(ids);
+    // Pages this session hasn't cropped yet start from their ink at the session's start (the `base` event), so the
+    // first crop shows only what was written during the lecture, not the page's older ink.
+    const unseen = ids.filter((id) => !this.r.kvGet<InkSeen>(inkKey(sid, id)));
+    const docId = lecDocId(this.notebookId, sid);
+    const base: Record<string, BaseSeen> = unseen.length ? await room(this.env, docId).lectureBaseSeen(docId, unseen) : {};
+    // ---- no await from here to the kvPuts ----
+    const regions = this.r.kvGet<QinkRegions>('regions') ?? emptyRegions();
+    const prev: Record<string, InkSeen | undefined> = {};
+    for (const id of ids) prev[id] = this.r.kvGet<InkSeen>(inkKey(sid, id)) ?? seedSeen(pages[id]!, base[id]);
+    const u = encodeQinkUpdate(nb, pages, regions, prev, { session: sessionOf(this.notebookId), rev: st.rev + 1, client: cropClient(sid), threads: emptyThreads(), seen: {} });
+    const text = u.text.split('\n').filter((l) => CROP_LINE.test(l)).join('\n');
+    const next: CropState = { ...st, deliveredAt: at, failures: 0, retryAt: 0, ...(info.state === 'stopped' ? { flushed: true } : {}) };
+    const hasRegions = text.includes('\nR');
+    this.r.kvPut('regions', regions);
+    for (const [id, ink] of Object.entries(u.ink)) this.r.kvPut(inkKey(sid, id), ink);
+    if (!hasRegions) {
+      this.r.kvPut(`lecture:${sid}`, next);
+      return;
+    }
+    const pending: PendingCrop = { crop: { t: info.lastT, sha: '', w: 0, h: 0, text, regions: parseCropRegions(text) }, rows: u.image?.rows.length ? u.image.rows : null, pageIds: ids };
+    const withPending: CropState = { ...next, pending };
+    this.r.kvPut(`lecture:${sid}`, withPending);
+    await this.storePending(sid, withPending);
+  }
+
+  /** Renders and stores a pending crop's PNG and adds the crop to the session doc; then it is no longer pending. */
+  private async storePending(sid: string, st: CropState): Promise<CropState> {
+    const p = st.pending;
+    if (!p) return st;
+    testCropHook?.(p.pageIds, 'store');
+    let crop = p.crop;
+    if (p.rows) {
+      const pages = await this.loadPages(p.pageIds);
+      const png = await svgToPng(renderRegionsSvg(pages, p.rows).svg);
+      const sha = await sha256Hex(png.png);
+      await this.storeAsset(sha, png.png);
+      crop = { ...crop, sha, w: png.width, h: png.height };
+    }
+    const docId = lecDocId(this.notebookId, sid);
+    await room(this.env, docId).addLectureCrop(docId, crop);
+    const cur = this.r.kvGet<CropState>(`lecture:${sid}`) ?? st;
+    const { pending: _done, ...rest } = cur;
+    const done: CropState = { ...rest, rev: cur.rev + 1, lastCropAt: now(), failures: 0, retryAt: 0 };
+    this.r.kvPut(`lecture:${sid}`, done);
+    return done;
+  }
+
+  private async loadPages(ids: readonly string[]): Promise<Record<string, Page>> {
     const pages: Record<string, Page> = {};
     await Promise.all(
-      pageIds.filter((id) => live.has(id)).map(async (id) => {
+      ids.map(async (id) => {
         const docId = pgDocId(this.notebookId, id);
         const doc = new Y.Doc();
         Y.applyUpdate(doc, await room(this.env, docId).getState(docId));
@@ -225,28 +326,7 @@ export class LectureCrops {
         pages[id] = new Page(doc);
       }),
     );
-    const regions = this.r.kvGet<QinkRegions>('regions') ?? emptyRegions();
-    const prev: Record<string, InkSeen | undefined> = {};
-    for (const id of Object.keys(pages)) prev[id] = this.r.kvGet<InkSeen>(inkKey(sid, id));
-    const u = encodeQinkUpdate(nb, pages, regions, prev, { session: sessionOf(this.notebookId), rev: st.rev + 1, client: cropClient(sid), threads: emptyThreads(), seen: {} });
-    this.r.kvPut('regions', regions);
-    for (const [id, ink] of Object.entries(u.ink)) this.r.kvPut(inkKey(sid, id), ink);
-    const text = u.text.split('\n').filter((l) => CROP_LINE.test(l)).join('\n');
-    const next: CropState = { ...st, deliveredAt: at, failures: 0, retryAt: 0, ...(info.state === 'stopped' ? { flushed: true } : {}) };
-    if (!text.includes('\nR')) {
-      this.r.kvPut(`lecture:${sid}`, next);
-      return;
-    }
-    let crop: LectureCrop = { t: info.lastT, sha: '', w: 0, h: 0, text, regions: parseCropRegions(text) };
-    if (u.image?.rows.length) {
-      const png = await svgToPng(renderRegionsSvg(pages, u.image.rows).svg);
-      const sha = await sha256Hex(png.png);
-      await this.storeAsset(sha, png.png);
-      crop = { ...crop, sha, w: png.width, h: png.height };
-    }
-    const docId = lecDocId(this.notebookId, sid);
-    await room(this.env, docId).addLectureCrop(docId, crop);
-    this.r.kvPut(`lecture:${sid}`, { ...next, rev: st.rev + 1, lastCropAt: now() });
+    return pages;
   }
 
   /** A crop PNG as an asset of the notebook's owner: in R2 and counted in user_assets (never refused, like ink). */
@@ -262,8 +342,8 @@ export class LectureCrops {
 }
 
 /** Tests: called at each crop attempt with its pages (throw to make it fail). */
-let testCropHook: ((pageIds: string[]) => void) | null = null;
-export function setTestCropHook(fn: ((pageIds: string[]) => void) | null): void {
+let testCropHook: ((pageIds: string[], phase: 'start' | 'store') => void) | null = null;
+export function setTestCropHook(fn: ((pageIds: string[], phase: 'start' | 'store') => void) | null): void {
   testCropHook = fn;
 }
 
@@ -277,6 +357,8 @@ export function setTestAi(fn: AiRun | false | null): void {
   testAi = fn;
 }
 
+/** The lowest bitrate a speech chunk is assumed to have (kbps = bits per ms): its upper bound on length. */
+const MIN_KBPS = 6;
 const AUDIO_TYPES = /^audio\/(webm|ogg|mp4|m4a|x-m4a|aac|mpeg|mp3|wav|x-wav)\b/;
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
@@ -383,9 +465,10 @@ async function transcribe(req: Request, env: Env): Promise<Response> {
   const perMinute = num(env.TRANSCRIBE_PER_MINUTE, 6);
   const limitMs = num(env.TRANSCRIBE_MINUTES_PER_MONTH, 600) * 60_000;
   const limitMinutes = Math.round(limitMs / 60_000);
-  // The chunk's length: the client's claim, at least what its bytes hold at 32 kbps, at most 10 minutes.
-  const declared = Math.min(10 * 60_000, Math.max(num(req.headers.get('X-Audio-Duration-Ms') ?? undefined, 0), Math.round(body.length / 4)));
-  const row = await env.DB.prepare('INSERT INTO transcribe_usage (user_id, at, ms) VALUES (?1, ?2, ?3) RETURNING id').bind(userId, t, declared).first<{ id: number }>();
+  // The most this chunk can hold: its bytes at a floor of 6 kbps (no speech codec goes lower), or the client's claim if
+  // larger. Reserved before Whisper runs (clamped to what's left below), so parallel requests see it.
+  const upper = Math.max(num(req.headers.get('X-Audio-Duration-Ms') ?? undefined, 0), Math.ceil((body.length * 8) / MIN_KBPS));
+  const row = await env.DB.prepare('INSERT INTO transcribe_usage (user_id, at, ms) VALUES (?1, ?2, ?3) RETURNING id').bind(userId, t, upper).first<{ id: number }>();
   const release = () => env.DB.prepare('DELETE FROM transcribe_usage WHERE id = ?1').bind(row!.id).run();
   const recent = await env.DB.prepare('SELECT COUNT(*) AS n FROM transcribe_usage WHERE user_id = ?1 AND at > ?2 AND id <= ?3')
     .bind(userId, t - 60_000, row!.id)
@@ -399,22 +482,25 @@ async function transcribe(req: Request, env: Env): Promise<Response> {
     await release();
     return json({ error: `You've used this month's ${limitMinutes} minutes of cloud transcription.`, code: 'transcribe_quota', usedMinutes: Math.round(used / 60_000), limitMinutes }, 402);
   }
-  // This request is charged at most what is left, so the month's total never passes the cap however many run at once.
+  // The reservation never claims more than is left: a request after this one sees the month as full and is refused.
+  // This one is charged what Whisper hears, so the cap is passed by at most this one request.
   const budget = limitMs - used;
-  const reserved = Math.min(declared, budget);
-  if (reserved < declared) await env.DB.prepare('UPDATE transcribe_usage SET ms = ?2 WHERE id = ?1').bind(row!.id, reserved).run();
+  const reserved = Math.min(upper, budget);
+  if (reserved < upper) await env.DB.prepare('UPDATE transcribe_usage SET ms = ?2 WHERE id = ?1').bind(row!.id, reserved).run();
   const lang = new URL(req.url).searchParams.get('lang');
   let out: WhisperOut;
   try {
     out = (await ai(MODEL, { audio: b64(body), task: 'transcribe', vad_filter: true, ...(lang && /^[a-z]{2}$/.test(lang) ? { language: lang } : {}) })) as WhisperOut;
   } catch (e) {
     console.error('whisper failed', e);
-    await release();
+    // Kept as 0 ms: no minutes are charged, but it still counts towards the per-minute limit (a chunk that always
+    // fails can't be retried in a tight loop).
+    await env.DB.prepare('UPDATE transcribe_usage SET ms = 0 WHERE id = ?1').bind(row!.id).run();
     throw new HttpError(502, 'Transcription failed; it will be retried');
   }
-  // What Whisper heard (at least the reservation), never more than this request's budget.
+  // Charged what Whisper heard (no clamp: a long chunk is charged in full). Whisper not saying: its bytes at 32 kbps.
   const heard = Math.round((out.transcription_info?.duration ?? 0) * 1000);
-  const durationMs = Math.min(budget, 10 * 60_000, Math.max(reserved, heard));
+  const durationMs = heard > 0 ? heard : Math.min(reserved, Math.round(body.length / 4));
   await env.DB.prepare('UPDATE transcribe_usage SET ms = ?2 WHERE id = ?1').bind(row!.id, durationMs).run();
   return json({ segments: whisperSegments(out), durationMs, usedMinutes: Math.round((used + durationMs) / 60_000), limitMinutes });
 }
@@ -442,6 +528,21 @@ export async function lectureDeleted(env: Env, docId: string): Promise<boolean> 
  * Frees assets a deleted session held: a sha stays while any other session of the user still references it; else the
  * user's `user_assets` row goes, and the R2 object too when no other user holds it.
  */
+/** Every page asset sha (PDFs, images) in the user's notebooks that aren't deleted forever, from their index docs. */
+async function pageAssetShas(env: Env, userId: string): Promise<Set<string>> {
+  const nbs = (await env.DB.prepare('SELECT id FROM notebooks WHERE owner_id = ?1 AND deleted_at IS NULL').bind(userId).all<{ id: string }>()).results;
+  const out = new Set<string>();
+  for (const { id } of nbs) {
+    try {
+      for (const sha of await room(env, nbDocId(id)).notebookAssetShas(nbDocId(id))) out.add(sha);
+    } catch (e) {
+      console.error('notebookAssetShas failed', e);
+      throw e; // unsure: keep the assets rather than delete something a page uses
+    }
+  }
+  return out;
+}
+
 async function releaseLectureAssets(env: Env, userId: string, shas: readonly string[]): Promise<void> {
   for (let i = 0; i < shas.length; i += 50) {
     const part = shas.slice(i, i + 50);
@@ -451,7 +552,12 @@ async function releaseLectureAssets(env: Env, userId: string, shas: readonly str
         (r) => r.sha256,
       ),
     );
-    const free = part.filter((s) => !used.has(s));
+    let free = part.filter((s) => !used.has(s));
+    // A page asset (PDF, image) of any of the user's notebooks with the same bytes keeps it too.
+    if (free.length) {
+      const inPages = await pageAssetShas(env, userId);
+      free = free.filter((s) => !inPages.has(s));
+    }
     if (!free.length) continue;
     const fm = free.map((_, j) => `?${j + 2}`).join(',');
     await env.DB.prepare(`DELETE FROM user_assets WHERE user_id = ?1 AND sha256 IN (${fm})`).bind(userId, ...free).run();

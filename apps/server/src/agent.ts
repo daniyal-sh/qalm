@@ -288,13 +288,14 @@ export class AgentHub {
 
   private hasTranscriptNews(st: AgentState): boolean {
     if (!this.lectureLive()) return false;
-    return Object.entries(this.lectures()).some(([sid, l]) => l.count > (st.lect?.[sid] ?? 0));
+    return Object.entries(this.lectures()).some(([sid, l]) => l.liveSeen && l.count > (st.lect?.[sid] ?? 0));
   }
 
   /**
    * New transcript segments per session since this agent's state, as Q-ink lines (and the counts to store). At most
    * `LIVE_LINES_MAX` lines per session per update: a long catch-up (e.g. after Play) ends with a `more:` pointer to
-   * `read("L…")` from the first line left out, and the agent's position moves past all of them.
+   * `read("L…")` from the earliest line left out, and the agent's position moves past all of them. A session that
+   * was never live here (an import) sends no live lines: `read("L…")` has its transcript.
    */
   private async transcriptNews(st: AgentState): Promise<{ lines: string[]; lect: Record<string, number> }> {
     const lect = { ...st.lect };
@@ -302,17 +303,13 @@ export class AgentHub {
     const lines: string[] = [];
     for (const [sid, l] of Object.entries(this.lectures())) {
       const from = lect[sid] ?? 0;
-      if (l.count <= from) continue;
+      if (!l.liveSeen || l.count <= from) continue;
       const label = labels.byId[sid];
       const docId = lecDocId(this.notebookId, sid);
-      const { segs, next } = await room(this.env, docId).lectureTranscript(docId, from, LIVE_LINES_MAX + 1);
-      const shown = segs.slice(0, LIVE_LINES_MAX);
-      if (label) for (const seg of shown) lines.push(transcriptLine(label, seg));
-      const rest = segs[LIVE_LINES_MAX];
-      if (rest) {
-        if (label) lines.push(`more: read("${label}@${fmtTExact(rest.t0)}")`);
-        lect[sid] = Math.max(next, l.count);
-      } else lect[sid] = next;
+      const { segs, next, restT0 } = await room(this.env, docId).lectureTranscript(docId, from, LIVE_LINES_MAX);
+      if (label) for (const seg of segs) lines.push(transcriptLine(label, seg));
+      if (restT0 !== null && label) lines.push(`more: read("${label}@${fmtTExact(restT0)}")`);
+      lect[sid] = next;
     }
     return { lines, lect };
   }

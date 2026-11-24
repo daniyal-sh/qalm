@@ -3,10 +3,10 @@ import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import { AI_LIVE, AI_LIVE_TTL_MS, AI_PAUSE, AI_PAUSED, AI_PLAY, AI_PLAYING, AI_RESUME, AI_STOP, LectureDoc, Notebook, Page, inkInBox, migratePage, summarizeThreads, type LectureCrop, type LectureMeta, type ThreadSummary, type TranscriptSegment } from '@qalm/core';
+import { AI_LIVE, AI_LIVE_TTL_MS, AI_PAUSE, AI_PAUSED, AI_PLAY, AI_PLAYING, AI_RESUME, AI_STOP, LectureDoc, Notebook, inkSig, Page, inkInBox, migratePage, summarizeThreads, type LectureCrop, type LectureMeta, type ThreadSummary, type TranscriptSegment } from '@qalm/core';
 import { num, type Env } from './env';
 import { parseDocId, nbDocId, pgDocId, lecDocId, room, type DocRef } from './docs';
-import { LectureCrops, lectureCfg, recordLectureAssets, type LectureInfo } from './lecture';
+import { LectureCrops, lectureCfg, recordLectureAssets, type BaseSeen, type LectureInfo } from './lecture';
 import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit, type AgentWho, type PageEdit, type Presence } from './agent';
 
 const MSG_SYNC = 0;
@@ -564,10 +564,42 @@ export class DocRoom extends DurableObject<Env> {
     return { meta: lec.meta(), transcript: lec.transcript(), crops: lec.crops() };
   }
 
-  /** Session room: transcript segments in arrival order from `from`, at most `max` (live MCP lines). */
-  lectureTranscript(docId: string, from: number, max?: number): { segs: TranscriptSegment[]; next: number } {
+  /**
+   * Session room: transcript segments in arrival order from `from`, at most `max` (live MCP lines). `next` is past
+   * all of them; `restT0` is the earliest time among those left out (chunks can arrive out of order), or null.
+   */
+  lectureTranscript(docId: string, from: number, max?: number): { segs: TranscriptSegment[]; next: number; restT0: number | null } {
     this.setDocId(docId);
-    return new LectureDoc(this.doc).transcriptFrom(from, max);
+    const all = new LectureDoc(this.doc).transcriptFrom(from);
+    if (max === undefined || all.segs.length <= max) return { ...all, restT0: null };
+    const rest = all.segs.slice(max);
+    return { segs: all.segs.slice(0, max), next: all.next, restT0: Math.min(...rest.map((s) => s.t0)) };
+  }
+
+  /**
+   * Session room: each page's ink at the session start, from its `base` event (ids), with the earliest copy of any
+   * base item the session later erased or changed (its signature as it was then). Pages without a base: left out.
+   */
+  lectureBaseSeen(docId: string, pageIds: string[]): Record<string, BaseSeen> {
+    this.setDocId(docId);
+    const want = new Set(pageIds);
+    const out: Record<string, BaseSeen> = {};
+    for (const e of new LectureDoc(this.doc).events()) {
+      if (e.k === 'base' && want.has(e.p) && !out[e.p]) out[e.p] = { ids: [...e.ids], early: {} };
+      if ((e.k === 'erase' || e.k === 'update') && out[e.p]) {
+        const b = out[e.p]!;
+        const base = new Set(b.ids);
+        const olds = e.k === 'update' ? (e.before ?? []) : e.items;
+        for (const it of olds) if (base.has(it.id) && !(it.id in b.early)) b.early[it.id] = inkSig(it);
+      }
+    }
+    return out;
+  }
+
+  /** Notebook room: the shas of its page assets (PDFs, images). */
+  notebookAssetShas(docId: string): string[] {
+    this.setDocId(docId);
+    return new Notebook(this.doc).assets().map((a) => a.sha256).filter(Boolean);
   }
 
   /** Session room: every asset it holds (audio, crop PNGs), for deletion. */

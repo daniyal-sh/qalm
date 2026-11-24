@@ -42,6 +42,8 @@ export interface Env {
   WHISPER_FAKE?: string;
   /** Tests only: how long a live lecture session may report nothing before it is expired (default 15 min / 6 h paused). */
   LECTURE_SILENT_MS?: string;
+  /** Tests only: the first lecture crop retry delay (default 15000 ms, doubling). */
+  LECTURE_CROP_BACKOFF_MS?: string;
 }
 
 /** What completeAuthorization() stores; reaches the MCP handler as ctx.props. */

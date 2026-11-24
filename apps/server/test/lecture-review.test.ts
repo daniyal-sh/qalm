@@ -38,51 +38,84 @@ const fakeWhisper = (secs: number) =>
   setTestAi(async () => ({ text: 'hello', transcription_info: { duration: secs }, segments: [{ start: 0, end: 1, text: ' hello' }] }));
 
 describe('lecture crops: start, backoff, flush, expiry', () => {
-  it('crops start at the session start; a failing crop backs off; a stopped session takes no later crops', async () => {
+  it('crops show only ink written in the session; failures back off; a stop during back-off keeps its last crop', async () => {
     const t = await signIn('rev-crops@example.com');
     const n = await notebook(t, 'revcrop', 'Crops', { ai: false });
-    // Ink from before the lecture: never part of its crops.
+    // Ink from before the lecture: never part of its crops (the app logs it as the page's `base`).
     n.page.addItem(stroke('old', 50, 100, 300, 140));
     await pause(400);
     const s1 = await startLecture(t, 'revcrop', 's1');
     await until(async () => (await lecOnServer('revcrop', 's1')).meta().state === 'recording');
-    s1.lec.appendEvents([{ t: 0, k: 'start', at: 1 }, { t: 100, k: 'pause' }]);
+    s1.lec.appendEvents([{ t: 0, k: 'start', at: 1 }, { t: 0, k: 'base', p: n.pageId, ids: ['old'] }, { t: 100, k: 'pause' }]);
     s1.lec.setMeta({ state: 'paused' });
     await pause(1500);
     expect((await lecOnServer('revcrop', 's1')).crops()).toHaveLength(0);
 
-    // Resume; every crop attempt fails: one attempt, then a back-off, not one per pen-up.
-    let attempts = 0;
+    // Resume; every crop attempt fails: the retries back off (400 ms doubling in tests), not one per pen-up.
+    const tries: number[] = [];
     setTestCropHook(() => {
-      attempts++;
+      tries.push(Date.now());
       throw new Error('render failed');
     });
     s1.lec.setMeta({ state: 'recording' });
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       n.page.addItem(stroke(`n${i}`, 50, 200 + i * 40, 300, 220 + i * 40));
       s1.lec.appendEvents([{ t: 1000 + i * 500, k: 'add', p: n.pageId, items: [] }]);
-      await pause(500);
+      await pause(300);
     }
-    await until(async () => attempts >= 1, 5000);
-    await pause(1500);
-    expect(attempts).toBe(1);
+    await until(async () => tries.length >= 3, 8000);
+    const gaps = tries.slice(1).map((x, i) => x - tries[i]!);
+    expect(gaps[0]).toBeGreaterThanOrEqual(350);
+    expect(gaps[1]).toBeGreaterThanOrEqual(700);
 
-    // Stop while paused (no crop then: still backing off), then a second session records on the same notebook:
-    // only that one gets crops, the stopped one never again.
-    setTestCropHook(null);
+    // Stop while backing off: the last crop is not lost; it is made once the retry works.
     s1.lec.setMeta({ state: 'paused' });
     s1.lec.setMeta({ state: 'stopped' });
-    await until(async () => (await lecOnServer('revcrop', 's1')).meta().state === 'stopped');
+    setTestCropHook(null);
+    await until(async () => (await lecOnServer('revcrop', 's1')).crops().length === 1, 10_000);
+    const last = (await lecOnServer('revcrop', 's1')).crops()[0]!;
+    expect(last.text).not.toContain('first look');
+    expect(last.regions.reduce((a, r) => a + r.add, 0)).toBe(6); // the session's strokes, not 'old'
+
+    // A second session on the same notebook gets crops; the stopped one never again.
     const s2 = await startLecture(t, 'revcrop', 's2');
     await until(async () => (await lecOnServer('revcrop', 's2')).meta().state === 'recording');
+    s2.lec.appendEvents([{ t: 0, k: 'base', p: n.pageId, ids: ['old', 'n0', 'n1', 'n2', 'n3', 'n4', 'n5'] }]);
     await pause(50);
     n.page.addItem(stroke('late', 50, 500, 300, 540));
     s2.lec.appendEvents([{ t: 300, k: 'add', p: n.pageId, items: [] }]);
     await until(async () => (await lecOnServer('revcrop', 's2')).crops().length === 1, 8000);
-    expect((await lecOnServer('revcrop', 's1')).crops()).toHaveLength(0);
-    // s2's first crop covers only ink written since it started.
-    expect((await lecOnServer('revcrop', 's2')).crops()[0]!.regions.reduce((a, r) => a + r.add, 0)).toBe(0); // first look
+    expect((await lecOnServer('revcrop', 's1')).crops()).toHaveLength(1);
+    // s2's first crop of the page is only what it wrote (one stroke), not a first look at the whole page.
+    const c2 = (await lecOnServer('revcrop', 's2')).crops()[0]!;
+    expect(c2.text).not.toContain('first look');
+    expect(c2.regions.reduce((a, r) => a + r.add, 0)).toBe(1);
     for (const x of [s1, s2]) x.c.close();
+    n.nbc.close();
+    n.pgc.close();
+  });
+
+  it('a crop whose storage fails is retried (storage only), not lost', async () => {
+    const t = await signIn('rev-store@example.com');
+    const n = await notebook(t, 'revstore', 'Store', { ai: false });
+    const s = await startLecture(t, 'revstore', 's1');
+    await until(async () => (await lecOnServer('revstore', 's1')).meta().state === 'recording');
+    s.lec.appendEvents([{ t: 0, k: 'start', at: 1 }, { t: 0, k: 'base', p: n.pageId, ids: [] }]);
+    const phases: string[] = [];
+    let failStore = true;
+    setTestCropHook((_ids, phase) => {
+      phases.push(phase);
+      if (phase === 'store' && failStore) {
+        failStore = false;
+        throw new Error('R2 down'); // after the labels and ink-seen state were saved
+      }
+    });
+    n.page.addItem(stroke('a', 50, 100, 300, 140));
+    s.lec.appendEvents([{ t: 500, k: 'add', p: n.pageId, items: [] }]);
+    await until(async () => (await lecOnServer('revstore', 's1')).crops().length === 1, 8000);
+    expect(phases).toEqual(['start', 'store', 'store']); // the retry stored the same crop, it didn't make a new one
+    expect((await lecOnServer('revstore', 's1')).crops()[0]!.regions.reduce((a, r) => a + r.add, 0)).toBe(1);
+    s.c.close();
     n.nbc.close();
     n.pgc.close();
   });
@@ -176,15 +209,24 @@ describe('transcription limits under concurrency', () => {
     expect(n!.n).toBe(ok);
   });
 
-  it('parallel requests can\'t pass the monthly cap: each is charged at most what is left', async () => {
+  it('parallel requests pass the monthly cap by at most one request; a long chunk is charged in full', async () => {
     const t = await signIn('rev-cap@example.com');
     fakeWhisper(50);
-    const rs = await Promise.all([0, 1, 2].map((i) => transcribe(t, new Uint8Array([2, i]), { 'X-Audio-Duration-Ms': '50000' })));
-    expect(rs.some((r) => r.status === 200)).toBe(true);
-    const used = await env.DB.prepare('SELECT COALESCE(SUM(ms), 0) AS ms FROM transcribe_usage WHERE user_id = ?1').bind(t.userId).first<{ ms: number }>();
-    expect(used!.ms).toBeLessThanOrEqual(60_000); // 1 minute a month in tests
+    // 40 kB of audio (10 s at 32 kbps, at most 53 s at the 6 kbps floor), claimed as 1 s and heard as 50 s each.
+    const chunk = (i: number) => new Uint8Array(40_000).fill(i + 1);
+    const rs = await Promise.all([0, 1, 2].map((i) => transcribe(t, chunk(i), { 'X-Audio-Duration-Ms': '1000' })));
+    expect(rs.map((r) => r.status).sort()).toEqual([200, 200, 402]);
+    const used = async () => (await env.DB.prepare('SELECT COALESCE(SUM(ms), 0) AS ms FROM transcribe_usage WHERE user_id = ?1').bind(t.userId).first<{ ms: number }>())!.ms;
+    expect(await used()).toBe(100_000); // the cap (60 s) passed by the one request that took what was left
     await env.DB.prepare('UPDATE transcribe_usage SET at = at - 120000 WHERE user_id = ?1').bind(t.userId).run();
-    if (used!.ms >= 60_000) expect((await transcribe(t, new Uint8Array([3]))).status).toBe(402);
+    expect((await transcribe(t, chunk(5))).status).toBe(402);
+
+    // 30 minutes heard is charged as 30 minutes (no 10-minute clamp).
+    const t2 = await signIn('rev-long@example.com');
+    fakeWhisper(1800);
+    const r = await transcribe(t2, chunk(6));
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as { durationMs: number }).durationMs).toBe(1_800_000);
   });
 
   it('refuses a body over 8 MB while streaming, without a Content-Length', async () => {
@@ -214,16 +256,14 @@ describe('lecture MCP output', () => {
     const s = sessionOf('revlines');
     const { c, lec } = await startLecture(t, 'revlines', 's1');
     await until(async () => textOf(await tool(token, 'wait')).includes('recording'));
-    // Play right before each wait: one heartbeat gap (> AI_LIVE_TTL_MS, 2.5 s in tests) while other tests' work runs in
-    // the same isolate pauses the notebook for good, and this test is about the line cap, not liveness.
-    n.nbc.play();
     let w = tool(token, 'wait', { s });
     await pause(100);
-    lec.addTranscript(Array.from({ length: 35 }, (_, i) => ({ t0: 1000 * (i + 1), t1: 1000 * (i + 1) + 500, text: `line ${i + 1}`, src: 'cloud' as const })));
+    // 35 lines; the 5 left out arrived last but are earlier on the timeline (an older chunk transcribed late).
+    const t0 = (i: number) => (i < 30 ? 10_000 + 1000 * i : 9000 - 1000 * (i - 30));
+    lec.addTranscript(Array.from({ length: 35 }, (_, i) => ({ t0: t0(i), t1: t0(i) + 500, text: `line ${i + 1}`, src: 'cloud' as const })));
     const lines = textOf(await w).split('\n');
     expect(lines.filter((l) => l.startsWith('L1 '))).toHaveLength(30);
-    expect(lines.at(-1)).toBe('more: read("L1@00:31")');
-    n.nbc.play();
+    expect(lines.at(-1)).toBe('more: read("L1@00:05")'); // the earliest line left out
     w = tool(token, 'wait', { s });
     await pause(100);
     lec.addTranscript([{ t0: 40_000, t1: 41_000, text: 'next', src: 'cloud' }]);
@@ -284,3 +324,71 @@ describe('lecture MCP output', () => {
     n.pgc.close();
   });
 });
+
+describe('review 2: uploads, imports, shared page assets', () => {
+  it('lecture audio uploads name their session: recorded at once while it lives, refused once it is deleted', async () => {
+    const t = await signIn('rev-tag@example.com');
+    const n = await notebook(t, 'revtag', 'Tag', { ai: false });
+    const s = await startLecture(t, 'revtag', 's1');
+    const doc = lectureDocId('revtag', 's1');
+    const put = async (bytes: Uint8Array) => {
+      const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+      const r = await call(`/assets/${sha}`, { method: 'PUT', token: t.accessToken, body: bytes as unknown as BodyInit, headers: { 'Content-Type': 'audio/webm', 'X-Qalm-Lecture': doc } });
+      return { sha, status: r.status };
+    };
+    const first = await put(new Uint8Array(200).fill(4));
+    expect(first.status).toBe(201);
+    expect(await refs(doc)).toEqual([first.sha]); // before the session doc even mentions it
+    s.c.close();
+    expect((await call('/lectures/revtag/s1', { method: 'DELETE', token: t.accessToken })).status).toBe(200);
+    expect(await owns(t.userId, first.sha)).toBe(false);
+    // A queued upload that lands after the delete is refused: nothing to count against storage.
+    const late = await put(new Uint8Array(200).fill(5));
+    expect(late.status).toBe(410);
+    expect(await owns(t.userId, late.sha)).toBe(false);
+    n.nbc.close();
+    n.pgc.close();
+  });
+
+  it('an imported (stopped) session sends no live lines; read("L…") still has its transcript', async () => {
+    const email = 'rev-imp@example.com';
+    const t = await signIn(email);
+    const n = await notebook(t, 'revimp', 'Imported');
+    const token = await connectAgent(email, { comment: true, transcribe: true });
+    const s = sessionOf('revimp');
+    const w = tool(token, 'wait', { s }); // the agent follows from here
+    await pause(100);
+    const imp = await startLecture(t, 'revimp', 'imp', 'stopped');
+    imp.lec.setMeta({ durationMs: 5000 });
+    imp.lec.addTranscript([{ t0: 1000, t1: 2000, text: 'from the import', src: 'cloud' }]);
+    expect(textOf(await w)).toBe(`#q s=${s} no changes`);
+    await until(async () => textOf(await tool(token, 'read', { ref: 'outline', s })).includes('L1'));
+    expect(textOf(await tool(token, 'read', { ref: 'L1', s }))).toContain('00:01 "from the import"');
+    imp.c.close();
+    n.nbc.close();
+    n.pgc.close();
+  });
+
+  it('deleting a session keeps an asset a notebook page also uses', async () => {
+    const t = await signIn('rev-page@example.com');
+    const n = await notebook(t, 'revpage', 'Pages', { ai: false });
+    const bytes = new Uint8Array(250).fill(8);
+    const sha = await putAsset(t, bytes, 'image/png');
+    n.nb.addAsset({ id: 'img1', sha256: sha, mime: 'image/png', name: 'diagram.png', bytes: 250 });
+    await until(async () => (await serverNotebookAssets('revpage')).includes(sha));
+    const s = await startLecture(t, 'revpage', 's1');
+    s.lec.addCrop({ t: 1, sha, w: 1, h: 1, text: '', regions: [] }, 'client'); // the same bytes, as a crop
+    await until(async () => (await refs(lectureDocId('revpage', 's1'))).includes(sha));
+    s.c.close();
+    expect((await call('/lectures/revpage/s1', { method: 'DELETE', token: t.accessToken })).status).toBe(200);
+    expect(await owns(t.userId, sha)).toBe(true);
+    expect(await env.ASSETS.head(sha)).not.toBeNull();
+    n.nbc.close();
+    n.pgc.close();
+  });
+});
+
+async function serverNotebookAssets(id: string): Promise<string[]> {
+  const { Notebook } = await import('@qalm/core');
+  return new Notebook(await serverDoc(`nb:${id}`)).assets().map((a) => a.sha256);
+}

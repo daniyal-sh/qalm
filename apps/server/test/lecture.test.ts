@@ -92,8 +92,9 @@ describe('POST /lectures/transcribe', () => {
     const limited = await transcribe(t, new Uint8Array([9]));
     expect(limited.status).toBe(429);
     expect(limited.headers.get('Retry-After')).toBe('60');
-    // 1 minute a month in tests: the 3 chunks used 37.5 s; one more long chunk passes the cap.
+    // 1 minute a month in tests: the 3 chunks used 37.5 s; one more long chunk (heard as 30 s) passes the cap.
     await env.DB.prepare('UPDATE transcribe_usage SET at = at - 120000 WHERE user_id = ?1').bind(t.userId).run();
+    setTestAi(async () => ({ text: 'long', transcription_info: { duration: 30 }, segments: [{ start: 0, end: 30, text: ' long' }] }));
     expect((await transcribe(t, new Uint8Array([2]), { 'X-Audio-Duration-Ms': '30000' })).status).toBe(200);
     await env.DB.prepare('UPDATE transcribe_usage SET at = at - 120000 WHERE user_id = ?1').bind(t.userId).run();
     const quota = await transcribe(t, new Uint8Array([3]));
@@ -101,7 +102,7 @@ describe('POST /lectures/transcribe', () => {
     expect(((await quota.json()) as { code: string }).code).toBe('transcribe_quota');
   });
 
-  it('answers 503 without the AI binding and doesn\'t count a failed run', async () => {
+  it('answers 503 without the AI binding; a failed run charges no minutes but counts per minute', async () => {
     const t = await signIn('lec-noai@example.com');
     setTestAi(false);
     expect((await transcribe(t, new Uint8Array([1]))).status).toBe(503);
@@ -109,8 +110,12 @@ describe('POST /lectures/transcribe', () => {
       throw new Error('model down');
     });
     expect((await transcribe(t, new Uint8Array([1]))).status).toBe(502);
-    const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM transcribe_usage WHERE user_id = ?1').bind(t.userId).first<{ n: number }>();
-    expect(n!.n).toBe(0);
+    const n = await env.DB.prepare('SELECT COUNT(*) AS n, SUM(ms) AS ms FROM transcribe_usage WHERE user_id = ?1').bind(t.userId).first<{ n: number; ms: number }>();
+    expect(n).toMatchObject({ n: 1, ms: 0 });
+    // A chunk that always fails can't be retried in a tight loop: the failures count towards the per-minute limit.
+    expect((await transcribe(t, new Uint8Array([1]))).status).toBe(502);
+    expect((await transcribe(t, new Uint8Array([1]))).status).toBe(502);
+    expect((await transcribe(t, new Uint8Array([1]))).status).toBe(429);
   });
 });
 
