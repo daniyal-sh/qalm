@@ -114,8 +114,8 @@ export function DeleteAccountSheet({ visible, onClose }: { visible: boolean; onC
             ))}
           </View>
           <Text variant="meta">
-            Want a copy first? Open a notebook and export it as PDF or a .qalm backup. Notebooks you made on this device without signing in stay on
-            this device.
+            Want a copy first? Open a notebook and export it as PDF or a .qalm backup. Notebooks you made before signing in moved into your
+            account, so they're deleted too.
           </Text>
         </View>
       ) : step === 'email' ? (
