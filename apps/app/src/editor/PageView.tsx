@@ -362,6 +362,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
         // Live shapes: hold the pen still and the stroke snaps under it; drag to adjust, lift to place.
         recognizeShape={t.snapShapes && t.tool === 'pen' ? liveShape : undefined}
         adjustShape={adjustLiveShape}
+        onPenSeen={ed.onPenSeen}
         onStrokeEnd={({ nativeEvent: e }) => {
           ed.touchPage(info.id);
           const stroke = makeStroke(e);

@@ -19,7 +19,7 @@ public class QalmInkModule: Module {
     }
 
     View(QalmInkView.self) {
-      Events("onStrokeEnd", "onErase", "onLasso", "onPenButton", "onRejectedTouch", "onShapeHold")
+      Events("onStrokeEnd", "onErase", "onLasso", "onPenButton", "onRejectedTouch", "onShapeHold", "onPenSeen")
 
       Prop("pageSize") { (view: QalmInkView, size: [String: Any]) in
         let w = InkNum.double(size["w"]) ?? 0

@@ -11,12 +11,13 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { persistClip } from '../src/editor/clipboard';
 import { desktop } from '../src/lib/desktop';
 import { useFullscreenShortcut } from '../src/lib/fullscreen';
+import { PEN_DETECTED_TOAST } from '../src/lib/inputPrefs';
 import { kvGet, kvSet } from '../src/lib/kv';
 import { quietNonPrimaryMouseUp } from '../src/lib/webMouse';
 import { SessionProvider, useSession } from '../src/state/session';
 import { ConfirmHost } from '../src/ui/ConfirmHost';
 import { Button } from '../src/ui/controls';
-import { Sheet } from '../src/ui/layout';
+import { Sheet, useToast } from '../src/ui/layout';
 import { Text } from '../src/ui/Text';
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
 
@@ -83,6 +84,16 @@ function MoveLocalOffer() {
   );
 }
 
+/** The one-time toast when the first pen this device shows switches "draw with" to pen only. */
+function PenDetectedToast() {
+  const { penSwitched } = useTheme();
+  const [toast, show] = useToast();
+  React.useEffect(() => {
+    if (penSwitched) show(PEN_DETECTED_TOAST);
+  }, [penSwitched, show]);
+  return toast;
+}
+
 function Shell() {
   const { c, scheme } = useTheme();
   const [fontsLoaded, fontError] = useFonts({ Figtree_400Regular, Figtree_500Medium, Figtree_600SemiBold, Figtree_700Bold, GeistMono_400Regular });
@@ -101,6 +112,7 @@ function Shell() {
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: c.bg }, animation: 'fade' }} />
       <MoveLocalOffer />
       <ConfirmHost />
+      <PenDetectedToast />
     </>
   );
 }

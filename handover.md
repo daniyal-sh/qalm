@@ -100,8 +100,14 @@ apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Objec
 - **Palm rejection:**
   - **Thresholds** use the contact's full major axis in mm: relaxed 30, standard 20, strict 14 (owner decision: the old 9 / 7 / 5
     rejected most fingertips, which are 8–10 mm). The lockout, hand side and multi-touch rules catch smaller palm edges.
-  - **Pen priority:** a 600 ms pen lockout, and the writing-hand side is considered for 3 s.
-  - **Retractions:** an OS cancel retracts the stroke, as does a second finger or a contact that grows into a palm.
+  - **Pen priority:** a 600 ms pen lockout, and the writing-hand side is considered for 2 s (owner decision: 3 s felt like
+    waiting to scroll).
+  - **Retractions:** an OS cancel retracts the stroke, as does a contact that grows into a palm, or a second finger within
+    150 ms / 3 mm of the first. A later second finger keeps the stroke and pans.
+  - **"Pen and finger":** one finger draws; two fingers pan (web: `twoFingerPan.ts`, with a fling; Android: the ScrollViews;
+    iOS: the scroll views' pan needs two touches while a finger draws) and pinch-zoom.
+  - **Auto-pick:** "draw with" is "pen and finger" until the device shows a real pen, then "pen only" with a one-time toast,
+    unless chosen in Settings (`drawWithAuto`, `penSeen` in the local prefs).
   - **Fingers:** with "pen only" one finger scrolls and two zoom; a rejected palm (or a finger landing right after the pen)
     never moves the page, on web, Android and iOS.
   - **Pen button:** held while writing, it erases only that stroke; pressed while hovering, it's the shortcut.
@@ -236,7 +242,8 @@ email-only sign-in and stay in place.
     place; one undo restores the stroke. Tested on web/Electron (desktop e2e step); Android built only as a JVM test of
     `LiveShape.kt` (the view wiring is uncompiled); iOS never compiled. Needs a real-stylus feel check.
   - Fractions like ⅔ have no glyph on the page; PDF export uses Symbol, so symbol-heavy lines may wrap differently.
-  - Pinch zoom on tablets works only with "pen only"; with "pen and finger" use the ± buttons.
+  - "Pen and finger" two-finger pan and pinch are verified with synthetic touch on Electron only; Android and iPad need
+    a device check (iOS changes are unbuilt).
   - The live highlighter uses plain alpha; finished highlights use multiply.
   - The Android overlay sits on top of the window (`setZOrderOnTop`), so UI placed over the page would be hidden.
   - After logout, access JWTs stay valid for up to 1 h and open sync sockets aren't closed.

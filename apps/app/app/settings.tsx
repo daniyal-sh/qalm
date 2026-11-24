@@ -148,20 +148,31 @@ function StorageCard() {
 }
 
 function PenSection() {
-  const { c, input, setInput } = useTheme();
+  const { c, input, setInput, notePenSeen } = useTheme();
   const [rejected, setRejected] = React.useState<string | null>(null);
+  const drawWithText = input.drawWith === 'pen' ? 'Fingers scroll and zoom; only the pen draws' : 'One finger draws; two fingers scroll and zoom';
+  const pickedText = input.drawWithAuto
+    ? input.penSeen
+      ? 'Picked automatically: a pen was detected on this device'
+      : 'Picked automatically: no pen detected on this device yet'
+    : 'Your choice';
   return (
     <View style={{ gap: 8 }}>
       <Panel>
-        <Row title="Draw with" description={input.drawWith === 'pen' ? 'Fingers scroll and zoom; only the pen draws' : 'Pen and fingers both draw'}>
-          <Segmented<DrawWith>
-            value={input.drawWith}
-            onChange={(drawWith) => setInput({ drawWith })}
-            options={[
-              { value: 'pen', label: 'Pen only' },
-              { value: 'any', label: 'Pen and finger' },
-            ]}
-          />
+        <Row title="Draw with" description={`${drawWithText}. ${pickedText}`}>
+          <View style={{ alignItems: 'flex-end', gap: 6 }}>
+            <Segmented<DrawWith>
+              value={input.drawWith}
+              onChange={(drawWith) => setInput({ drawWith, drawWithAuto: false })}
+              options={[
+                { value: 'pen', label: 'Pen only' },
+                { value: 'any', label: 'Pen and finger' },
+              ]}
+            />
+            {input.drawWithAuto ? null : (
+              <Button label="Pick automatically" size="sm" variant="ghost" onPress={() => setInput({ drawWithAuto: true, drawWith: input.penSeen ? 'pen' : 'any' })} />
+            )}
+          </View>
         </Row>
         <Row title="Writing hand" description="Touches beside and below the pen on this side are ignored">
           <Segmented<Hand>
@@ -224,6 +235,7 @@ function PenSection() {
           onErase={() => undefined}
           onLasso={() => undefined}
           onRejectedTouch={({ nativeEvent }) => setRejected(nativeEvent.reason)}
+          onPenSeen={notePenSeen}
         />
       </View>
       <Text variant="meta" tone={rejected ? 'bad' : 'faint'} style={{ paddingHorizontal: 4 }}>

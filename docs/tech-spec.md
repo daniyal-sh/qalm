@@ -302,6 +302,7 @@ interface InkOverlayProps {
   onLasso(e: { nativeEvent: { polygon: {x:number;y:number}[] } }): void;   // every lasso gesture, taps too (1+ points)
   onPenButton?(e: { nativeEvent: { kind: 'double-tap'|'squeeze'|'button' } }): void;
   onRejectedTouch?(e: { nativeEvent: { reason: string } }): void;
+  onPenSeen?(e: { nativeEvent: {} }): void;     // once per overlay: the first real pen, touching or hovering
 }
 // functions
 QalmInk.renderPdfPage(fileUri: string, pageIndex: number, widthPx: number): Promise<string /*cached png file uri*/>
@@ -322,8 +323,26 @@ web CSS px = 0.2646 mm):
    rule 3 and the multi-touch retraction catch smaller palm edges. The setting is stored by name, not by number. The major axis is
    the full contact length on every platform: Android `getTouchMajor`, iOS `2 × majorRadius` (not reduced by `majorRadiusTolerance`),
    web the larger of the pointer's `width` / `height`.
-3. Touches within 600 ms of pen activity, or below or beside the pen on the `hand` side, are rejected.
-4. An OS cancel (`ACTION_CANCEL` / `FLAG_CANCELED` / `touchesCancelled`) retracts the in-progress stroke.
+3. Touches within 600 ms of pen activity, or below or beside (±10 mm) the pen on the `hand` side within **2 s** of pen
+   activity, are rejected.
+4. An OS cancel (`ACTION_CANCEL` / `FLAG_CANCELED` / `touchesCancelled`) retracts the in-progress stroke, as does a contact
+   that grows into a palm.
+
+**"Pen and finger" (`drawWith: 'any'`):** one finger draws; two fingers pan and pinch-zoom (the editor's RNGH pinch). The palm rules
+above still apply, and a rejected palm never counts as a finger. A second finger landing **within 150 ms** of the first, or before
+the first has travelled **3 mm**, retracts that half-started stroke (`multi-touch`); later, the stroke was real: it is kept, ending
+where the second finger landed, and the fingers go on to pan. Until every finger lifts, no finger draws.
+- Web / Electron: the canvas is `touch-action: none`, so `twoFingerPan.ts` scrolls the nearest scroll views by the fingers' midpoint
+  and flings after they lift (velocity over the last 100 ms, decaying 0.998 per ms like UIScrollView). Fingers are tracked
+  window-wide, so a second finger on another page or between pages counts.
+- Android: the finger stroke holds the ancestor ScrollViews still; a second finger releases them (their own scroll and fling).
+- iOS: while a finger draws, the ancestor scroll views' pan needs two touches (`minimumNumberOfTouches`, restored when the touches
+  end) and may run alongside the ink recognizer, so two fingers scroll natively with momentum.
+
+**Auto-pick:** until the user chooses in Settings (`drawWithAuto`), `drawWith` is "pen and finger" on a device that has never shown
+a real pen (web pointerType `'pen'`, Android `TOOL_TYPE_STYLUS`, iOS `.pencil`) and "pen only" once one is seen (`penSeen`, in the
+local prefs). The switch shows a one-time toast: "Pen detected: fingers now scroll. Change in Settings." Prefs saved before this
+have no `drawWithAuto`: a saved "pen" counts as a choice, a saved "any" as auto. Settings shows whether the mode was auto-picked.
 
 Hover (where supported) shows a brush-size preview. The pen button pressed while hovering, a squeeze or a double-tap fires `onPenButton`,
 and the app switches to the eraser (or the last tool, per Settings). On every platform the barrel button (or eraser end) held while the pen

@@ -52,6 +52,8 @@ export interface EditorCtx {
   setTool(t: ToolId): void;
   onPenButton(): void;
   input: InputPrefs;
+  /** An overlay saw a real pen (auto-picks "draw with"). */
+  onPenSeen(): void;
   undo: CrossPageUndo;
   /** One UndoManager per page doc, kept while the doc stays in memory (so history survives scrolling). */
   undoManagerFor(pageId: string, page: Page): Y.UndoManager;
