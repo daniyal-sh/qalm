@@ -85,10 +85,11 @@ export function magicLinkEmail(to: string, link: string, code: string | null = n
   const button = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td class="q-btn" align="center" style="background:${T.accent};border-radius:8px">
 <a href="${l}" class="q-btn" style="display:block;padding:12px 20px;font-size:15px;line-height:20px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;background:${T.accent}">Sign in to qalm</a>
 </td></tr></table>`;
+  const line = `<td width="50%" valign="middle"><div class="q-line2" style="height:1px;line-height:1px;font-size:1px;background:${T.line2}">&nbsp;</div></td>`;
   const divider = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-<td style="height:1px;background:${T.line2}" class="q-line2"></td>
+${line}
 <td style="padding:0 12px;white-space:nowrap;font-size:12px;line-height:16px;color:${T.faint}" class="q-faint">or enter this code</td>
-<td style="height:1px;background:${T.line2}" class="q-line2"></td>
+${line}
 </tr></table>`;
   const codeRows = code
     ? row(divider, 24) + row(codeBox(code)) + row(small('The link and the code each work once and expire in 15 minutes.', true), 10)
