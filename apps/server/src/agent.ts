@@ -147,6 +147,24 @@ export class AgentHub {
     this.wakeAll();
   }
 
+  /**
+   * THE check for every Lecture-mode output to MCP (docs/lecture-mode.md §7): live transcript lines in `wait`,
+   * `read("L2")`, the outline's lecture lines and `lecture L2 recording` in the session list. Nothing about a lecture
+   * reaches an agent unless this is true at the moment it goes out (re-checked after every await).
+   *
+   * Today: AI access on and sharing not paused. The Play / Pause AI work (a central `isLive()`: one of the student's
+   * devices is playing AI for this notebook) plugs in here by making the body `return this.isLive();`.
+   */
+  lectureLive(): boolean {
+    return this.aiAccess() && !this.paused();
+  }
+
+  /** Throws what the agent should see when `lectureLive()` is false. */
+  private requireLectureLive(): void {
+    if (!this.aiAccess()) throw new Error(AI_OFF);
+    if (!this.lectureLive()) throw new Error(PAUSED);
+  }
+
   // ---- presence: who is following this notebook ----
 
   /** Agent calls touch `presence` (kv: clientId → name, last call); pending waits are counted in memory. */
@@ -261,6 +279,7 @@ export class AgentHub {
 
   /** `lecture L2 recording 12:40` for the session list, or null when nothing records. */
   liveLecture(): string | null {
+    if (!this.lectureLive()) return null;
     const labels = this.lectureLabels();
     const live = Object.entries(this.lectures())
       .filter(([, l]) => l.state !== 'stopped')
@@ -272,6 +291,7 @@ export class AgentHub {
   }
 
   private hasTranscriptNews(st: AgentState): boolean {
+    if (!this.lectureLive()) return false;
     return Object.entries(this.lectures()).some(([sid, l]) => l.count > (st.lect?.[sid] ?? 0));
   }
 
@@ -294,10 +314,12 @@ export class AgentHub {
 
   /** `read("L2")` / `read("L2@10:00")`: transcript and crops interleaved by time. */
   private async readLecture(label: string, from: number): Promise<AgentResult> {
+    this.requireLectureLive();
     const sid = resolveLecture(this.lectureLabels(), label);
     if (!sid || !this.lectures()[sid]) throw new Error(`No lecture ${label}; read("outline") lists them`);
     const docId = lecDocId(this.notebookId, sid);
     const d = await room(this.env, docId).lectureData(docId);
+    this.requireLectureLive();
     const parts = encodeLectureRead(label, d.meta, d.transcript, d.crops as LectureCrop[], from);
     const text = parts.flatMap((p) => ('text' in p ? [p.text] : [])).join('\n');
     return { text, svg: null, changed: false, parts };
@@ -305,6 +327,7 @@ export class AgentHub {
 
   /** Outline lines for the notebook's sessions (`L2 2026-11-24 47:10 stopped`). */
   private lectureOutline(): string[] {
+    if (!this.lectureLive()) return [];
     const labels = this.lectureLabels();
     return Object.entries(this.lectures())
       .sort((a, b) => a[1].startedAt - b[1].startedAt)
@@ -395,7 +418,9 @@ export class AgentHub {
     const prev: Record<string, InkSeen | undefined> = {};
     for (const id of Object.keys(pages)) prev[id] = this.r.kvGet<InkSeen>(inkKey(clientId, id));
     const u = encodeQinkUpdate(nb, pages, regions, prev, { session, rev: st.rev + 1, client: clientId, asks, threads, seen: st.seen });
-    const news = await this.transcriptNews(st);
+    const news = this.lectureLive() ? await this.transcriptNews(st) : { lines: [], lect: st.lect ?? {} };
+    // Lecture lines only go out while lectureLive() holds after the await, too (nothing is saved, so they wait).
+    if (news.lines.length && !this.lectureLive()) return { retryAt: Infinity };
     if (news.lines.length) u.text = `${u.text}\n${news.lines.join('\n')}`;
     this.r.kvPut('regions', regions);
     this.r.kvPut('threads', threads);

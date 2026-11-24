@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { LectureDoc, lectureDocId } from '@qalm/core';
+import { LectureDoc, Notebook, lectureDocId } from '@qalm/core';
 import { YClient, call, signIn, stroke, ticket, until, type Tokens } from './helpers';
 import { connectAgent, notebook, serverDoc, textOf, tool } from './mcp-helpers';
 import { sessionOf } from '../src/grants';
@@ -173,6 +173,41 @@ describe('lecture crops and MCP', () => {
     expect(lines[2]).toMatch(/^00:04 R\d+ \[1\] p1 @84,168 169x34$/);
     expect(lines[3]).toMatch(/^00:09 R\d+ \[1\] p1 @\d+,\d+ \d+x\d+ -1$/);
     expect((await tool(token, 'read', { ref: 'L9', s })).isError).toBe(true);
+    c.close();
+    n.nbc.close();
+    n.pgc.close();
+  });
+
+  it('sends nothing about a lecture while sharing is paused (the lectureLive gate)', async () => {
+    const email = 'lec-gate@example.com';
+    const t = await signIn(email);
+    const n = await notebook(t, 'lecgate', 'Gated');
+    const token = await connectAgent(email, { comment: true, transcribe: true });
+    const s = sessionOf('lecgate');
+    const { c, lec } = await startLecture(t, 'lecgate', 'sess1');
+    await until(async () => (await lecOnServer('lecgate', 'sess1')).meta().state === 'recording');
+    expect(textOf(await tool(token, 'wait'))).toContain('lecture L1 recording');
+    const first = tool(token, 'wait', { s }); // the agent is following from here
+    await pause(100);
+
+    n.nb.setMeta({ aiPaused: true });
+    await until(async () => new Notebook(await serverDoc('nb:lecgate')).meta().aiPaused === true);
+    lec.addTranscript([{ t0: 1000, t1: 2000, text: 'said while paused', src: 'cloud' }]);
+    await until(async () => (await lecOnServer('lecgate', 'sess1')).transcriptCount() === 1);
+    expect(textOf(await first)).toBe(`#q s=${s} paused`);
+    // Not in the session list, no read, no outline lines.
+    const list = textOf(await tool(token, 'wait'));
+    expect(list).toContain(`s=${s} "Gated"`);
+    expect(list).not.toContain('lecture');
+    const read = await tool(token, 'read', { ref: 'L1', s });
+    expect(read.isError).toBe(true);
+    expect(textOf(read)).toContain('paused sharing');
+
+    // Resumed: what was said meanwhile goes out with the next update, as ink written while paused does.
+    const resumed = tool(token, 'wait', { s });
+    await pause(100);
+    n.nb.setMeta({ aiPaused: false });
+    expect(textOf(await resumed)).toBe([`#q s=${s} r=1`, 'L1 00:01 "said while paused"'].join('\n'));
     c.close();
     n.nbc.close();
     n.pgc.close();

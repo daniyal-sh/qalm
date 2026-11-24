@@ -170,6 +170,11 @@ Still four tools (`wait`, `read`, `transcribe`, `comment`); lecture data is read
   the transcript and crops **interleaved by time**: text lines `03:12 "…"` and crop lines `03:15 R40 p2 @120,300
   260x80 +5`, with the crops' images as image blocks in the same order. One read covers 10 minutes and at most 8
   images; it ends with `more: read("L2@10:00")`.
+- **Only while shared:** every lecture output to an agent (live lines, the session list's `lecture L2 …`, outline
+  lines, `read("L2")`) goes through one check, `AgentHub.lectureLive()` in `apps/server/src/agent.ts`, at the moment it
+  goes out (and again after each await). Today that is AI access on and sharing not paused; with Play / Pause AI it is
+  the central `isLive()`. Lines spoken while not live are not dropped: like ink written meanwhile, they go out with
+  the next update once the notebook is live again.
 
 ## 8. Export
 
