@@ -2,7 +2,7 @@ import { createUndoManager, Page, UNITS_PER_MM, type InkPoint, type StrokeItem }
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 
-import { eraseAlong, makeStroke, scribbleErase } from '../src/editor/items';
+import { bakeErase, cloneItems, eraseAlong, makeStroke, scribbleErase } from '../src/editor/items';
 import { loadInputPrefs } from '../src/lib/inputPrefs';
 import type { InputPrefs } from '../src/theme/ThemeProvider';
 import { CrossPageUndo } from '../src/editor/undoStack';
@@ -59,6 +59,40 @@ describe('the eraser in the editor', () => {
     expect((page.item('s') as StrokeItem).points).toHaveLength(line('s', 0, 200, 100).points.length);
     undo.redo();
     expect(page.items()).toHaveLength(3);
+  });
+
+  it("partial: the pen-up bakes the cut into real points, inside the gesture's one undo step", () => {
+    const { undo, page, tick } = setup();
+    page.addItem(line('s', 0, 200, 100));
+    const cut = new Set<string>();
+    for (const x of [0, 10, 20]) {
+      eraseAlong(page, undo, [{ x, y: 95 }, { x: x + 10, y: 105 }], 6, 'partial', ids, cut);
+      tick(16);
+    }
+    expect([...cut]).toEqual(['s']);
+    const items = page.doc.getMap<Y.Map<unknown>>('items');
+    expect(items.get('s')!.has('cutFrom')).toBe(true);
+    const kept = (page.item('s') as StrokeItem).points.map((q) => q.x);
+    bakeErase(page, undo, cut);
+    expect(cut.size).toBe(0);
+    expect(items.get('s')!.has('cutFrom')).toBe(false);
+    expect((page.item('s') as StrokeItem).points.map((q) => q.x)).toEqual(kept);
+    undo.undo(); // one undo: the cuts and the bake
+    expect((page.item('s') as StrokeItem).points).toHaveLength(line('s', 0, 200, 100).points.length);
+    // The next undo takes back adding the line: that one undo covered the whole gesture, bake included.
+    undo.undo();
+    expect(page.items()).toEqual([]);
+    undo.redo();
+    undo.redo();
+    expect((page.item('s') as StrokeItem).points.map((q) => q.x)).toEqual(kept);
+    expect(items.get('s')!.has('cutFrom')).toBe(false);
+  });
+
+  it('copies of a piece are new ink (no splitFrom)', () => {
+    const piece = { ...line('p', 0, 20, 10), splitFrom: 's' };
+    const [copy] = cloneItems([piece], 5, 5, ids) as [StrokeItem];
+    expect(copy.splitFrom).toBeUndefined();
+    expect(copy.id).not.toBe('p');
   });
 
   it('whole stroke: removes what it touches', () => {

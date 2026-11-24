@@ -525,14 +525,24 @@ that ink is all deleted, the thread shows only in the panel ("Ink removed").
   within the eraser radius plus half the stroke width, so the pieces' round ends just touch the eraser and the gap is as
   wide as the eraser. Cuts are found by sampling near the eraser and bisection (one interpolated point per cut); every
   other point is the stroke's own, so pieces keep pressure, tilt and time, and the tool, colour, width, style, smoothing
-  and `createdAt`. Pieces under ~0.5 units are dropped. **The longest piece keeps the stroke's id**: it is stored as a
-  `cut` of its points (the fractional point indexes `[from, to]` it now runs between, applied when the stroke is read;
-  `geometry/cut.ts`), so a rub writes two numbers rather than the points again (one 50-move rub along a 1000-point
-  stroke grows the doc by ~2 KB, against ~0.9 MB when every move re-created the pieces), and writing new points (a
-  move) ends the cut. Only the other pieces are new strokes, with `splitFrom` naming the stroke as drawn (a timeline
-  can follow it). Two devices at once: a delete of the stroke elsewhere keeps it deleted (only a split-off piece can
-  remain); a move elsewhere (which writes `points`) and a split (which writes `cut`) both apply; two splits keep one
-  stroke with one device's cut, plus each device's new pieces (some ink may show twice, never the whole stroke). **Highlighters split too. Shapes are erased whole** (they are
+  and `createdAt`. Pieces under ~0.5 units are dropped. **The longest piece keeps the stroke's id**; only the other
+  pieces are new strokes, with `splitFrom` naming the stroke as drawn (a timeline can follow it; copies drop it).
+  - **While the eraser is down** the kept piece is its stored points plus a cut: `cutFrom` / `cutTo`, fractional point
+    indexes (`geometry/cut.ts`), each written only when that end moves and tagged with the stroke's points version
+    `pv`. A rub writes a few bytes, not the points again; two devices rubbing different ends both apply.
+  - **When the pen lifts** (the overlay's last `onErase` has `final: true`; or 400 ms after the last segment if it
+    never comes) the app **bakes** the cut (`Page.bakeCuts`): the kept points are written once, the cut keys go and
+    `pv` changes, in the gesture's undo step (one undo still restores the stroke whole). So builds and servers that
+    don't know about cuts see the right ink and box. A 50-move rub along a 1000-point stroke grows the doc by ~0.5 KB
+    of cuts plus ~12 KB for the bake, against ~907 KB when every move re-created the pieces.
+  - **Moves, turns and resizes** (`Page.transformItems`) transform the stored points and keep the cut and `pv` (every
+    index stays), so a cut from another device lands on the same ink. Replacing a stroke's points any other way changes
+    `pv`; a cut end written against older points is then ignored, never applied to the wrong ink.
+  - **Two devices at once:** a delete stays a delete (only a piece split off before the delete arrived can remain); a
+    move and a cut both apply; two cuts of different ends both apply before either bakes. Two bakes of one stroke are
+    last-writer-wins on its points, so one device's erase of that piece can be lost (never wrong ink).
+  - **Deploying:** an older server core reads a cut stroke whole until it is baked, so agents could see erased ink
+    for that moment: deploy the server before shipping an app with this. **Highlighters split too. Shapes are erased whole** (they are
   geometric, so a piece of a rectangle isn't a rectangle); text boxes and images are never erased. The radius is the
   eraser size (4 / 10 / 22 units). Each overlay `onErase` segment is one `applyErase` transaction; the app merges a
   gesture's segments into one undo entry (`CrossPageUndo.merging('erase')`), so **one undo restores the strokes whole**.
@@ -553,9 +563,12 @@ that ink is all deleted, the thread shows only in the panel ("Ink removed").
      at most **3 s** long.
   2. **It covers ink** (`scribbleTargets`): strokes and shapes with **≥ 60% of their points** inside the scribble's convex
      hull (grown by 1 mm plus half the pen width) that the **middles of ≥ 3 legs cross** (a leg is the path between
-     two reversals, less **1.2 mm** at each end where it turns; marks under **3 mm** across need one). Ink whose box,
-     grown by **1.5 mm**, holds the whole scribble is never a target. So shading inside a box or circle keeps the
-     outline: the hatching turns at the outline, so no leg's middle crosses it. Text and images are never deleted.
+     two reversals, less **1.2 mm** at each end where it turns; marks under **3 mm** across need one). Two rules for
+     **closed outlines** (snapped boxes, circles and polygons, or strokes whose ends meet within 20% of their size):
+     one whose box, grown by **0.4 × its shorter side (1.5–3 mm)**, holds the whole scribble is never a target (a
+     checkbox ticked with a zig-zag that overshoots it); and when **≥ 60% of the scribble's turns lie within 1.5 mm**
+     of an outline whose grown box holds ≥ 80% of them, the scribble is shading and **deletes nothing**, not even
+     ink written inside (a "2" in a shaded box). Text and images are never deleted.
   A scribble over empty paper (or shading) covers nothing and stays ink. Otherwise the covered ink is removed in one
   transaction (one undo brings it back), the scribble is never added (the overlay drops it through `committedIds`, as
   a hand-off), and the deleted ink fades out over 320 ms (`EraseFade`; at once with reduced motion). Thresholds are in
@@ -564,7 +577,8 @@ that ink is all deleted, the thread shows only in the panel ("Ink removed").
   w, www, MMM, NNN, ZZZ, eee, lll, sine, 8, spiral, a slow spring, a sparse sawtooth, a double underline, a tremor;
   2.5–8 mm at 25–90 mm/s, plus tall fast coils at 120–260 mm/s), and shading inside a 30 × 15 mm box and a 10 mm circle
   (hand-drawn and snapped; 0.6 / 1 / 1.5 mm apart at 80 / 150 / 200 mm/s; turning at the outline or overshooting it by
-  1 mm; diagonal) that must keep the outline, in `packages/core/test/scribble.test.ts`.
+  1 mm; diagonal) that must keep the outline, 6–8 mm checkboxes ticked 2 mm past their sides, and a "2" inside a
+  shaded box, in `packages/core/test/scribble.test.ts`.
 - **Limits:** a vertical scratch-out with legs further apart than ~0.4 × their length (e.g. 6 mm legs moving on 1.5 mm
   each) is kept as ink; scribble back and forth along the words instead. Circular scribbles ("@@@") aren't detected.
 

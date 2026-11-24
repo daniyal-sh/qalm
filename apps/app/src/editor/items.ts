@@ -92,17 +92,38 @@ export type EraserMode = 'stroke' | 'partial';
  * One eraser segment (the overlay's onErase). Every segment of one gesture joins one undo entry, so one undo brings
  * back everything the gesture erased (a split stroke as it was). Returns whether anything changed.
  */
-export function eraseAlong(page: Page, undo: Pick<CrossPageUndo, 'merging'>, path: { x: number; y: number }[], radius: number, mode: EraserMode, makeId: () => string = newIdFallback): boolean {
+export function eraseAlong(
+  page: Page,
+  undo: Pick<CrossPageUndo, 'merging'>,
+  path: { x: number; y: number }[],
+  radius: number,
+  mode: EraserMode,
+  makeId: () => string = newIdFallback,
+  /** Collects the strokes left with a cut, for `bakeErase` when the gesture ends. */
+  cut?: Set<string>,
+): boolean {
   if (mode === 'partial') {
     const plan = planPartialErase(page.items(), path, radius, makeId);
     if (emptyPlan(plan)) return false;
     undo.merging('erase', () => page.applyErase(plan));
+    if (cut) for (const s of plan.split) if (s.keep) cut.add(s.id);
     return true;
   }
   const ids = hitTestErase(page.items(), path, radius);
   if (!ids.length) return false;
   undo.merging('erase', () => page.removeItems(ids));
   return true;
+}
+
+/**
+ * The end of a partial-erase gesture: the strokes it left with a cut get their kept points written once (`bakeCuts`),
+ * in the gesture's undo step, so one undo still restores everything and readers without cuts see the right ink.
+ */
+export function bakeErase(page: Page, undo: Pick<CrossPageUndo, 'merging'>, cut: Set<string>): void {
+  if (!cut.size) return;
+  const ids = [...cut];
+  cut.clear();
+  undo.merging('erase', () => page.bakeCuts(ids));
 }
 
 /**
@@ -178,7 +199,11 @@ export function dropEmptyText(page: Page, undo: Pick<CrossPageUndo, 'merging'>, 
 
 /** Copies of items with fresh ids, offset by (dx, dy). */
 export function cloneItems(items: Item[], dx: number, dy: number, newId: () => string = newIdFallback): Item[] {
-  return items.map((it) => ({ ...transformItem(it, moveBy(dx, dy)), id: newId() }) as Item);
+  return items.map((it) => {
+    const copy = { ...transformItem(it, moveBy(dx, dy)), id: newId() } as Item & { splitFrom?: string };
+    delete copy.splitFrom; // a copy is new ink, not a piece of anything
+    return copy as Item;
+  });
 }
 
 /** The topmost text box under (x, y), turned ones too. */

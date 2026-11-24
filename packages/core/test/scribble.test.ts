@@ -219,3 +219,57 @@ describe('scribble to erase: shading inside an outline keeps the outline', () =>
     expect(detectScribble([boxStroke(), ...w], over, 1.8)?.sort()).toEqual(w.map((x) => x.id).sort());
   });
 });
+
+// ---- two real cases from the re-check of PR #68: ticking a checkbox, shading a box with a digit in it ----
+describe('scribble to erase: filling a checkbox, shading around a digit', () => {
+  const cases: [string, Item[], [number, number][], number][] = [];
+  for (const size of [6, 7, 8]) {
+    const u = UNITS_PER_MM;
+    const stroke = strokeOf('check', trace([[0, 0], [size, 0], [size, size], [0, size], [0, 0]], { at: AT, speed: 40 }));
+    const shape: Item = { id: 'check', type: 'shape', kind: 'rect', pts: [[AT[0], AT[1]], [AT[0] + size * u, AT[1]], [AT[0] + size * u, AT[1] + size * u], [AT[0], AT[1] + size * u]], color: '#000', width: 1.8 };
+    for (const gap of [0.8, 1.2]) {
+      for (const speed of [120, 200]) {
+        // A zig-zag over the box, 2 mm past its sides (and, in the second, 1 mm past its top and bottom too).
+        const across = hatch(0.5, size - 0.5, gap, () => -2, () => size + 2);
+        const past = hatch(-1, size + 1, gap, () => -2, () => size + 2);
+        for (const [label, pl] of [['2 mm past its sides', across], ['2 mm past its sides, 1 mm past top and bottom', past]] as const) {
+          cases.push([`${size} mm checkbox (stroke) ticked ${label}, ${gap} mm apart, ${speed} mm/s`, [stroke], pl, speed]);
+          cases.push([`${size} mm checkbox (shape) ticked ${label}, ${gap} mm apart, ${speed} mm/s`, [shape], pl, speed]);
+        }
+      }
+    }
+  }
+  // A "2" written inside the 30 × 15 mm box, then the box shaded (turning at its sides).
+  const two = handwriting('two', '2', AT[0] + 12 * UNITS_PER_MM, AT[1] + 3 * UNITS_PER_MM, 25);
+  for (const speed of [80, 150, 200]) {
+    for (const gap of [0.6, 1, 1.5]) {
+      cases.push([`a 2 inside a shaded box (stroke), ${gap} mm apart, ${speed} mm/s`, [boxStroke(), ...two], hatch(gap, 15 - gap, gap, () => 0, () => 30), speed]);
+      cases.push([`a 2 inside a shaded box (shape), ${gap} mm apart, ${speed} mm/s`, [boxShape(), ...two], hatch(gap, 15 - gap, gap, () => 0.3, () => 29.7), speed]);
+    }
+  }
+
+  it('the digit is inside the box and the shading covers it', () => {
+    const b = span(two);
+    expect(b.x).toBeGreaterThan(AT[0]);
+    expect(b.w).toBeLessThan(15);
+  });
+
+  for (const [name, items, pl, speed] of cases) {
+    it(name, () => {
+      const pts = trace(pl, { at: AT, speed, seed: 5 });
+      expect(scribbleTargets(items, pts, 1.8)).toEqual([]);
+      expect(detectScribble(items, pts, 1.8)).toBeNull();
+    });
+  }
+
+  it('a checkbox struck through well past it, and a 2 scribbled over on its own, are still erased', () => {
+    const size = 7;
+    const check = strokeOf('check', trace([[0, 0], [size, 0], [size, size], [0, size], [0, 0]], { at: AT, speed: 40 }));
+    const strike = trace(zigzag(size + 10, 0.8, 10, 0.1), { at: [AT[0] - 5 * UNITS_PER_MM, AT[1]], speed: 200 });
+    expect(scribbleShape(strike).ok).toBe(true);
+    expect(detectScribble([check], strike, 1.8)).toEqual(['check']);
+    const s = span(two);
+    const over = trace(zigzag(s.w + 3, (s.h + 2) / 10, 10), { at: [s.x - 1.5 * UNITS_PER_MM, s.y - UNITS_PER_MM], speed: 160 });
+    expect(detectScribble([boxStroke(), ...two], over, 1.8)?.sort()).toEqual(two.map((x) => x.id).sort());
+  });
+});

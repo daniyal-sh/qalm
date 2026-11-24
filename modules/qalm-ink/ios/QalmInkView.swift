@@ -800,12 +800,13 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private func emitErase(_ a: Active, isFinal: Bool) {
     let n = a.points.count
     if n == 0 { return }
-    if n <= a.erasedUpTo { return }
+    // The last segment always goes (the app bakes a partial erase on it), even with no new points.
+    if n <= a.erasedUpTo && !isFinal { return }
     // Overlap by one point so consecutive segments join.
-    let from = max(0, a.erasedUpTo - 1)
+    let from = max(0, min(a.erasedUpTo, n) - 1)
     let path: [[String: Any]] = a.points[from..<n].map { ["x": $0.x, "y": $0.y] }
     a.erasedUpTo = n
-    onErase(["path": path])
+    onErase(isFinal ? ["path": path, "final": true] : ["path": path])
   }
 
   /// How long the pen stayed within `heldRadius` page units of where it lifted.

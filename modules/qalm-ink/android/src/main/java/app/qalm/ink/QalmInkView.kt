@@ -387,7 +387,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     if (l.points.size - from < (if (final) 1 else 2)) return
     val path = l.points.subList(from, l.points.size).map { mapOf("x" to it.x, "y" to it.y) }
     l.erasedUpTo = l.points.size
-    onErase(mapOf("path" to path))
+    onErase(if (final) mapOf("path" to path, "final" to true) else mapOf("path" to path))
   }
 
   // ---- hover (brush preview) ----

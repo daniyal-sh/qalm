@@ -56,6 +56,8 @@ export interface ShapePreview {
 }
 export interface EraseEvent {
   path: { x: number; y: number }[];
+  /** The pen (or finger, mouse) lifted: this is the gesture's last segment (the app bakes a partial erase then). */
+  final?: boolean;
 }
 export interface LassoEvent {
   /**

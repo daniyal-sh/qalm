@@ -49,8 +49,21 @@ export const SCRIBBLE = {
   minCrossLegs: 3,
   legTrimMm: 1.2,
   smallMm: 3,
-  /** Never a target: ink whose box, grown by this, holds the whole scribble (an outline being shaded inside). */
-  enclosesMm: 1.5,
+  /**
+   * Never a target: a closed outline whose box, grown by `enclosesShare` of its shorter side (kept within
+   * `enclosesMm`), holds the whole scribble: it's being filled in, like a checkbox ticked with a zig-zag that overshoots
+   * it a little.
+   */
+  enclosesShare: 0.4,
+  enclosesMm: [1.5, 3],
+  /**
+   * Shading, so nothing is a target: `shadeShare` of the scribble's turns lie within `shadeTurnMm` of a closed
+   * outline whose box (grown as above) holds `surroundShare` of them. Shading turns at the outline it fills, a scribble
+   * beyond the ink it rubs out; so shading a box never erases what's written inside it.
+   */
+  shadeTurnMm: 1.5,
+  shadeShare: 0.6,
+  surroundShare: 0.8,
 } as const;
 
 const mm = (v: number) => v * UNITS_PER_MM;
@@ -219,20 +232,26 @@ export function scribbleTargets(items: readonly Item[], points: readonly Pick<In
     (b, [x, y]) => [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)],
     [Infinity, Infinity, -Infinity, -Infinity],
   );
-  const pad = mm(SCRIBBLE.enclosesMm);
-  // Mostly inside first (cheap), and not an outline around the whole scribble.
+  const { legs, turns } = scribbleLegs(raw);
+  const pathOf = (it: Item): P[] =>
+    it.type === 'stroke' ? it.points.map((q): P => [q.x, q.y]) : it.type === 'shape' ? shapePolylines(it).flatMap((pl) => resample(pl, mm(1))) : [];
+  // Filling in an outline (its turns along it) is shading: nothing is a target, not even ink written inside it.
+  for (const it of items) {
+    if (isOutline(it) && isShadingInside(it, pathOf(it), turns)) return [];
+  }
+  // Mostly inside (cheap), and not an outline around the whole scribble.
   const inside: Item[] = [];
   for (const it of items) {
-    const pts: P[] = it.type === 'stroke' ? it.points.map((q): P => [q.x, q.y]) : it.type === 'shape' ? shapePolylines(it).flatMap((pl) => resample(pl, mm(1))) : [];
+    const pts = pathOf(it);
     if (!pts.length) continue;
     const b = itemBBox(it);
-    if (b[0] - pad <= sx0 && b[1] - pad <= sy0 && b[2] + pad >= sx1 && b[3] + pad >= sy1) continue;
+    const pad = enclosePad(b);
+    if (isOutline(it) && b[0] - pad <= sx0 && b[1] - pad <= sy0 && b[2] + pad >= sx1 && b[3] + pad >= sy1) continue;
     const n = pts.filter((p) => pointInPolygon(p, h)).length;
     if (n >= SCRIBBLE.minCovered * pts.length) inside.push(it);
   }
   if (!inside.length) return [];
   // Then whether the scribble really crosses it: the middles of enough legs pass over it.
-  const legs = legMiddles(raw);
   const out: string[] = [];
   for (const it of inside) {
     const b = itemBBox(it);
@@ -247,23 +266,71 @@ export function scribbleTargets(items: readonly Item[], points: readonly Pick<In
 }
 
 /**
- * The scribble's legs (between its sharp reversals, as `scribbleShape` finds them), each without its ends: where a leg
- * turns it may touch the ink around it (shading turns at the outline it fills), but its middle crosses what it rubs out.
+ * A closed outline (a box, a circle, a checkbox; snapped or drawn by hand, its ends meeting): what shading fills in.
+ * A digit or a word under a tight scribble may sit just as snugly in the scribble's box, but it isn't one.
  */
-function legMiddles(raw: readonly P[]): { x: number; y: number }[][] {
+function isOutline(it: Item): boolean {
+  if (it.type === 'shape') return it.kind !== 'line' && it.kind !== 'arrow' && it.kind !== 'double-arrow';
+  if (it.type !== 'stroke' || it.points.length < 3) return false;
+  const a = it.points[0]!;
+  const z = it.points[it.points.length - 1]!;
+  const [x0, y0, x1, y1] = itemBBox(it);
+  return Math.hypot(z.x - a.x, z.y - a.y) <= Math.max(mm(1.5), 0.2 * Math.hypot(x1 - x0, y1 - y0));
+}
+
+/** How far beyond its box an outline still holds a scribble (`SCRIBBLE.enclosesShare` of its shorter side). */
+function enclosePad(b: readonly number[]): number {
+  const [lo, hi] = SCRIBBLE.enclosesMm;
+  const side = Math.min(b[2]! - b[0]!, b[3]! - b[1]!) / UNITS_PER_MM;
+  return mm(Math.min(hi, Math.max(lo, SCRIBBLE.enclosesShare * side)));
+}
+
+/** Distance from `p` to the polyline `pl`. */
+function distToPath(p: P, pl: readonly P[]): number {
+  if (pl.length === 1) return dist(p, pl[0]!);
+  let m = Infinity;
+  for (let i = 1; i < pl.length; i++) {
+    const a = pl[i - 1]!;
+    const b = pl[i]!;
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+    m = Math.min(m, Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dy * t));
+  }
+  return m;
+}
+
+/** Whether the scribble's `turns` fill in the outline `it` (mostly inside its box, mostly right at its path). */
+function isShadingInside(it: Item, path: readonly P[], turns: readonly P[]): boolean {
+  if (turns.length < SCRIBBLE.minReversals || path.length < 2) return false;
+  const b = itemBBox(it);
+  const pad = enclosePad(b);
+  const within = turns.filter(([x, y]) => x >= b[0] - pad && x <= b[2] + pad && y >= b[1] - pad && y <= b[3] + pad);
+  if (within.length < SCRIBBLE.surroundShare * turns.length) return false;
+  const near = turns.filter((t) => distToPath(t, path) <= mm(SCRIBBLE.shadeTurnMm)).length;
+  return near >= SCRIBBLE.shadeShare * turns.length;
+}
+
+/**
+ * The scribble's turns (its sharp reversals, as `scribbleShape` finds them) and its legs between them, each without
+ * its ends: where a leg turns it may touch the ink around it (shading turns at the outline it fills), but its middle
+ * crosses what it rubs out.
+ */
+function scribbleLegs(raw: readonly P[]): { legs: { x: number; y: number }[][]; turns: P[] } {
   const step = mm(0.4);
   const r = resample(raw, step);
   const k = Math.max(1, Math.round(mm(SCRIBBLE.turnMm) / step));
   const rev = reversals(r, k);
-  const out: { x: number; y: number }[][] = [];
+  const legs: { x: number; y: number }[][] = [];
   for (let i = 1; i < rev.length; i++) {
     const a = rev[i - 1]!;
     const b = rev[i]!;
     const trim = Math.round(mm(SCRIBBLE.legTrimMm) / step);
     if (b - trim - (a + trim) < 1) continue;
-    out.push(r.slice(a + trim, b - trim + 1).map(([x, y]) => ({ x, y })));
+    legs.push(r.slice(a + trim, b - trim + 1).map(([x, y]) => ({ x, y })));
   }
-  return out;
+  return { legs, turns: rev.map((i) => r[i]!) };
 }
 
 /**

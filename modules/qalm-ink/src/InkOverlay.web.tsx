@@ -309,7 +309,7 @@ export function InkOverlay(props: InkOverlayProps) {
       if (live.points.length - from < (final ? 1 : 2)) return;
       const path = live.points.slice(from).map(({ x, y }) => ({ x, y }));
       live.erasedUpTo = live.points.length;
-      propsRef.current.onErase({ nativeEvent: { path } });
+      propsRef.current.onErase({ nativeEvent: final ? { path, final: true } : { path } });
     };
 
     /** Snaps the stroke to a shape if it looks like one (the pen has held still since `holdIdx`). */

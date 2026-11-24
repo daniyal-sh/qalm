@@ -10,7 +10,7 @@ import { useSession, useVersion } from '../state/session';
 import { smoothingLevel } from '../theme/ThemeProvider';
 import { font } from '../theme/tokens';
 import { useEditor } from './context';
-import { adjustLiveShape, commitSnapped, eraseAlong, scribbleErase, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, dropEmptyText, TEXT_LINE_HEIGHT, hitText, typeText, liveShape, makeStroke, pointsBBox, transformPatch } from './items';
+import { adjustLiveShape, bakeErase, commitSnapped, eraseAlong, scribbleErase, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, dropEmptyText, TEXT_LINE_HEIGHT, hitText, typeText, liveShape, makeStroke, pointsBBox } from './items';
 import { EraseFade, type Fading } from './EraseFade';
 import { isAdditive } from './modifiers';
 import { PAPER_ACCENT, SelectionFrame, type LiveEdit } from './SelectionFrame';
@@ -19,6 +19,8 @@ import { commentAnchors, pdfRenderWidth } from './view';
 
 /** A lasso that moved less than this (px) is a tap. */
 const TAP_SLOP_PX = 6;
+/** A partial erase is baked this long after its last segment if the pen-up never arrives (within the undo merge). */
+const BAKE_AFTER_MS = 400;
 /** A tap selects the nearest item within this many px. */
 const TAP_TOLERANCE_PX = 10;
 const DOUBLE_TAP_MS = 450;
@@ -255,6 +257,18 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   // Ink a scribble just deleted, fading out where it was.
   const [fading, setFading] = React.useState<Fading[]>([]);
   const fadeKey = React.useRef(0);
+  // Partial erase: strokes this gesture cut, baked when the pen lifts (the overlay's last onErase), or soon after the
+  // last segment if that never comes (a cancelled touch), within the gesture's undo step.
+  const cutIds = React.useRef(new Set<string>());
+  const bakeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pageRef = React.useRef(page);
+  pageRef.current = page;
+  const bakeNow = React.useCallback(() => {
+    if (bakeTimer.current) clearTimeout(bakeTimer.current);
+    bakeTimer.current = null;
+    if (pageRef.current) bakeErase(pageRef.current, ed.undo, cutIds.current);
+  }, [ed.undo]);
+  React.useEffect(() => () => bakeNow(), [bakeNow]);
   const fadeDone = React.useCallback((key: number) => setFading((f) => f.filter((x) => x.key !== key)), []);
   const rootRef = React.useRef<React.ComponentRef<typeof View>>(null);
   const lastTap = React.useRef<{ id: string; at: number } | null>(null);
@@ -266,13 +280,8 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
     ed.touchPage(info.id);
     mark('qalm:commit-start', { items: sel.length });
     if (edit.kind === 'text') page.updateItem(edit.id, edit.patch as Partial<TextItem>);
-    else
-      page.updateItems(
-        sel.flatMap((id) => {
-          const it = page.item(id);
-          return it ? [[id, transformPatch(it, edit.sim)] as const] : [];
-        }),
-      );
+    // On the stored points: a stroke still being rubbed out (here or elsewhere) keeps its cut on the same ink.
+    else page.transformItems(sel, edit.sim);
     mark('qalm:commit-end', { items: sel.length });
   };
 
@@ -392,7 +401,12 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
           else page.addItem(stroke);
         }}
         onErase={({ nativeEvent: e }) => {
-          if (eraseAlong(page, ed.undo, e.path, t.eraserRadius, t.eraserMode, newId)) ed.touchPage(info.id);
+          if (eraseAlong(page, ed.undo, e.path, t.eraserRadius, t.eraserMode, newId, cutIds.current)) ed.touchPage(info.id);
+          if (e.final) bakeNow();
+          else if (cutIds.current.size) {
+            if (bakeTimer.current) clearTimeout(bakeTimer.current);
+            bakeTimer.current = setTimeout(bakeNow, BAKE_AFTER_MS);
+          }
         }}
         lassoMode={t.lassoMode}
         eraserMode={t.eraserMode}
