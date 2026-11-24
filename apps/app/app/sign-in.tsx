@@ -14,10 +14,28 @@ import { useSession, type Profile } from '../src/state/session';
 import { useTheme } from '../src/theme/ThemeProvider';
 import { Lockup } from '../src/ui/brand';
 import { Button, TextField } from '../src/ui/controls';
+import { Icon, type IconName } from '../src/ui/Icon';
 import { Divider, Panel } from '../src/ui/layout';
+import { Appear } from '../src/theme/motion';
+import { space } from '../src/theme/tokens';
 import { Text } from '../src/ui/Text';
 
 WebBrowser.maybeCompleteAuthSession();
+
+/** A solid tinted note with an icon: what happened, in one line or two. */
+function Note({ tone, icon, children }: { tone: 'good' | 'warn' | 'bad'; icon: IconName; children: React.ReactNode }) {
+  const { c } = useTheme();
+  const fg = c[tone];
+  const bg = tone === 'good' ? c.goodSoft : tone === 'warn' ? c.warnSoft : c.badSoft;
+  return (
+    <Appear distance={4} style={[styles.note, { backgroundColor: bg, borderColor: c.line }]}>
+      <Icon name={icon} size={16} color={fg} />
+      <Text variant="label" style={{ color: fg, flex: 1 }} accessibilityRole={tone === 'bad' ? 'alert' : undefined}>
+        {children}
+      </Text>
+    </Appear>
+  );
+}
 
 const googleClientId = Platform.select({ web: config.googleClientIds.web, ios: config.googleClientIds.ios, android: config.googleClientIds.android });
 
@@ -128,18 +146,14 @@ export default function SignIn() {
           </View>
 
           {!s.serverUrl ? (
-            <View style={[styles.note, { backgroundColor: c.warnSoft, borderColor: c.line }]}>
-              <Text variant="label" tone="warn">
-                This build has no sync server, so notebooks stay on this device.
-              </Text>
-            </View>
+            <Note tone="warn" icon="cloud-off">
+              This build has no sync server, so notebooks stay on this device.
+            </Note>
           ) : sentTo ? (
             <View style={{ gap: 12 }}>
-              <View style={[styles.note, { backgroundColor: c.goodSoft, borderColor: c.line }]}>
-                <Text variant="label" tone="good">
-                  We sent a sign-in link and code to {sentTo}.
-                </Text>
-              </View>
+              <Note tone="good" icon="mail">
+                We sent a sign-in link and code to {sentTo}.
+              </Note>
               <Text tone="muted">Open the link on this device, or enter the 6-digit code from the email. You can also paste the link here.</Text>
               <TextField
                 value={link}
@@ -186,9 +200,9 @@ export default function SignIn() {
           )}
 
           {err ? (
-            <Text variant="label" tone="bad" accessibilityRole="alert">
+            <Note tone="bad" icon="alert-circle">
               {err}
-            </Text>
+            </Note>
           ) : null}
 
           <Divider />
@@ -201,7 +215,7 @@ export default function SignIn() {
 
 const styles = StyleSheet.create({
   wrap: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
-  card: { width: '100%', maxWidth: 440, padding: 24, gap: 20 },
-  note: { padding: 12, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth },
+  card: { width: '100%', maxWidth: 420, padding: space.xxl, gap: space.xl },
+  note: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: space.md, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth },
   or: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4 },
 });

@@ -10,8 +10,11 @@ const css = `
 :root{${vars(T)}}
 @media (prefers-color-scheme: dark){:root{${vars(D)}}}
 *{box-sizing:border-box}
-body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:15px/1.45 ${BRAND_FONT_STACK};display:grid;place-items:center;padding:24px 16px;-webkit-font-smoothing:antialiased}
-.card{width:min(420px,100%);background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:24px}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:15px/1.45 ${BRAND_FONT_STACK};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px 16px;-webkit-font-smoothing:antialiased}
+.card{width:min(420px,100%);background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:28px 24px 24px;animation:rise .2s cubic-bezier(.2,0,0,1) both}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.brand{margin:0;font-size:12px;color:var(--faint)}
+.brand b{font-weight:600;color:var(--muted);letter-spacing:-.02em}
 .logos{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:16px}
 .av{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:#fff;font-weight:600;font-size:16px;background:var(--assistant)}
 .mark{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--line)}
@@ -20,8 +23,9 @@ body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:15px/1
 h1{margin:0 0 4px;font-size:20px;font-weight:600;letter-spacing:-.02em;text-align:center}
 .sub{margin:0 0 16px;text-align:center;color:var(--muted);font-size:14px}
 .who{font-size:12px;color:var(--muted);text-align:center;margin:-8px 0 16px}
-.warn{background:var(--warn-soft);color:var(--warn);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
-.err{background:var(--bad-soft);color:var(--bad);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+.warn{background:var(--warn-soft);color:var(--warn);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+.err{background:var(--bad-soft);color:var(--bad);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+.detail{font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;color:var(--faint);text-align:center;margin:-8px 0 0}
 .label{font-size:12px;color:var(--muted);margin:12px 0 4px}
 .list{max-height:260px;overflow:auto;margin:0 -4px;padding:0 4px}
 .ck{display:flex;align-items:center;gap:10px;min-height:44px;padding:4px 2px;cursor:pointer}
@@ -39,13 +43,20 @@ h1{margin:0 0 4px;font-size:20px;font-weight:600;letter-spacing:-.02em;text-alig
 .info{display:flex;justify-content:space-between;align-items:center;min-height:52px;border-top:1px solid var(--line-2)}
 .info small{display:block;color:var(--muted);font-size:12px}
 .foot{display:flex;gap:8px;margin-top:16px}
-button{font:inherit;font-weight:600;height:44px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);flex:1;cursor:pointer}
+button{font:inherit;font-weight:600;height:44px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);flex:1;cursor:pointer;transition:background-color .12s,opacity .12s,transform .12s}
+button:hover{background:var(--surface-2)}
+button:active{background:var(--soft)}
 button.p{background:var(--accent);border-color:var(--accent);color:#fff}
-button:disabled{opacity:.5;cursor:default}
-a.btn{display:flex;align-items:center;justify-content:center;flex:1;height:44px;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;text-decoration:none}
-input[type=email]{width:100%;height:44px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;padding:0 12px}
+button.p:hover{opacity:.92}
+button.p:active{opacity:.84}
+button:disabled,button:disabled:hover{opacity:.45;cursor:default;background:var(--surface)}
+button.p:disabled,button.p:disabled:hover{background:var(--accent)}
+a.btn{display:flex;align-items:center;justify-content:center;flex:1;height:44px;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;text-decoration:none;transition:opacity .12s}
+a.btn:hover{opacity:.92}
+input[type=email]{width:100%;height:44px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;padding:0 12px;transition:border-color .12s,box-shadow .12s}
+input[type=email]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-line)}
 .fine{font-size:12px;color:var(--faint);text-align:center;margin-top:14px}
-@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
 `;
 
 function vars(t: Record<string, string>): string {
@@ -63,7 +74,7 @@ function page(title: string, body: string, status = 200, headers?: Headers): Res
   return new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${e(title)}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>${css}</style></head><body><main class="card">${body}</main></body></html>`,
+<style>${css}</style></head><body><main class="card">${body}</main><p class="brand"><b>qalm</b> by Apollo</p></body></html>`,
     { status, headers: h },
   );
 }
@@ -78,8 +89,13 @@ const initials = (name: string) =>
 
 const logos = (clientName: string) => `<div class="logos"><span class="av">${e(initials(clientName))}</span><span class="sep">⟷</span><span class="mark">${MARK_SVG}</span></div>`;
 
-export function messagePage(title: string, text: string, status = 200): Response {
-  return page(title, `<div class="logos"><span class="mark">${MARK_SVG}</span></div><h1>${e(title)}</h1><p class="sub">${e(text)}</p>`, status);
+/** `detail`: a technical reason, shown small under the plain-words text (for whoever set up the app). */
+export function messagePage(title: string, text: string, status = 200, detail?: string): Response {
+  return page(
+    title,
+    `<div class="logos"><span class="mark">${MARK_SVG}</span></div><h1>${e(title)}</h1><p class="sub">${e(text)}</p>${detail ? `<p class="detail">${e(detail)}</p>` : ''}`,
+    status,
+  );
 }
 
 /**
@@ -103,8 +119,8 @@ ${button}`,
   return res;
 }
 
-function signInPage(returnTo: string, sent = false, error?: string): Response {
-  if (sent) return messagePage('Check your email', 'We sent you a sign-in link. Open it in this browser to continue.');
+function signInPage(returnTo: string, sent = false, error?: string, email?: string): Response {
+  if (sent) return messagePage('Check your email', `We sent a sign-in link${email ? ` to ${email}` : ''}. Open it in this browser to continue.`);
   return page(
     'Sign in to qalm',
     `<div class="logos"><span class="mark">${MARK_SVG}</span></div>
@@ -157,7 +173,8 @@ f.addEventListener('change',sync);sync();
 
 async function authError(err: unknown): Promise<Response> {
   if (err instanceof AuthorizationError && err.redirectTo) return Response.redirect(err.redirectTo, 302);
-  if (err instanceof AuthorizationError) return messagePage("Can't connect", err.description || 'This request is invalid or has expired. Start again from your app.', 400);
+  if (err instanceof AuthorizationError)
+    return messagePage("Can't connect", 'This connection request isn’t valid, or it has expired. Start connecting again from your app.', 400, err.description || undefined);
   if (err instanceof CimdFetchError) return messagePage("Can't connect", 'This app could not be verified.', 400);
   throw err;
 }
@@ -179,7 +196,7 @@ export async function handleAuthorize(req: Request, env: Env, path: string): Pro
       if (err instanceof HttpError && err.status === 400) return signInPage(returnTo, false, 'Enter a valid email address.');
       throw err;
     }
-    return signInPage(returnTo, true);
+    return signInPage(returnTo, true, undefined, String(form.get('email') ?? '').trim());
   }
   if (path !== '/authorize') return null;
 

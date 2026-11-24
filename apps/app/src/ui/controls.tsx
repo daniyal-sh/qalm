@@ -141,9 +141,14 @@ export function IconButton({ icon, label, selected, tone = 'default', size = CON
   );
 }
 
+/** True inside a settings row that has stacked its control under the title (a narrow window): controls fill the width. */
+export const StackedRow = React.createContext(false);
+
 export interface SegmentOption<T extends string> {
   value: T;
   label: string;
+  /** A short second fact ("5 mm"): after the label on wide rows, under it when the control fills a narrow row. */
+  detail?: string;
   icon?: IconName;
   swatch?: string;
 }
@@ -163,8 +168,9 @@ export function Segmented<T extends string>({
   accessibilityLabel?: string;
 }) {
   const { c } = useTheme();
+  const fill = React.useContext(StackedRow);
   return (
-    <View accessibilityRole="radiogroup" accessibilityLabel={accessibilityLabel} style={[styles.segTrack, { backgroundColor: c.soft }, style]}>
+    <View accessibilityRole="radiogroup" accessibilityLabel={accessibilityLabel} style={[styles.segTrack, { backgroundColor: c.soft }, fill && styles.segFill, style]}>
       {options.map((o) => {
         const on = o.value === value;
         return (
@@ -172,10 +178,11 @@ export function Segmented<T extends string>({
             key={o.value}
             accessibilityRole="radio"
             accessibilityState={{ checked: on }}
-            accessibilityLabel={o.label}
+            accessibilityLabel={o.detail ? `${o.label}, ${o.detail}` : o.label}
             onPress={() => onChange(o.value)}
             style={(s) => [
               styles.seg,
+              fill && styles.segFillItem,
               hoverTransition,
               on ? [{ backgroundColor: c.surface, borderColor: c.line }, segRaise] : (s as PressState).hovered ? { backgroundColor: c.surface2 } : null,
               focusRing(c, (s as PressState).focused),
@@ -183,9 +190,21 @@ export function Segmented<T extends string>({
           >
             {o.swatch ? <View style={[styles.swatch, { backgroundColor: o.swatch, borderColor: c.line }]} /> : null}
             {o.icon ? <Icon name={o.icon} size={15} color={on ? c.ink : c.muted} /> : null}
-            <Text variant="label" style={{ color: on ? c.ink : c.muted, flexShrink: 1 }} numberOfLines={1}>
-              {o.label}
-            </Text>
+            {o.detail && fill ? (
+              <View style={{ alignItems: 'center', flexShrink: 1 }}>
+                <Text variant="label" style={{ color: on ? c.ink : c.muted }} numberOfLines={1}>
+                  {o.label}
+                </Text>
+                <Text variant="meta" style={{ color: on ? c.muted : c.faint }} numberOfLines={1}>
+                  {o.detail}
+                </Text>
+              </View>
+            ) : (
+              <Text variant="label" style={{ color: on ? c.ink : c.muted, flexShrink: 1 }} numberOfLines={1}>
+                {o.label}
+                {o.detail ? <Text variant="label" style={{ color: on ? c.muted : c.faint }}>{` · ${o.detail}`}</Text> : null}
+              </Text>
+            )}
           </Pressable>
         );
       })}
@@ -373,6 +392,8 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minWidth: 0,
   },
+  segFill: { alignSelf: 'stretch' },
+  segFillItem: { flex: 1, justifyContent: 'center', paddingHorizontal: 6, paddingVertical: 4 },
   swatch: { width: 14, height: 14, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth },
   chip: {
     flexDirection: 'row',
