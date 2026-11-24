@@ -11,6 +11,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { CONTROL_H, radius, shadow2, space } from '../theme/tokens';
 import { IconButton } from '../ui/controls';
 import { Icon } from '../ui/Icon';
+import { contrastRatio } from './colors.logic';
 import type { ToolState } from './context';
 import { DEFAULT_PILL, isVertical, parsePill, pillOrigin, snapPill, type Edge, type Pad, type PillPlace, type Size } from './focus.logic';
 import { SwatchStrip } from './Swatches';
@@ -153,7 +154,8 @@ export function FocusPill(p: FocusPillProps) {
               { backgroundColor: colours ? c.accentSoft : s.pressed ? c.soft : (s as { hovered?: boolean }).hovered ? c.surface2 : 'transparent' },
             ]}
           >
-            <View style={[styles.dot, { backgroundColor: colour, borderColor: c.line2 }]} />
+            {/* A colour close to the pill's own (graphite in dark mode) gets a visible outline, as in the toolbar. */}
+            <View style={[styles.dot, { backgroundColor: colour }, contrastRatio(colour, c.surface) < 1.6 ? { borderWidth: 1, borderColor: c.faint } : { borderColor: c.line }]} />
           </Pressable>
           {sep}
           <IconButton icon="rotate-ccw" label="Undo" disabled={!p.canUndo} onPress={p.onUndo} />
