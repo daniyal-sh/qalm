@@ -13,7 +13,8 @@ import org.robolectric.annotation.Config
 
 /**
  * Palm rejection (tech-spec §3) driven by synthesized MotionEvents: tool types, TOUCH_MAJOR in px (converted with
- * xdpi), pen lockout, hand side, multi-touch retraction and FLAG_CANCELED, for relaxed / standard / strict.
+ * xdpi), pen lockout, hand side, a second finger (retracting a stroke that just started, keeping one that was
+ * drawing), FLAG_CANCELED and "pen seen", for relaxed / standard / strict.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -24,6 +25,7 @@ class InkInputTest {
 
   private val log = ArrayList<String>()
   private var startResult = true
+  private var penSeen = 0
   private lateinit var input: InkInput
 
   private val host = object : InkInput.Host {
@@ -39,6 +41,7 @@ class InkInputTest {
     override fun penButton() { log += "button" }
     override fun claim(disallow: Boolean) { log += "claim $disallow" }
     override fun holdScroll(hold: Boolean) { log += "hold $hold" }
+    override fun penSeen() { penSeen++ }
   }
 
   @Before
@@ -128,6 +131,48 @@ class InkInputTest {
     send(1040, MotionEvent.ACTION_MOVE, finger(0, 90f, 90f), finger(1, 420f, 420f))
     assertEquals(listOf("start 0 touch", "hold true", "hold false", "retract", "reject multi-touch", "claim false"), log)
     assertFalse(input.drawing)
+  }
+
+  @Test
+  fun aSecondFingerAfterTheStrokeWasDrawingKeepsItAndPans() {
+    send(1000, MotionEvent.ACTION_DOWN, finger(0, 100f, 100f))
+    send(1100, MotionEvent.ACTION_MOVE, finger(0, 100f + mm(5.0), 100f))
+    send(1200, MotionEvent.ACTION_MOVE, finger(0, 100f + mm(10.0), 100f))
+    send(1210, MotionEvent.ACTION_POINTER_DOWN, finger(0, 100f + mm(10.0), 100f), finger(1, 400f, 400f), actionIndex = 1)
+    send(1220, MotionEvent.ACTION_MOVE, finger(0, 90f, 90f), finger(1, 420f, 420f))
+    send(1230, MotionEvent.ACTION_POINTER_UP, finger(0, 90f, 90f), finger(1, 420f, 420f), actionIndex = 1)
+    send(1240, MotionEvent.ACTION_UP, finger(0, 80f, 80f))
+    // Committed where the second finger landed; the rest of the gesture is the ScrollView's and the pinch's.
+    assertEquals(listOf("start 0 touch", "hold true", "move 0", "move 0", "hold false", "finish 0", "claim false"), log)
+    assertFalse(input.drawing)
+  }
+
+  @Test
+  fun aSecondFingerRetractsAStrokeThatHasNotGoneAnywhere() {
+    // Long enough, but hardly moved: one finger rested, then the other landed for a pinch.
+    send(1000, MotionEvent.ACTION_DOWN, finger(0, 100f, 100f))
+    send(1300, MotionEvent.ACTION_MOVE, finger(0, 100f + mm(2.0), 100f))
+    send(1400, MotionEvent.ACTION_POINTER_DOWN, finger(0, 100f + mm(2.0), 100f), finger(1, 400f, 400f), actionIndex = 1)
+    assertEquals(listOf("start 0 touch", "hold true", "move 0", "hold false", "retract", "reject multi-touch", "claim false"), log)
+  }
+
+  @Test
+  fun aSecondFingerWithin150msRetractsEvenAFastStroke() {
+    send(1000, MotionEvent.ACTION_DOWN, finger(0, 100f, 100f))
+    send(1100, MotionEvent.ACTION_MOVE, finger(0, 100f + mm(20.0), 100f))
+    send(1149, MotionEvent.ACTION_POINTER_DOWN, finger(0, 100f + mm(20.0), 100f), finger(1, 400f, 400f), actionIndex = 1)
+    assertEquals(listOf("start 0 touch", "hold true", "move 0", "hold false", "retract", "reject multi-touch", "claim false"), log)
+  }
+
+  @Test
+  fun penSeenIsReportedOnceForAContactOrAHover() {
+    tap(1000, finger(0, 10f, 10f))
+    assertEquals(0, penSeen)
+    val hover = event(2000, MotionEvent.ACTION_HOVER_MOVE, listOf(pen(0, 500f, 500f)))
+    input.onHoverEvent(hover)
+    hover.recycle()
+    penStroke(upAt = 3000, x = 500f, y = 500f)
+    assertEquals(1, penSeen)
   }
 
   @Test
@@ -234,7 +279,7 @@ class InkInputTest {
   }
 
   @Test
-  fun rightHandSideIsBesideOrBelowThePenFor3s() {
+  fun rightHandSideIsBesideOrBelowThePenFor2s() {
     penStroke(upAt = 10_000, x = 500f, y = 500f)
     log.clear()
     tap(10_700, finger(1, 700f, 700f)) // below right
@@ -246,7 +291,10 @@ class InkInputTest {
     tap(11_700, finger(1, 900f, 500f - mm(15.0))) // right but clearly above
     assertEquals(List(2) { listOf("start 1 touch", "hold true", "hold false", "finish 1") }.flatten(), log)
     log.clear()
-    tap(13_001, finger(1, 700f, 700f)) // the pen hasn't been seen for over 3 s
+    tap(11_950, finger(1, 700f, 700f)) // below right, still within 2 s
+    assertEquals(listOf("claim true", "reject hand-side"), log)
+    log.clear()
+    tap(12_001, finger(1, 700f, 700f)) // the pen hasn't been seen for over 2 s
     assertEquals(listOf("start 1 touch", "hold true", "hold false", "finish 1"), log)
   }
 

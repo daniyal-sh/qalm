@@ -12,14 +12,19 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   let onPenButton = EventDispatcher()
   let onRejectedTouch = EventDispatcher()
   let onShapeHold = EventDispatcher()
+  let onPenSeen = EventDispatcher()
 
   // MARK: Tunables (spec §3; physical sizes in millimetres)
   private static let mmPerPoint = 0.19               // iPad point ≈ 0.19 mm
   private static let penLockout: TimeInterval = 0.6  // touches within 600 ms of pen activity are rejected
-  private static let handSideWindow: TimeInterval = 3.0  // how long the last pen position guards the hand side
+  private static let handSideWindow: TimeInterval = 2.0  // how long the last pen position guards the hand side
   private static let handSideMarginMm = 10.0         // "beside" tolerance around the pen tip
   private static let fingerClaimDelay: TimeInterval = 0.08  // a 2nd finger before this → scroll/zoom, not ink
   private static let fingerClaimDistance: CGFloat = 3       // points of movement that also claim a finger stroke
+  // A second finger this soon after the first landed, or before the first travelled this far, retracts its stroke
+  // (both were meant as a pan or pinch). Later, the stroke is kept and ends there. Same as Android and web.
+  private static let secondFingerRetract: TimeInterval = 0.15
+  private static let secondFingerRetractMm = 3.0
   private static let heldRadius = 2.0                // page units, for heldMs
   private static let pendingFallback: TimeInterval = 4.0   // drop an uncommitted finished stroke after this
   // committedIds arrive once Skia has its new picture; it shows it a frame or two later, so keep ours until then.
@@ -62,6 +67,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     let smoothing: Int
     let start: TimeInterval
     let startLocation: CGPoint
+    var lastLocation: CGPoint
+    var travel: CGFloat = 0  // points the touch has moved
     var points: [Pt] = []
     var pendingEstimates: [NSNumber: Int] = [:]
     var erasedUpTo = 0  // eraser: points already emitted
@@ -87,6 +94,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
       self.smoothing = smoothing
       self.start = touch.timestamp
       self.startLocation = location
+      self.lastLocation = location
     }
   }
 
@@ -104,6 +112,10 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private var claimCounter = 0
   private var holdCounter = 0
   private var holdWork: DispatchWorkItem?
+  private var penReported = false
+  /// Ancestor scroll views whose pan needs two fingers while a finger draws here ("pen and finger"), with the
+  /// minimum they had before.
+  private var heldScrollPans: [(UIPanGestureRecognizer, Int)] = []
   private static var lastPenButtonTime: TimeInterval = -1_000_000  // shared: every overlay on screen gets the pencil interaction
 
   // MARK: Layers
@@ -306,12 +318,20 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
           reject("pen-active")
           continue
         }
-        // A second finger: this is a scroll/zoom, not ink.
-        retract(reason: "multi-touch")
+        // A second finger: this is a scroll/zoom, not ink. A stroke that has only just started is retracted; one
+        // that was clearly drawing ends here and is kept. The two-finger scroll pan and the pinch take over.
+        let young = touch.timestamp - a.start < QalmInkView.secondFingerRetract
+          || Double(a.travel) * QalmInkView.mmPerPoint < QalmInkView.secondFingerRetractMm
+        if young {
+          retract(reason: "multi-touch")
+        } else {
+          finish(a)
+        }
         recognizer.relinquish()
         return
       }
       begin(touch, event: event, isPencil: false)
+      holdScrollPans()
       scheduleFingerClaim(recognizer)
     }
   }
@@ -326,6 +346,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
         return
       }
       let loc = a.touch.location(in: self)
+      a.travel += hypot(loc.x - a.lastLocation.x, loc.y - a.lastLocation.y)
+      a.lastLocation = loc
       if hypot(loc.x - a.startLocation.x, loc.y - a.startLocation.y) >= QalmInkView.fingerClaimDistance {
         recognizer.claim()
       }
@@ -366,6 +388,33 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   func inkRecognizerDidReset() {
     // All touches are gone. Anything still in progress lost its touch: retract it.
     if active != nil { retract(reason: "cancelled") }
+    releaseScrollPans()
+  }
+
+  /// "Pen and finger": one finger draws, so while it is down the ancestor scroll views pan with two fingers only.
+  /// The second finger then pans them natively (with momentum) and RNGH pinches; one finger never scrolls the page.
+  /// Restored when the touch sequence ends, so elsewhere (and with the pen tool off) one finger scrolls as usual.
+  private func holdScrollPans() {
+    guard heldScrollPans.isEmpty else { return }
+    var v = superview
+    while let view = v {
+      if let sv = view as? UIScrollView, sv.isScrollEnabled {
+        let pan = sv.panGestureRecognizer
+        heldScrollPans.append((pan, pan.minimumNumberOfTouches))
+        pan.minimumNumberOfTouches = max(2, pan.minimumNumberOfTouches)
+      }
+      v = view.superview
+    }
+  }
+
+  private func releaseScrollPans() {
+    for (pan, minimum) in heldScrollPans { pan.minimumNumberOfTouches = minimum }
+    heldScrollPans.removeAll()
+  }
+
+  override func willMove(toWindow newWindow: UIWindow?) {
+    super.willMove(toWindow: newWindow)
+    if newWindow == nil { releaseScrollPans() }
   }
 
   // MARK: Gesture delegate
@@ -376,14 +425,27 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     if otherGestureRecognizer === hoverGesture { return true }
     // Finger ink keeps the parent's pinch alive, so a second finger can still zoom (we retract then).
     if let a = active, a.isPencil { return false }
+    // …and the scroll views' pan, which waits for a second finger while a finger draws (holdScrollPans).
+    if active != nil, !heldScrollPans.isEmpty, let pan = otherGestureRecognizer as? UIPanGestureRecognizer,
+       heldScrollPans.contains(where: { $0.0 === pan }) {
+      return true
+    }
     return otherGestureRecognizer is UIPinchGestureRecognizer
   }
 
   // MARK: Palm rejection (spec §3)
 
   private func notePen(_ touch: UITouch) {
-    lastPenTime = touch.timestamp
-    lastPenLocation = touch.location(in: self)
+    notePen(at: touch.location(in: self), time: touch.timestamp)
+  }
+
+  private func notePen(at location: CGPoint, time: TimeInterval, surelyPencil: Bool = true) {
+    lastPenTime = time
+    lastPenLocation = location
+    if surelyPencil && !penReported {
+      penReported = true
+      onPenSeen([:])  // the first Pencil contact or hover: "pen seen" (the app's auto-picked drawWith)
+    }
   }
 
   private func contactAxisMm(_ touch: UITouch) -> Double {
@@ -736,12 +798,14 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     switch g.state {
     case .began, .changed:
       let loc = g.location(in: self)
+      // Before iOS 16.1 a hover may be a trackpad pointer: it still guards the palm, but isn't "pen seen".
       var isPencilHover = true
-      if #available(iOS 16.1, *) { isPencilHover = g.zOffset > 0 }
-      if isPencilHover {
-        lastPenTime = ProcessInfo.processInfo.systemUptime
-        lastPenLocation = loc
+      var surelyPencil = false
+      if #available(iOS 16.1, *) {
+        isPencilHover = g.zOffset > 0
+        surelyPencil = isPencilHover
       }
+      if isPencilHover { notePen(at: loc, time: ProcessInfo.processInfo.systemUptime, surelyPencil: surelyPencil) }
       guard active == nil, tool == .pen || tool == .highlighter || tool == .eraser else {
         if active == nil { cursorLayer.isHidden = true }
         return

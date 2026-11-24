@@ -83,7 +83,7 @@ const DEFAULT_TOOLS: ToolState = {
 type MenuState = { items: MenuItem[]; anchor?: { x: number; y: number; align?: 'left' | 'right' } } | null;
 
 export function EditorScreen({ notebookId }: { notebookId: string }) {
-  const { c, input, scheme } = useTheme();
+  const { c, input, scheme, notePenSeen } = useTheme();
   const s = useSession();
   const { library } = useLibraryData();
   const h = useDoc(docIds.notebook(notebookId), 2500);
@@ -895,6 +895,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             setTool,
             onPenButton,
             input,
+            onPenSeen: notePenSeen,
             undo,
             undoManagerFor: (pageId: string, page: Page) => registry.get(pageId, page),
             selection,
@@ -910,7 +911,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             touchPage,
           }
         : null,
-    [notebook, notebookId, tools, setTool, onPenButton, input, undo, registry, selection, editingText, activeCommentId, selectThread, reportPage, touchPage],
+    [notebook, notebookId, tools, setTool, onPenButton, input, notePenSeen, undo, registry, selection, editingText, activeCommentId, selectThread, reportPage, touchPage],
   );
 
   if (!h || !notebook || !meta || !edCtx) {

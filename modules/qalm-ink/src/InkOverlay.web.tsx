@@ -13,7 +13,8 @@ import {
   SHAPE_HOLD_MS,
 } from './InkOverlay.types';
 import { traceOutline } from './outlinePath';
-import { MM_PER_CSS_PX as MM_PER_PX, palmVerdict, pointerContact, touchContact } from './palm';
+import { MM_PER_CSS_PX as MM_PER_PX, palmVerdict, pointerContact, secondFingerRetracts, touchContact } from './palm';
+import { fingerGesture, type FingerOwner } from './twoFingerPan';
 /** A snapped shape pulses this long (web has no haptics): a halo that shrinks and fades. */
 const PULSE_MS = 260;
 /** The halo starts this wide (CSS px) beyond the line. */
@@ -54,6 +55,10 @@ interface Live {
   /** Snapped while held: the shape under the pen, adjusted as the pen drags (`from` is where the pen was then). */
   snap: { base: ShapePreview; cur: ShapePreview; from: [number, number]; at: number } | null;
   erasedUpTo: number;
+  /** Client px of the last sample, and how far the contact has travelled (mm): a second finger's verdict. */
+  lastX: number;
+  lastY: number;
+  travelMm: number;
 }
 
 interface Finished {
@@ -114,6 +119,7 @@ export function InkOverlay(props: InkOverlayProps) {
     lastPen: { x: 0, y: 0, t: -Infinity }, // client px, performance.now()
     penPointers: new Set<number>(),
     buttonDown: false,
+    penReported: false,
     draw: () => {},
   });
 
@@ -275,6 +281,10 @@ export function InkOverlay(props: InkOverlayProps) {
 
     const notePen = (ev: PointerEvent) => {
       s.lastPen = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp };
+      if (!s.penReported) {
+        s.penReported = true;
+        propsRef.current.onPenSeen?.({ nativeEvent: {} });
+      }
     };
 
     const emitErase = (live: Live, final: boolean) => {
@@ -314,6 +324,9 @@ export function InkOverlay(props: InkOverlayProps) {
     };
 
     const addPoint = (live: Live, ev: PointerEvent) => {
+      live.travelMm += Math.hypot(ev.clientX - live.lastX, ev.clientY - live.lastY) * MM_PER_PX;
+      live.lastX = ev.clientX;
+      live.lastY = ev.clientY;
       const pt = toPoint(ev, live);
       if (live.snap) {
         // Adjusting: the stroke stays as it was drawn; the shape follows the pen.
@@ -361,6 +374,9 @@ export function InkOverlay(props: InkOverlayProps) {
         holdTimer: null,
         snap: null,
         erasedUpTo: 0,
+        lastX: ev.clientX,
+        lastY: ev.clientY,
+        travelMm: 0,
       };
       s.live = live;
       addPoint(live, ev);
@@ -374,11 +390,12 @@ export function InkOverlay(props: InkOverlayProps) {
       draw();
     };
 
-    const finish = (ev: PointerEvent) => {
+    /** `ev` is the live pointer's last event; null when a second finger ends the stroke where it is. */
+    const finish = (ev: PointerEvent | null, now = ev?.timeStamp ?? 0) => {
       const live = s.live;
       if (!live) return;
       s.live = null;
-      addPoint(live, ev);
+      if (ev) addPoint(live, ev);
       stopHold(live);
       const P = propsRef.current;
       if (live.kind === 'erase') {
@@ -388,7 +405,7 @@ export function InkOverlay(props: InkOverlayProps) {
       } else if (live.points.length > 0) {
         const id = uuid();
         const last = live.points[live.points.length - 1]!;
-        const heldMs = Math.max(0, Math.round(Math.max(last.t, ev.timeStamp - live.t0) - live.holdT));
+        const heldMs = Math.max(0, Math.round(Math.max(last.t, now - live.t0) - live.holdT));
         const shape = live.snap?.cur;
         s.finished.push({
           id,
@@ -420,6 +437,22 @@ export function InkOverlay(props: InkOverlayProps) {
       draw();
     };
 
+    // "Pen and finger": this overlay's finger owns the gesture until every finger lifts; a second one, anywhere in the
+    // window, pans (twoFingerPan.ts) and the editor's pinch zooms.
+    const owner: FingerOwner = {
+      el: canvas,
+      isPalm: (ev) => palmVerdict(pointerContact(ev), s.lastPen, propsRef.current.input) !== null,
+      secondFinger: (t) => {
+        const live = s.live;
+        if (!live || live.isPen) return;
+        if (secondFingerRetracts(t - live.t0, live.travelMm)) {
+          retract(); // both fingers were meant as the gesture
+          reject('multi-touch');
+        } else finish(null, t); // a real stroke: keep it, ending here
+      },
+    };
+    const releaseFingers = fingerGesture.use();
+
     const onDown = (ev: PointerEvent) => {
       const P = propsRef.current;
       if (ev.pointerType === 'pen') {
@@ -438,13 +471,11 @@ export function InkOverlay(props: InkOverlayProps) {
         // Pen only: fingers scroll and zoom. A palm is still reported as one (and onTouchStart keeps it from scrolling).
         if (P.input.drawWith === 'pen') return reject(palm ?? 'pen-only');
         if (palm) return reject(palm);
+        // A further finger (here, or the first landed on another page): a pan or pinch, not ink.
+        if (fingerGesture.busy) return;
         if (s.live?.isPen) return reject('pen-active');
-        if (s.live) {
-          // A second finger: this is a scroll / zoom, not ink.
-          retract();
-          reject('multi-touch');
-          return;
-        }
+        if (s.live) return; // a mouse stroke
+        fingerGesture.first(ev, owner);
         start(ev, false);
         return;
       }
@@ -509,7 +540,9 @@ export function InkOverlay(props: InkOverlayProps) {
 
     // A hovering pen must never pan: switch touch-action before it touches down.
     const onOver = (ev: PointerEvent) => {
-      if (ev.pointerType === 'pen') canvas.style.touchAction = 'none';
+      if (ev.pointerType !== 'pen') return;
+      canvas.style.touchAction = 'none';
+      notePen(ev);
     };
 
     // Chromium may still turn a pen drag into a pan: cancel the compatibility touch events of pen contacts. With
@@ -547,6 +580,8 @@ export function InkOverlay(props: InkOverlayProps) {
       canvas.removeEventListener('touchstart', onTouchStart);
       canvas.removeEventListener('contextmenu', onContextMenu);
       ro.disconnect();
+      fingerGesture.release(owner);
+      releaseFingers();
       s.draw = () => {};
     };
   }, []);

@@ -14,8 +14,10 @@ import kotlin.math.max
  * 2. A finger whose contact major axis (`getTouchMajor`, px → mm with `xdpi`) exceeds [PALM_MAJOR_MM] is a palm.
  * 3. A finger within [PEN_LOCKOUT_MS] of any pen activity (contact or hover) is rejected, and so is a finger
  *    beside or below the last pen position on the `hand` side while the pen was seen within [HAND_SIDE_WINDOW_MS].
- * 4. `ACTION_CANCEL` / `FLAG_CANCELED` retracts the stroke in progress, as do a second finger (a scroll or zoom)
- *    and a contact that grows into a palm.
+ * 4. `ACTION_CANCEL` / `FLAG_CANCELED` retracts the stroke in progress, as does a contact that grows into a palm.
+ *    A second finger is a scroll or zoom: it retracts a finger stroke that has only just started (under
+ *    [SECOND_FINGER_RETRACT_MS], or under [SECOND_FINGER_RETRACT_MM] of travel) and ends one that was clearly
+ *    drawing, keeping it, so a pan or pinch never deletes a real stroke.
  * 5. The pen button pressed while hovering is the shortcut ([Host.penButton]). Held (or the eraser end used) while
  *    the pen touches, it only makes that stroke erase: firing the shortcut too left the eraser on afterwards.
  *
@@ -42,6 +44,8 @@ internal class InkInput(private val host: Host) {
     fun claim(disallow: Boolean)
     /** Stop (true) or restore (false) scrolling in the ancestor scroll views, without touching gesture handlers. */
     fun holdScroll(hold: Boolean)
+    /** The first pen contact or hover this view has seen (the app's "pen seen", which auto-picks drawWith). */
+    fun penSeen() {}
   }
 
   var drawWith = "pen" // pen | any
@@ -52,6 +56,12 @@ internal class InkInput(private val host: Host) {
   var livePointer = -1
     private set
   private var liveIsPen = false
+  private var liveStartTime = 0L
+  private var liveLastX = 0f
+  private var liveLastY = 0f
+  /** How far the live contact has travelled, in px. */
+  private var liveTravel = 0.0
+  private var penReported = false
   private var scrollHeld = false
 
   private var lastPenTime = Long.MIN_VALUE / 2
@@ -124,8 +134,16 @@ internal class InkInput(private val host: Host) {
           !drawing -> begin(ev, idx, isPen = false, eraser = false)
           liveIsPen -> host.rejected("pen-active")
           else -> {
-            // A second finger: this is a scroll / zoom, not ink.
-            retract("multi-touch")
+            // A second finger: this is a scroll / zoom, not ink. A stroke that has only just started is retracted;
+            // one that was clearly drawing ends here and is kept. The fingers go on to pan or pinch.
+            val liveIdx = ev.findPointerIndex(livePointer)
+            if (liveIdx < 0 || isYoungStroke(ev.eventTime)) {
+              retract("multi-touch")
+            } else {
+              livePointer = -1
+              releaseScroll()
+              host.finish(ev, liveIdx)
+            }
             host.claim(false)
           }
         }
@@ -138,6 +156,10 @@ internal class InkInput(private val host: Host) {
     if (!host.start(ev, idx, isPen, eraser)) return
     livePointer = ev.getPointerId(idx)
     liveIsPen = isPen
+    liveStartTime = ev.eventTime
+    liveLastX = ev.getX(idx)
+    liveLastY = ev.getY(idx)
+    liveTravel = 0.0
     if (isFinger(ev.getToolType(idx))) {
       scrollHeld = true
       host.holdScroll(true)
@@ -161,6 +183,9 @@ internal class InkInput(private val host: Host) {
       host.claim(true)
       return
     }
+    liveTravel += Math.hypot((ev.getX(idx) - liveLastX).toDouble(), (ev.getY(idx) - liveLastY).toDouble())
+    liveLastX = ev.getX(idx)
+    liveLastY = ev.getY(idx)
     host.move(ev, idx)
   }
 
@@ -183,7 +208,15 @@ internal class InkInput(private val host: Host) {
     releaseScroll()
   }
 
+  /** A second finger this soon after the first landed, or before it went anywhere, means both were a gesture. */
+  private fun isYoungStroke(time: Long) =
+    time - liveStartTime < SECOND_FINGER_RETRACT_MS || liveTravel * host.mmPerPx < SECOND_FINGER_RETRACT_MM
+
   private fun notePen(ev: MotionEvent, idx: Int) {
+    if (!penReported) {
+      penReported = true
+      host.penSeen()
+    }
     lastPenTime = ev.eventTime
     lastPenX = ev.getX(idx)
     lastPenY = ev.getY(idx)
@@ -217,7 +250,11 @@ internal class InkInput(private val host: Host) {
   companion object {
     val PALM_MAJOR_MM = mapOf("relaxed" to 30.0, "standard" to 20.0, "strict" to 14.0)
     const val PEN_LOCKOUT_MS = 600L
-    const val HAND_SIDE_WINDOW_MS = 3000L // same as iOS
+    const val HAND_SIDE_WINDOW_MS = 2000L // same as iOS and web
+    /** A second finger within this of the first one landing retracts its stroke (else the stroke is kept). */
+    const val SECOND_FINGER_RETRACT_MS = 150L // same as iOS and web
+    /** …as does a second finger landing before the first one has travelled this far. */
+    const val SECOND_FINGER_RETRACT_MM = 3.0
     const val HAND_SIDE_MARGIN_MM = 10.0
     const val FLAG_CANCELED = 0x20 // MotionEvent.FLAG_CANCELED (API 33)
 

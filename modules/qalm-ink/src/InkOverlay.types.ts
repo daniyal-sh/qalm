@@ -109,6 +109,11 @@ export interface InkOverlayProps {
    * pen now at `to`, given it was at `from` when it snapped. Without it the shape stays as recognised.
    */
   adjustShape?(shape: ShapePreview, from: [number, number], to: [number, number]): ShapePreview;
+  /**
+   * The first real pen this overlay sees, touching or hovering (web pointerType 'pen', Android TOOL_TYPE_STYLUS,
+   * iOS `.pencil`). Fires once per overlay; the app remembers it to auto-pick `input.drawWith`.
+   */
+  onPenSeen?(e: { nativeEvent: Record<string, never> }): void;
   /** Layout. Defaults to absolute fill of the parent (stack it exactly over the PageCanvas). */
   style?: StyleProp<ViewStyle>;
 }

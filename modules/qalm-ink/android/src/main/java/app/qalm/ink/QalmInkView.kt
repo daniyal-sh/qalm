@@ -47,6 +47,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
       parent?.requestDisallowInterceptTouchEvent(disallow)
     }
     override fun holdScroll(hold: Boolean) = this@QalmInkView.holdScroll(hold)
+    override fun penSeen() = onPenSeen(mapOf<String, Any>())
   })
 
   /** Scroll views this view stopped for a finger stroke (see InkInput), to be restored when it ends. */
@@ -111,6 +112,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   private val onPenButton by EventDispatcher()
   private val onRejectedTouch by EventDispatcher()
   private val onShapeHold by EventDispatcher()
+  private val onPenSeen by EventDispatcher()
 
   // ---- state ----
   private class Live(
