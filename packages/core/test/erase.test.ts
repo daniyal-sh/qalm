@@ -115,9 +115,13 @@ describe('planPartialErase', () => {
     expect(items.length).toBeGreaterThan(3000);
     const path = Array.from({ length: 8 }, (_, i) => ({ x: 100 + i * 4, y: 200 + i }));
     planPartialErase(items, path, 10, ids);
-    const t0 = Date.now();
-    for (let i = 0; i < 20; i++) planPartialErase(items, path, 10, ids);
-    expect((Date.now() - t0) / 20).toBeLessThan(8);
+    // Best of three batches: a busy machine (other test files, other work) shouldn't fail it, a slow pass would.
+    const batch = () => {
+      const t0 = Date.now();
+      for (let i = 0; i < 20; i++) planPartialErase(items, path, 10, ids);
+      return (Date.now() - t0) / 20;
+    };
+    expect(Math.min(batch(), batch(), batch())).toBeLessThan(8);
   });
 });
 
