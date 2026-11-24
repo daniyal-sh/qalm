@@ -267,7 +267,7 @@ its fallback measure once per font set (`setFallbackTextMeasure(fn, key)`: every
 same fonts). Layouts are cached (LRU: 4000 entries or ~16 M characters of ops and paths, `LAYOUT_CACHE`) by
 `LAYOUT_VERSION`, the text-metrics epoch, size, width and text.
 
-**Maths** (`markdown/math.ts`): MathJax 3 (TeX in, SVG out, no DOM: `liteAdaptor`, packages base, ams, noundefined,
+**Maths** (`markdown/mathjax.ts`): MathJax 3 (TeX in, SVG out, no DOM: `liteAdaptor`, packages base, ams, noundefined,
 boldsymbol) gives glyph outlines, flattened into one absolute path per formula; drawn 1.15× the text size (Computer Modern
 runs small next to Figtree). A TeX error shows the source in code style. Cached per formula (LRU, 2000 formulas or 4 M
 characters of path).
@@ -285,6 +285,22 @@ characters of path).
   when the task ends `onMathDeferred` listeners re-render (PageCanvas redraws and re-bakes its Markdown boxes, comments
   re-render), a slice at a time. A page of heavy boxes or a 100-reply thread never blocks for long. PDF export uses
   `layoutMarkdownSettled`, which yields between slices until every formula is in, so the PDF is complete.
+- **Loaded on demand.** MathJax is about 0.6 MB gzipped and most notes have no maths, so `markdown/math.ts` loads it with
+  `import()` of `markdown/mathjax.ts`, the only way in (a core test fails if anything else imports it, core or app). The
+  limits, the formula cache, the budgets and the time slice live in `math.ts`, so they hold before it has loaded: a
+  formula past a limit shows its source without loading MathJax. Layout stays synchronous: `texToPath` answers
+  `undefined` until MathJax has loaded, starting the load, and the layout draws that formula as its raw TeX in muted
+  monospace (`MdLayout.pending`; cached, and redone once MathJax is ready: `LAYOUT_VERSION` isn't bumped). Its arrival is
+  one more kind of fill-in: it bumps `mathDeferredEpoch` and calls the `onMathDeferred` listeners, so the same re-render
+  that fills in time-sliced maths swaps the placeholders (then the slice applies as usual; each task renders at least
+  one formula, so it converges). A failed load (offline web, a chunk gone after a deploy) leaves the placeholder; cached
+  placeholder layouts ask again, backing off 5 s doubling to 60 s, and the browser's `online` event retries at once.
+  Whatever must be exact awaits it first: PDF export (`loadMathFor` per box, then `layoutMarkdownSettled`; if the load
+  fails, `withoutMathPlaceholders` draws maths as its TeX source and the export still succeeds) and the server, which
+  loads it in `loadPages` for pages with maths to render, before regions are measured (a box's height is its layout's)
+  and crops drawn. On web and Electron, Metro puts MathJax in its own chunk (`mathjax-<hash>.js`), fetched the first time
+  maths is drawn; on Android and iPad it stays in the one Hermes bundle but isn't evaluated until then; in the Worker,
+  wrangler/esbuild keep one file, with MathJax behind a lazy `init_mathjax()`, so cold starts don't run it.
 
 **Editing.** The box shows its raw Markdown while it's being typed in, and renders when it loses focus. A format bar
 (bold, italic, strikethrough, heading, bullet list, numbered list, quote, code, link, maths) sits under the toolbar while

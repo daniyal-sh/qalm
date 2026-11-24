@@ -138,7 +138,7 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
 | Package | Tests | Other verification |
 |---|---|---|
 | core | 173 | Regions (clustering, context, the owner's page, first look, erased, labels, refs), readings stale rules, migration |
-| server | 47 | `wrangler dev` smoke test; `wrangler deploy --dry-run` (bundle ~1.9 MB gzipped, ~0.8 MB of it MathJax) |
+| server | 48 | `wrangler dev` smoke test; `wrangler deploy --dry-run` (bundle ~1.9 MB gzipped, ~0.8 MB of it MathJax, evaluated only for maths) |
 | app | 219 | Every round-2 PR checked in headless Chrome, offline and signed in against `wrangler dev` with a scripted MCP agent |
 | qalm-ink | JVM freehand parity test (31 style × smoothing cases) | Android `assembleDebug` (x86_64); drawing on an emulator and on web |
 | desktop | 3 unit | Packaged `qalm.exe` end-to-end test (Playwright): library, open notebook, draw, live shapes, a Markdown text box via the format bar, reload route, PDF export (with the Markdown fonts) via the native save dialog, deep link, no console errors |
@@ -260,8 +260,9 @@ email-only sign-in, and `grants.notebook_ids` / `folder_ids` since grants cover 
   - **Markdown** is verified on web (headless Chrome, light and dark) and in the packaged desktop app (e2e step: format
     bar keeps focus, box stored as `format: 'md'`, Figtree Bold in the PDF export). On Android and iPad it's unverified on
     a device: the RN TextInput selection restore (`setSelection`), inline maths SVG inside `<Text>` in comments, and the
-    format bar staying clear of the keyboard need a check. MathJax adds ~0.8 MB gzipped to the Worker (now ~1.9 MB) and
-    to the app bundle. Lists don't continue on Enter (type `- ` or use the bar). Maths is capped (`MATH_LIMITS`) after a
+    format bar staying clear of the keyboard need a check. MathJax loads on demand (tech-spec, Maths): its own ~0.58 MB
+    gzipped chunk on web/Electron; still in the Worker's single file (~1.9 MB) and the native bundle, but not evaluated
+    until a note has maths. Lists don't continue on Enter (type `- ` or use the bar). Maths is capped (`MATH_LIMITS`) after a
     review found a 3.8 KB `\def` comment could OOM the Worker. Fallback runs (Cyrillic, CJK, emoji) and the right-to-left
     plain fallback are only checked on web: on native, emoji and CJK come from system fonts and need a device check. On
     web and desktop they show as missing-glyph boxes in plain and Markdown boxes alike (CanvasKit has only the bundled
