@@ -3,8 +3,8 @@ import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import { Notebook, Page, inkInBox, migratePage, summarizeThreads, type ThreadSummary } from '@qalm/core';
-import type { Env } from './env';
+import { AI_LIVE, AI_LIVE_TTL_MS, AI_PAUSE, AI_PAUSED, Notebook, Page, inkInBox, migratePage, summarizeThreads, type ThreadSummary } from '@qalm/core';
+import { num, type Env } from './env';
 import { parseDocId, nbDocId, pgDocId, room, type DocRef } from './docs';
 import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit, type AgentWho, type PageEdit, type Presence } from './agent';
 
@@ -23,6 +23,8 @@ interface Attachment {
   userId: string;
   /** Awareness client ids announced on this socket, with their last clock. */
   aw: Record<string, number>;
+  /** Notebook rooms: this socket's device is playing AI sharing until then (ms; see core aiLive.ts). */
+  liveUntil?: number;
 }
 
 /** Whether Yjs type `t` is `root` or nested inside it. */
@@ -265,7 +267,7 @@ export class DocRoom extends DurableObject<Env> {
   }
 
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (typeof message === 'string') return;
+    if (typeof message === 'string') return this.onText(ws, message);
     const data = new Uint8Array(message);
     try {
       const decoder = decoding.createDecoder(data);
@@ -289,6 +291,7 @@ export class DocRoom extends DurableObject<Env> {
 
   override async webSocketClose(ws: WebSocket, code: number): Promise<void> {
     this.dropAwareness(ws);
+    this.dropLive(ws);
     try {
       ws.close(code === 1005 || code === 1006 ? 1000 : code, 'closed');
     } catch {
@@ -298,6 +301,55 @@ export class DocRoom extends DurableObject<Env> {
 
   override async webSocketError(ws: WebSocket): Promise<void> {
     this.dropAwareness(ws);
+    this.dropLive(ws);
+  }
+
+  // ---- AI sharing liveness (Play / Pause AI; core aiLive.ts) ----
+
+  /**
+   * Until when this notebook is live for agents (ms), or 0 when it isn't: the latest Play heartbeat of any open socket
+   * (each is one of the owner's devices or tabs; sync tickets only go to the owner). Never stored or synced, so a
+   * restarted room, a closed socket or a device that stopped sending is paused.
+   */
+  liveUntil(): number {
+    if (this.ref?.kind !== 'nb') return 0;
+    let until = 0;
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment() as Attachment | null;
+      if (a?.liveUntil && a.liveUntil > until) until = a.liveUntil;
+    }
+    return until > Date.now() ? until : 0;
+  }
+
+  private onText(ws: WebSocket, message: string): void {
+    if (this.ref?.kind !== 'nb' || (message !== AI_LIVE && message !== AI_PAUSE)) return;
+    const was = this.liveUntil() > 0;
+    if (message === AI_LIVE) {
+      const att = ws.deserializeAttachment() as Attachment;
+      ws.serializeAttachment({ ...att, liveUntil: Date.now() + num(this.env.AI_LIVE_TTL_MS, AI_LIVE_TTL_MS) });
+    } else {
+      // Pause on one device pauses them all, and the others' editors switch to paused.
+      for (const s of this.ctx.getWebSockets()) {
+        const att = s.deserializeAttachment() as Attachment | null;
+        if (att?.liveUntil) s.serializeAttachment({ ...att, liveUntil: 0 });
+        if (s !== ws) {
+          try {
+            s.send(AI_PAUSED);
+          } catch {
+            /* closing */
+          }
+        }
+      }
+    }
+    if (was !== this.liveUntil() > 0) this.agents().onLiveChanged();
+  }
+
+  /** A socket that closes stops its device's sharing at once. */
+  private dropLive(ws: WebSocket): void {
+    const att = ws.deserializeAttachment() as Attachment | null;
+    if (!att?.liveUntil) return;
+    ws.serializeAttachment({ ...att, liveUntil: 0 });
+    if (this.ref?.kind === 'nb') this.agents().onLiveChanged();
   }
 
   private broadcast(msg: Uint8Array, except?: unknown): void {
@@ -415,10 +467,10 @@ export class DocRoom extends DurableObject<Env> {
     return this.agents().lastClientUpdateAt();
   }
 
-  /** For the session list: the live AI access switch (unknown → off) and the last client update. */
-  agentInfo(docId: string): { aiAccess: boolean; paused: boolean; at: number } {
+  /** For the session list: the live AI access switch (unknown → off), whether it is playing, and the last client update. */
+  agentInfo(docId: string): { aiAccess: boolean; live: boolean; at: number } {
     this.setDocId(docId);
-    return { aiAccess: this.agents().aiAccess(), paused: this.agents().paused(), at: this.agents().lastClientUpdateAt() };
+    return { aiAccess: this.agents().aiAccess(), live: this.agents().isLive(), at: this.agents().lastClientUpdateAt() };
   }
 
   /** For the editor's presence pill (GET /ai/presence). */

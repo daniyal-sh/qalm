@@ -186,7 +186,7 @@ describe('mcp', () => {
     let html = '';
     const token = await connectAgent('aiswitch@example.com', { comment: true, transcribe: true }, 'Tutor', (h) => (html = h));
     // The consent page has no notebook picker: the agent gets the notebooks with AI access on.
-    expect(html).toContain("the notebooks you've turned AI access on for");
+    expect(html).toContain("It can read notebooks you've turned AI access on for, only while you've pressed Play in qalm.");
     expect(html).toContain("Right now that's <b>Physics</b>.");
     expect(html).not.toContain('Private');
     expect(html).not.toContain('name="notebook"');

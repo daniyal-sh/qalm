@@ -126,7 +126,10 @@ export class YClient {
   }
 
   private onMessage(data: ArrayBuffer | string) {
-    if (typeof data === 'string') return;
+    if (typeof data === 'string') {
+      this.texts.push(data);
+      return;
+    }
     const d = decoding.createDecoder(new Uint8Array(data));
     const type = decoding.readVarUint(d);
     if (type !== MSG_SYNC) return;
@@ -137,7 +140,37 @@ export class YClient {
     if (kind === syncProtocol.messageYjsSyncStep2) this.markSynced();
   }
 
+  /** Text frames from the server (e.g. `ai:paused`). */
+  readonly texts: string[] = [];
+  private beat: ReturnType<typeof setInterval> | null = null;
+
+  /** Play AI on this socket: an `ai:live` heartbeat now and every `everyMs` (the editor sends one every 15 s). */
+  play(everyMs = 400) {
+    this.stopBeat();
+    this.ws.send('ai:live');
+    this.beat = setInterval(() => {
+      try {
+        this.ws.send('ai:live');
+      } catch {
+        this.stopBeat();
+      }
+    }, everyMs);
+  }
+
+  /** Pause AI (on every device). */
+  pause() {
+    this.stopBeat();
+    this.ws.send('ai:pause');
+  }
+
+  /** Stops heartbeats without saying so: the device went to sleep. */
+  stopBeat() {
+    if (this.beat) clearInterval(this.beat);
+    this.beat = null;
+  }
+
   close() {
+    this.stopBeat();
     this.ws.close(1000, 'bye');
   }
 }

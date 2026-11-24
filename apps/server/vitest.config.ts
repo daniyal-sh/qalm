@@ -15,6 +15,7 @@ export default defineConfig(async () => {
             WAKE_IDLE_MS: '300',
             WAKE_MIN_INTERVAL_MS: '800',
             WAIT_TIMEOUT_MS: '2500',
+            AI_LIVE_TTL_MS: '1200',
             MAX_ASSET_BYTES: '1024',
             MAX_USER_STORAGE_BYTES: '1500',
             // Pin anything a developer's local .dev.vars might set (vitest-pool-workers reads it), so tests are hermetic.
