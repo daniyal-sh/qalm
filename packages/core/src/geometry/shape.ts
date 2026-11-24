@@ -4,8 +4,18 @@ import type { InkPoint, ShapeItem, ShapeKind } from '../types';
 
 type P = [number, number];
 
-/** Hold the pen still this long (ms) at the end of a stroke and it snaps to a shape. */
-export const SNAP_HOLD_MS = 350;
+/**
+ * Hold the pen still this long (ms) at the end of a stroke and it snaps to a shape, while the pen is still down (the
+ * overlays time the hold; `snapShape` checks it after the fact).
+ */
+export const SNAP_HOLD_MS = 400;
+/**
+ * How far (mm) the pen may wobble during that hold, measured from where the hold began (not frame to frame, so a slow
+ * drift still ends the hold). A real hand resting on a nib wanders 1–2 mm; 1 mm missed most holds.
+ */
+export const SNAP_HOLD_TOLERANCE_MM = 2.5;
+/** Adjusting a snapped closed shape: a turn this small (degrees) keeps its orientation. */
+const ADJUST_TURN_SNAP_DEG = 6;
 const DEFAULT_COLOR = '#27272a';
 const DEFAULT_WIDTH = 1.8;
 /** Resampled points along a stroke. */
@@ -331,7 +341,7 @@ function ellipseCorners(f: EllipseFit): P[] {
  * typical turn) within a short window on each side (≈ 4% of the outline), keeping only the peak of each turn. A
  * hand-rounded corner still turns by its full angle over the window, while a circle turns evenly, ~30° everywhere.
  */
-function corners(ring: P[]): P[] {
+function cornerIndices(ring: P[]): number[] {
   const n = ring.length;
   const w = Math.max(3, Math.round(n / 24));
   const th = ring.map((_, i) => turnAt(ring, i, w, true));
@@ -346,9 +356,78 @@ function corners(ring: P[]): P[] {
       if (th[(i - d + n) % n]! >= th[i]!) peak = false; // the earlier of equal values wins
       if (th[(i + d) % n]! > th[i]!) peak = false;
     }
-    if (peak) out.push(ring[i]!);
+    if (peak) out.push(i);
   }
   return out;
+}
+
+/**
+ * Sharper corners for a hand-drawn polygon: a line fitted through the middle of each side (between corners `idx` of
+ * the closed `ring`), and each corner where neighbouring sides meet. A hand rounds corners off, so the turning points
+ * themselves sit inside the shape; the sides are what the hand drew straight. A corner whose sides are nearly parallel
+ * or meet far from it keeps the turning point.
+ */
+function refineCorners(ring: P[], idx: number[], size: number): P[] {
+  const n = ring.length;
+  const k = idx.length;
+  const lines = idx.map((a, i) => {
+    const b = idx[(i + 1) % k]!;
+    const span = (b - a + n) % n || n;
+    const side: P[] = [];
+    for (let j = Math.ceil(span * 0.2); j <= Math.floor(span * 0.8); j++) side.push(ring[(a + j) % n]!);
+    if (side.length < 2) return null;
+    // Total least squares: through the centroid, along the principal direction.
+    const c: P = [side.reduce((m, p) => m + p[0], 0) / side.length, side.reduce((m, p) => m + p[1], 0) / side.length];
+    let sxx = 0, syy = 0, sxy = 0;
+    for (const p of side) {
+      const dx = p[0] - c[0], dy = p[1] - c[1];
+      sxx += dx * dx;
+      syy += dy * dy;
+      sxy += dx * dy;
+    }
+    const t = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    return { c, d: [Math.cos(t), Math.sin(t)] as P };
+  });
+  return idx.map((ci, i) => {
+    const l1 = lines[(i - 1 + k) % k], l2 = lines[i];
+    const turn = ring[ci]!;
+    if (!l1 || !l2) return turn;
+    const den = l1.d[0] * l2.d[1] - l1.d[1] * l2.d[0];
+    if (Math.abs(den) < Math.sin(20 * DEG)) return turn;
+    const w = sub(l2.c, l1.c);
+    const t = (w[0] * l2.d[1] - w[1] * l2.d[0]) / den;
+    const q = add(l1.c, mul(l1.d, t));
+    return dist(q, turn) <= 0.25 * size ? q : turn;
+  });
+}
+
+/**
+ * A rectangle fitted to a closed outline as a whole (for corners rounded off so far that no corner turns sharply): its
+ * orientation from the outline's segment directions folded to 0..90° (straight sides dominate), its sides at the
+ * outline's robust extents along those axes.
+ */
+function fitBox(ring: P[]): P[] {
+  let sx = 0, sy = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const e = sub(ring[(i + 1) % ring.length]!, ring[i]!);
+    const a = Math.atan2(e[1], e[0]) * 4;
+    const l = Math.hypot(e[0], e[1]);
+    sx += Math.cos(a) * l;
+    sy += Math.sin(a) * l;
+  }
+  const ang = Math.atan2(sy, sx) / 4;
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const us = ring.map((p) => p[0] * ca + p[1] * sa).sort((a, b) => a - b);
+  const vs = ring.map((p) => -p[0] * sa + p[1] * ca).sort((a, b) => a - b);
+  const q = Math.floor(ring.length * 0.02);
+  const [u0, u1, v0, v1] = [us[q]!, us[us.length - 1 - q]!, vs[q]!, vs[vs.length - 1 - q]!];
+  const back = (u: number, v: number): P => [u * ca - v * sa, u * sa + v * ca];
+  return [back(u0, v0), back(u1, v0), back(u1, v1), back(u0, v1)];
+}
+
+/** An ellipse's outline as a closed polygon (64 sides). */
+function ellipseOutline(corners4: P[]): P[] {
+  return shapePolylines({ kind: 'ellipse', pts: corners4 })[0]!.slice(0, -1);
 }
 
 function rectFrom(v: P[]): P[] {
@@ -448,17 +527,22 @@ function fitRegular(pts: P[], k: number): P[] {
 function recogniseClosed(loop: P[], diag: number): ShapeItem | null {
   const pts = resample(loop, N);
   const size = diag / Math.SQRT2;
-  const cs = corners(pts.slice(0, -1));
-  const k = cs.length;
-  const ell = fitEllipse(pts.slice(0, -1));
+  const ringPts = pts.slice(0, -1);
+  const idx = cornerIndices(ringPts);
+  const turns = idx.map((i) => ringPts[i]!);
+  const k = idx.length;
+  const ell = fitEllipse(ringPts);
+  // Polygons use the corners where their fitted sides meet; the star its sharp tips as they are.
+  const cs = k >= 3 && k <= 6 ? refineCorners(ringPts, idx, size) : turns;
+  if ((globalThis as any).DBG) console.log('k', k, 'ellErr', ell.err.toFixed(3), 'ang', interiorAngles(cs).map((a) => a.toFixed(0)).join(','));
 
   // A pentagram drawn in one go: 5 sharp tips, visited every other one (turns of ~144°).
   if (k === 5) {
-    const ang = interiorAngles(cs);
+    const ang = interiorAngles(turns);
     if (ang.every((a) => a < 60)) {
       // Tips of a star in drawing order skip one: reorder around the centre.
-      const c: P = [cs.reduce((s, p) => s + p[0], 0) / 5, cs.reduce((s, p) => s + p[1], 0) / 5];
-      const tips = [...cs].sort((a, b) => Math.atan2(a[1] - c[1], a[0] - c[0]) - Math.atan2(b[1] - c[1], b[0] - c[0]));
+      const c: P = [turns.reduce((s, p) => s + p[0], 0) / 5, turns.reduce((s, p) => s + p[1], 0) / 5];
+      const tips = [...turns].sort((a, b) => Math.atan2(a[1] - c[1], a[0] - c[0]) - Math.atan2(b[1] - c[1], b[0] - c[0]));
       const star = regular(tips, 0.382);
       if (star && meanDistToPolygon(pts, star) / size < 0.09) return make('star', star);
       return null;
@@ -503,6 +587,7 @@ function recogniseClosed(loop: P[], diag: number): ShapeItem | null {
     }
     if (poly && kind) {
       const err = meanDistToPolygon(pts, poly) / size;
+      if ((globalThis as any).DBG) console.log(' poly', kind, err.toFixed(3));
       if (err < 0.06) return make(kind, poly);
     }
   }
@@ -515,19 +600,29 @@ function recogniseClosed(loop: P[], diag: number): ShapeItem | null {
     const best = fits[0]!.err <= fits[1]!.err ? fits[0]! : fits[1]!;
     if (best.err < 0.035 && Math.abs(best.m - k) <= 1) return make(best.m === 5 ? 'pentagon' : 'hexagon', best.poly);
   }
+  // A rectangle with its corners rounded off (few or no sharp turns): the outline hugs its box closer than any
+  // ellipse does (a circle stays ~11% of its radius from its box; an ellipse fits it within ~3%).
+  if (k <= 4 && Math.min(ell.rx, ell.ry) > 0.12 * Math.max(ell.rx, ell.ry)) {
+    const box = fitBox(ringPts);
+    const boxErr = meanDistToPolygon(pts, box) / size;
+    const ellErr = meanDistToPolygon(pts, ellipseOutline(ellipseCorners(ell))) / size;
+    if ((globalThis as any).DBG) console.log(' box', boxErr.toFixed(3), 'ell', ellErr.toFixed(3));
+    if (boxErr < 0.04 && boxErr < 0.7 * ellErr) return make('rect', rectFrom(box));
+  }
   // Round: an ellipse (or circle). With corners found but no polygon fitting, only a close fit.
   if (ell.err < (k <= 2 ? 0.11 : 0.07) && Math.min(ell.rx, ell.ry) > 0.12 * Math.max(ell.rx, ell.ry)) return make('ellipse', ellipseCorners(ell));
   return null;
 }
 
 /**
- * Snaps a held stroke to a shape, or returns null. Only when the pen was held still for `SNAP_HOLD_MS` at the end.
- * Open strokes: line (snapped to horizontal / vertical within 5°), arrow, double arrow. Closed strokes (overshoot at
- * the closure is fine): rectangle (any rotation; squares), ellipse (any rotation; circles), triangle, diamond,
- * pentagon, hexagon, 5-point star. The result has a fresh id and the default style; the caller sets colour and width.
+ * The shape a stroke looks like, or null; no hold needed (the overlays call it once they see the hold, with the
+ * points up to where the hold began). Open strokes: line (snapped to horizontal / vertical within 5°), arrow, double
+ * arrow. Closed strokes (overshoot at the closure is fine): rectangle (any rotation; squares), ellipse (any rotation;
+ * circles), triangle, diamond, pentagon, hexagon, 5-point star. The result has a fresh id and the default style; the
+ * caller sets colour and width.
  */
-export function snapShape(points: InkPoint[], heldMs: number): ShapeItem | null {
-  if (heldMs < SNAP_HOLD_MS || points.length < 2) return null;
+export function recognizeShape(points: readonly { x: number; y: number }[]): ShapeItem | null {
+  if (points.length < 2) return null;
   const [x0, y0, x1, y1] = pointsBBox(points);
   const diag = Math.hypot(x1 - x0, y1 - y0);
   if (diag < 8) return null;
@@ -539,4 +634,58 @@ export function snapShape(points: InkPoint[], heldMs: number): ShapeItem | null 
   const loop = dist(pts[0]!, pts[pts.length - 1]!) < 0.25 * diag || L > 2.2 * diag ? closeLoop(pts, diag) : null;
   if (loop) return recogniseClosed(loop, diag);
   return recogniseOpen(raw, diag); // the drawn points: an arrow's tip stays exactly where it was drawn
+}
+
+/** `recognizeShape`, only when the pen was held still for `SNAP_HOLD_MS` at the end (`heldMs`). */
+export function snapShape(points: InkPoint[], heldMs: number): ShapeItem | null {
+  return heldMs < SNAP_HOLD_MS ? null : recognizeShape(points);
+}
+
+const OPEN_KINDS: ReadonlySet<ShapeKind> = new Set(['line', 'arrow', 'double-arrow']);
+
+/**
+ * Adjusting a snapped shape while the pen is still down: the pen was at `from` when it snapped and is at `to` now.
+ * Returns the shape's new `pts` (same kind).
+ * - Lines and arrows: the end nearest the pen follows it (by the pen's offset, so it doesn't jump), the other end
+ *   stays; the line snaps to horizontal / vertical within 5°, as when it was recognised.
+ * - Closed shapes: scaled and turned about their centre, by how the pen moved relative to it (distance and angle from
+ *   the centre, measured from `from`). Uniform scale, so a circle stays a circle and a square a square. A turn under
+ *   6° keeps the snapped orientation; rectangles and ellipses also come upright within 6°.
+ */
+export function adjustShape(s: Pick<ShapeItem, 'kind' | 'pts'>, from: readonly [number, number], to: readonly [number, number]): P[] {
+  const pts = s.pts.map((p) => [p[0], p[1]] as P);
+  const f: P = [from[0], from[1]];
+  const t: P = [to[0], to[1]];
+  if (OPEN_KINDS.has(s.kind)) {
+    const a = pts[0], b = pts[1];
+    if (!a || !b) return pts;
+    const moveB = dist(b, f) <= dist(a, f);
+    const fixed = moveB ? a : b;
+    const end = add(moveB ? b : a, sub(t, f));
+    const len = dist(fixed, end);
+    if (len < 1) return pts;
+    const ang = snapAxis(Math.atan2(end[1] - fixed[1], end[0] - fixed[0]));
+    const e: P = [fixed[0] + Math.cos(ang) * len, fixed[1] + Math.sin(ang) * len];
+    return moveB ? [fixed, e] : [e, fixed];
+  }
+  if (!pts.length) return pts;
+  const c: P = [pts.reduce((m, p) => m + p[0], 0) / pts.length, pts.reduce((m, p) => m + p[1], 0) / pts.length];
+  const u = sub(f, c);
+  const v = sub(t, c);
+  const lu = Math.hypot(u[0], u[1]);
+  const lv = Math.hypot(v[0], v[1]);
+  if (lu < 1e-6 || lv < 1e-6) return pts;
+  const k = Math.min(50, Math.max(0.05, lv / lu));
+  let th = Math.atan2(v[1], v[0]) - Math.atan2(u[1], u[0]);
+  th = Math.atan2(Math.sin(th), Math.cos(th));
+  if (Math.abs(th) <= ADJUST_TURN_SNAP_DEG * DEG) th = 0;
+  else if ((s.kind === 'rect' || s.kind === 'ellipse') && pts.length >= 4) {
+    const a0 = Math.atan2(pts[1]![1] - pts[0]![1], pts[1]![0] - pts[0]![0]);
+    th = snapAxis(a0 + th, ADJUST_TURN_SNAP_DEG) - a0;
+  }
+  const cos = Math.cos(th) * k, sin = Math.sin(th) * k;
+  return pts.map(([x, y]) => {
+    const dx = x - c[0], dy = y - c[1];
+    return [c[0] + dx * cos - dy * sin, c[1] + dx * sin + dy * cos] as P;
+  });
 }
