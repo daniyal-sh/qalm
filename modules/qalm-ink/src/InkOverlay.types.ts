@@ -86,5 +86,5 @@ export interface InkOverlayProps {
 }
 
 /** Palm rejection constants (tech-spec §3). Shared by every overlay implementation. */
-export const PALM_MAJOR_MM = { relaxed: 9, standard: 7, strict: 5 } as const;
+export const PALM_MAJOR_MM = { relaxed: 30, standard: 20, strict: 14 } as const;
 export const PEN_LOCKOUT_MS = 600;

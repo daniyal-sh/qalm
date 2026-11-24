@@ -304,7 +304,9 @@ own size onto the page, so it needs no zoom state.
 web CSS px = 0.2646 mm):
 1. Pen input always draws. With `drawWith: 'pen'`, touches never draw: they're passed through to scroll and zoom, except a touch
    that rules 2 or 3 reject, which never scrolls (web: its `touchstart` is cancelled) and is reported with that reason.
-2. Touches whose contact major axis is larger than the threshold are rejected: relaxed 9 mm, standard 7 mm, strict 5 mm. The major axis is
+2. Touches whose contact major axis is larger than the threshold are rejected: relaxed 30 mm, standard 20 mm, strict 14 mm. Fingertips
+   (7–12 mm) draw at every level, palms (20–40 mm) are rejected from standard, and a 15–18 mm flat finger or palm edge only at strict;
+   rule 3 and the multi-touch retraction catch smaller palm edges. The setting is stored by name, not by number. The major axis is
    the full contact length on every platform: Android `getTouchMajor`, iOS `2 × majorRadius` (not reduced by `majorRadiusTolerance`),
    web the larger of the pointer's `width` / `height`.
 3. Touches within 600 ms of pen activity, or below or beside the pen on the `hand` side, are rejected.

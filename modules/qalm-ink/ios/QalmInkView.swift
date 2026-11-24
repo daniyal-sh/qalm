@@ -40,7 +40,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private var lassoRect = false
   private var drawWithPen = true
   private var rightHanded = true
-  private var palmThresholdMm = 7.0
+  private var palmThresholdMm = 20.0
   private var committed = Set<String>()
 
   // MARK: State
@@ -183,9 +183,9 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     drawWithPen = drawWith != "any"
     rightHanded = hand != "left"
     switch palm {
-    case "relaxed": palmThresholdMm = 9
-    case "strict": palmThresholdMm = 5
-    default: palmThresholdMm = 7
+    case "relaxed": palmThresholdMm = 30
+    case "strict": palmThresholdMm = 14
+    default: palmThresholdMm = 20
     }
     applyInputConfig()
   }

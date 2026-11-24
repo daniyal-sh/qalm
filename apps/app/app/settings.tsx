@@ -97,7 +97,7 @@ function PenSection() {
             ]}
           />
         </Row>
-        <Row title="Palm rejection" description={`Ignore contacts wider than ${PALM_MAJOR_MM[input.palm]} mm`}>
+        <Row title="Palm rejection" description={`Fingertips write; contacts wider than ${PALM_MAJOR_MM[input.palm]} mm are a palm`}>
           <Segmented<Palm>
             value={input.palm}
             onChange={(palm) => setInput({ palm })}
@@ -134,7 +134,7 @@ function PenSection() {
       <SectionLabel>Test area</SectionLabel>
       <View style={[styles.pad, { borderColor: c.line }]}>
         <Text variant="meta" style={{ position: 'absolute', left: 12, top: 10, color: '#8b8b95' }}>
-          Rest your hand and write here
+          Write with a finger or the pen, and rest your palm here
         </Text>
         <InkOverlay
           pageSize={{ w: 600, h: 200 }}

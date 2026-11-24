@@ -28,8 +28,8 @@ delete env.ELECTRON_RUN_AS_NODE;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MM_PER_PX = 0.2646;
 const radius = (mm) => mm / MM_PER_PX / 2;
-const FINGER = 5; // mm across: a finger at every setting (strict is 5 mm, so use 4.5 there)
-const PALM = 25;
+const FINGER = 9; // mm across: a fingertip, which draws at every setting
+const PALM = 30; // a palm at standard and strict
 
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -115,7 +115,7 @@ try {
   // ---- Settings test area: the messages ----
   await win.goto('app://qalm/settings');
   await win.getByText('Pen and palm rejection').first().click();
-  await win.getByText('Rest your hand and write here').waitFor();
+  await win.getByText('Write with a finger or the pen, and rest your palm here').waitFor();
   const pad = await win.locator('canvas').last().boundingBox();
   const px = pad.x + pad.width / 2;
   const py = pad.y + pad.height / 2;
@@ -131,18 +131,22 @@ try {
 
   await choose('Pen and finger');
   for (const [label, palm, finger, wide] of [
-    ['Relaxed · 9 mm', 'relaxed', 8.5, 9.5],
-    ['Standard · 7 mm', 'standard', 6.5, 7.5],
-    ['Strict · 5 mm', 'strict', 4.5, 5.5],
+    ['Relaxed · 30 mm', 'relaxed', 12, 35],
+    ['Standard · 20 mm', 'standard', 12, 25],
+    ['Strict · 14 mm', 'strict', 12, 16],
   ]) {
     await choose(label);
     await drag([{ x: px - 150, y: py, mm: finger }], 12, 2, 8);
     check(`test area, ${palm}: a ${finger} mm finger writes`, (await message()) === idle);
     await drag([{ x: px - 150, y: py, mm: wide }], 12, 2, 8);
     check(`test area, ${palm}: a ${wide} mm contact is a palm`, (await message()) === 'Ignored: looked like a palm');
-    await drag([{ x: px - 150, y: py - 20, mm: 4 }], 12, 0, 4); // reset the message
+    await drag([{ x: px - 150, y: py - 20, mm: 8 }], 12, 0, 4); // reset the message
   }
-  await choose('Standard · 7 mm');
+  // A 16 mm flat finger or palm edge writes at standard; strict calls it a palm (checked above).
+  await choose('Standard · 20 mm');
+  await drag([{ x: px - 150, y: py, mm: 16 }], 12, 2, 8);
+  check('test area, standard: a 16 mm flat finger writes', (await message()) === idle);
+  await choose('Standard · 20 mm');
   await choose('Right');
   await penLine(px - 60, py - 30, px + 60, py - 30);
   await drag([{ x: px - 250, y: py - 60, mm: FINGER }], 0, 0, 1); // far left and above: only the lockout applies
