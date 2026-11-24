@@ -1,5 +1,5 @@
 import fontkit from '@pdf-lib/fontkit';
-import { BlendMode, LineCapStyle, PDFDocument, StandardFonts, degrees, rgb, type PDFEmbeddedPage, type PDFFont, type PDFImage, type RGB } from 'pdf-lib';
+import { BlendMode, LineCapStyle, PDFDocument, StandardFonts, degrees, rgb, type PDFEmbeddedPage, type PDFFont, type PDFImage, type PDFPage, type RGB } from 'pdf-lib';
 import { strokeSvgPath } from '../geometry/stroke';
 import { inkPaint } from '../geometry/color';
 import { itemsOnPaper, paperPattern, DOT_RADIUS, RULE_WIDTH } from '../geometry/paper';
@@ -9,6 +9,10 @@ import { wrapText } from '../render/text';
 import type { Notebook } from '../model/notebook';
 import type { Page } from '../model/page';
 import { FIGTREE_REGULAR_B64 } from './figtreeFont';
+import { FONT_B_B64, FONT_BI_B64, FONT_I_B64, FONT_M_B64, FONT_X_B64 } from '../markdown/fontData';
+import { layoutMarkdown } from '../markdown/layout';
+import type { MdFont } from '../markdown/fonts';
+import type { TextItem } from '../types';
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 function fromBase64(s: string): Uint8Array {
@@ -56,6 +60,26 @@ function textRuns(fonts: { font: PDFFont; has: Set<number> }[], s: string): Run[
   return runs;
 }
 
+const MD_FONT_B64: Record<Exclude<MdFont, 'r'>, string> = { b: FONT_B_B64, i: FONT_I_B64, bi: FONT_BI_B64, m: FONT_M_B64, x: FONT_X_B64 };
+
+/**
+ * Draws a Markdown text box (`format: 'md'`) from its layout, the same ops the page draws: text runs in their fonts,
+ * tints and rules as rectangles, maths as paths. `font` embeds each font on first use.
+ */
+async function drawMarkdown(out: PDFPage, H: number, item: TextItem, font: (f: MdFont) => Promise<PDFFont>): Promise<void> {
+  const color = parseColor(item.color);
+  const rot = item.rot ?? 0;
+  const [cos, sin] = [Math.cos(rot), Math.sin(rot)];
+  // Box-local (u right, v down) to PDF space (y up); pdf-lib turns counter-clockwise, ours turn clockwise.
+  const at = (u: number, v: number) => ({ x: item.x + u * cos - v * sin, y: H - (item.y + u * sin + v * cos) });
+  const rotate = rot ? { rotate: degrees((-rot * 180) / Math.PI) } : {};
+  for (const op of layoutMarkdown(item.text, item.w, item.fontSize).ops) {
+    if (op.k === 'text') out.drawText(op.text, { ...at(op.x, op.y), size: op.size, font: await font(op.font), color, ...rotate });
+    else if (op.k === 'rect') out.drawRectangle({ ...at(op.x, op.y + op.h), width: op.w, height: op.h, color, ...(op.alpha < 1 ? { opacity: op.alpha } : {}), ...rotate });
+    else out.drawSvgPath(op.d, { ...at(op.x, op.y), scale: op.s, color, borderWidth: 0, ...rotate });
+  }
+}
+
 const runsWidth = (runs: Run[], size: number) => runs.reduce((w, r) => w + r.font.widthOfTextAtSize(r.text, size), 0);
 
 const isPng = (b: Uint8Array) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
@@ -74,7 +98,7 @@ export interface ExportPdfOptions {
 /**
  * Exports a notebook as PDF: paper or the source PDF page as background, strokes and shapes as vector paths,
  * images (PNG and JPEG; others via `opts.toPng`) and text boxes (Figtree, subset, wrapped with its metrics like on
- * screen; see `textRuns` for characters Figtree lacks).
+ * screen; see `textRuns` for characters Figtree lacks). Markdown boxes draw their layout (`drawMarkdown`).
  */
 export async function exportPdf(
   nb: Notebook,
@@ -95,6 +119,13 @@ export async function exportPdf(
       fonts = [fig, sym].map((font) => ({ font, has: new Set(font.getCharacterSet()) }));
     }
     return fonts;
+  };
+  // Markdown boxes' fonts, each embedded (subset) on first use.
+  const mdFonts = new Map<MdFont, Promise<PDFFont>>();
+  const mdFont = (f: MdFont) => {
+    let p = mdFonts.get(f);
+    if (!p) mdFonts.set(f, (p = pdf.embedFont(f === 'r' ? figtreeBytes() : fromBase64(MD_FONT_B64[f]), { subset: true })));
+    return p;
   };
   const sources = new Map<string, Promise<PDFDocument>>();
   const embedded = new Map<string, PDFEmbeddedPage>();
@@ -167,6 +198,10 @@ export async function exportPdf(
           break;
         }
         case 'text': {
+          if (item.format === 'md') {
+            await drawMarkdown(out, H, item, mdFont);
+            break;
+          }
           const fs = await textFonts();
           const size = item.fontSize;
           const rows = wrapText(item.text, item.w, (s) => runsWidth(textRuns(fs, s), size));
