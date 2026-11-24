@@ -2,6 +2,7 @@ import * as Y from 'yjs';
 import { LOCAL_ORIGIN } from '../origin';
 import { newId } from '../ids';
 import { normalizeColor } from '../geometry/color';
+import type { LectureSummary } from '../lecture/types';
 
 /** Which swatch list: text and shapes use the pen list. */
 export type SwatchTool = 'pen' | 'highlighter';
@@ -58,6 +59,29 @@ export class Library {
     this.folderMap = doc.getMap('folders');
     this.entryMap = doc.getMap('entries');
     this.swatchMap = doc.getMap('swatches');
+    this.lectureMap = doc.getMap('lectures');
+  }
+
+  private readonly lectureMap: Y.Map<LectureSummary>;
+
+  /** Lecture sessions (docs/lecture-mode.md §5), newest first; `notebookId` filters to one notebook. */
+  lectures(notebookId?: string): LectureSummary[] {
+    const out: LectureSummary[] = [];
+    this.lectureMap.forEach((v) => {
+      if (v && typeof v === 'object' && typeof v.id === 'string' && (!notebookId || v.notebookId === notebookId)) out.push(v);
+    });
+    return out.sort((a, b) => b.startedAt - a.startedAt);
+  }
+
+  /** Adds or updates a session's entry (skipped when nothing changed). */
+  putLecture(s: LectureSummary): void {
+    const cur = this.lectureMap.get(s.id);
+    if (cur && JSON.stringify(cur) === JSON.stringify(s)) return;
+    this.doc.transact(() => this.lectureMap.set(s.id, { ...s }), LOCAL_ORIGIN);
+  }
+
+  removeLecture(id: string): void {
+    if (this.lectureMap.has(id)) this.doc.transact(() => this.lectureMap.delete(id), LOCAL_ORIGIN);
   }
 
   private tx(fn: () => void): void {

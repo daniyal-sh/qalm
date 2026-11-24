@@ -71,7 +71,7 @@ export {
   MAX_CONTEXT,
 } from './geometry/regions';
 export { exportPdf, type ExportPdfOptions } from './export/pdf';
-export { packQalm, unpackQalm, type QalmBundle } from './export/qalm';
+export { packQalm, packQalmStream, unpackQalm, type QalmBundle } from './export/qalm';
 export {
   encodeQinkUpdate,
   encodeQinkRead,
@@ -98,3 +98,36 @@ export {
   type QinkAsk,
 } from './qink';
 export { threadBox, anchorInkRemoved } from './anchor';
+export { LectureClock } from './lecture/clock';
+export { LectureLog } from './lecture/log';
+export { LectureReplay, strokeTimes, type BaseLookup } from './lecture/replay';
+export { LectureDoc, lectureDocId, LECTURE_SERVER_ORIGIN } from './lecture/doc';
+export {
+  itemToJson,
+  itemFromJson,
+  eventsToJsonl,
+  eventsFromJsonl,
+  packTimelineChunk,
+  unpackTimelineChunk,
+  unpackTimeline,
+  fmtT,
+  fmtTExact,
+  parseT,
+} from './lecture/timeline';
+export { cleanSegment, cleanTranscript, cleanCrop } from './lecture/validate';
+export { lectureFiles, readLectureFiles, lectureReadme, lectureBundleOf, lectureDocFromBundle, type LectureBundle } from './lecture/bundle';
+export {
+  emptyLectures,
+  lectureLabel,
+  resolveLecture,
+  transcriptLine,
+  lectureLine,
+  parseLectureRef,
+  encodeLectureRead,
+  parseCropRegions,
+  LECTURE_READ_WINDOW_MS,
+  LECTURE_READ_IMAGES,
+  type QinkLectures,
+  type LectureReadPart,
+} from './lecture/qink';
+export type * from './lecture/types';
