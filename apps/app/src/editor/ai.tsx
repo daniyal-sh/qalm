@@ -55,9 +55,22 @@ const NONE = { agents: [] as Presence['agents'], live: false };
 
 /**
  * Play / Pause AI on this device for the open notebook (see aiLive.ts). Starts paused; leaving the app (another app
- * in front, the tab hidden, the window minimized), closing the notebook, AI access going off or signing out stops it.
+ * in front, the tab hidden, the window minimized; unless held, see `holdWhileBackgrounded`), closing the notebook, AI
+ * access going off or signing out stops it.
  */
-export function useAiLive(provider: SyncProvider | null, enabled: boolean): { playing: boolean; play(): void; pause(): void } {
+export function useAiLive(
+  provider: SyncProvider | null,
+  enabled: boolean,
+): {
+  playing: boolean;
+  /** A Pause pressed offline that hasn't reached the server yet. */
+  pausePending: boolean;
+  play(): void;
+  /** False when it couldn't go out yet: queued until the socket is back. */
+  pause(): boolean;
+  /** Keep sharing while the app is in the background (e.g. a running Lecture recording); returns the release. */
+  holdWhileBackgrounded(reason: string): () => void;
+} {
   const [ctl, setCtl] = React.useState<AiLive | null>(null);
   const [, force] = React.useReducer((x: number) => x + 1, 0);
   React.useEffect(() => {
@@ -66,7 +79,8 @@ export function useAiLive(provider: SyncProvider | null, enabled: boolean): { pl
     const off = c.onChange(force);
     setCtl(c);
     const sub = AppState.addEventListener('change', (st) => {
-      if (st === 'background') c.stop();
+      if (st === 'background') c.background();
+      else if (st === 'active') c.foreground();
     });
     return () => {
       sub.remove();
@@ -76,7 +90,13 @@ export function useAiLive(provider: SyncProvider | null, enabled: boolean): { pl
     };
   }, [provider, enabled]);
   // `force` re-renders on every change, so `playing` here is always current.
-  return { playing: !!ctl?.playing, play: () => ctl?.play(), pause: () => ctl?.pause() };
+  return {
+    playing: !!ctl?.playing,
+    pausePending: !!ctl?.pausePending,
+    play: () => ctl?.play(),
+    pause: () => ctl?.pause() ?? false,
+    holdWhileBackgrounded: (reason) => ctl?.holdWhileBackgrounded(reason) ?? (() => undefined),
+  };
 }
 
 /**

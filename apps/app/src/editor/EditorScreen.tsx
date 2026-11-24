@@ -181,15 +181,23 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const [liveBump, setLiveBump] = React.useState(0);
   const presence = usePresence(s.user ? s.tm : null, notebookId, !!meta?.aiAccess, liveBump);
   const agents = presence.agents;
-  const shared = aiLive.playing || presence.live;
+  // Live here, or on another device (unless this one has a Pause queued for it).
+  const shared = aiLive.playing || (presence.live && !aiLive.pausePending);
   const playAi = () => {
+    // Apps from before Play / Pause write `aiPaused` ("Pause sharing"); the server still honours it, so Play clears it.
+    if (meta?.aiPaused) notebook?.setMeta({ aiPaused: false });
     aiLive.play();
     setLiveBump((x) => x + 1);
   };
   const pauseAi = () => {
-    aiLive.pause();
+    if (!aiLive.pause()) showToast('Offline: AI is paused here. Your other devices pause when this one reconnects');
     setLiveBump((x) => x + 1);
   };
+  // "Pause sharing" on an old device: pause every device playing, so it isn't silently undone when cleared there.
+  const oldPause = !!meta?.aiPaused;
+  React.useEffect(() => {
+    if (oldPause && aiLive.playing) aiLive.pause();
+  }, [oldPause, aiLive.playing]); // eslint-disable-line react-hooks/exhaustive-deps
   const [seen, setSeen] = React.useState<SeenThreads>({});
   const seenKey = `seen:${notebookId}`;
   React.useEffect(() => {
