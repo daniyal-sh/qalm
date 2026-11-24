@@ -296,7 +296,10 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   const toPage = (wx: number, wy: number, fn: (x: number, y: number) => void) =>
     rootRef.current?.measureInWindow((x, y) => fn((wx - x) / scale, (wy - y) / scale));
 
-  const anchors = React.useMemo(() => commentAnchors(comments, ed.activeCommentId, items), [comments, ed.activeCommentId, items]);
+  const anchors = React.useMemo(
+    () => (ed.showComments ? commentAnchors(comments, ed.activeCommentId, items) : []),
+    [comments, ed.activeCommentId, items, ed.showComments],
+  );
   const assetUri = React.useCallback((id: string) => imageUris.get(id), [imageUris]);
   const onDrawn = React.useCallback(
     (ids: string[], complete: boolean) => {

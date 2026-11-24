@@ -131,3 +131,23 @@ export function stillThinking(t: Thinking | null, threads: Iterable<ThreadEntrie
   }
   return true;
 }
+
+/** The comments panel starts closed on every screen size; the student opens it (new agent comments show the badge). */
+export const COMMENTS_START_OPEN = false;
+
+/** Which AI parts of the editor show. With the notebook's AI access off, none do (the AI access switch itself stays). */
+export interface AiUi {
+  /** Comments button and panel, margin cards, pins, "Comment on selection", new-comment toasts. */
+  comments: boolean;
+  /** Ask in the header and on the selection bar. */
+  ask: boolean;
+  /** The presence pill ("Claude is reading…", "AI can read"). */
+  presence: boolean;
+  /** The unread badge on the comments button. */
+  badge: boolean;
+}
+
+export function aiUi(aiAccess: boolean | undefined, unread = 0): AiUi {
+  const on = aiAccess === true;
+  return { comments: on, ask: on, presence: on, badge: on && unread > 0 };
+}

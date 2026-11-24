@@ -5,8 +5,6 @@ export interface Grant {
   id: string;
   clientId: string;
   clientName: string;
-  notebookIds: string[];
-  folderIds: string[];
   canComment: boolean;
   canTranscribe: boolean;
   createdAt: number;
@@ -63,7 +61,8 @@ export async function getAiOverview(tm: Authed): Promise<AiOverview> {
   return { mcpUrl: g.mcpUrl, grants: g.grants ?? [], pending: r.requests ?? [], activity: a.activity ?? [] };
 }
 
-export type GrantPatch = Partial<Pick<Grant, 'canComment' | 'canTranscribe' | 'notebookIds' | 'folderIds'>>;
+/** An approved agent can read every notebook with AI access on, so only its permissions can change. */
+export type GrantPatch = Partial<Pick<Grant, 'canComment' | 'canTranscribe'>>;
 
 export async function updateGrant(tm: Authed, id: string, patch: GrantPatch): Promise<Grant> {
   const res = await tm.fetch(`/ai/grants/${encodeURIComponent(id)}`, {
@@ -90,12 +89,11 @@ export function grantSummary(g: Pick<Grant, 'canComment' | 'canTranscribe'>): st
   return 'Read only';
 }
 
-/** Toggles one notebook in a grant's list. */
-export function toggleId(ids: string[], id: string, on: boolean): string[] {
-  const has = ids.includes(id);
-  if (on && !has) return [...ids, id];
-  if (!on && has) return ids.filter((x) => x !== id);
-  return ids;
+/** What every approved agent can see: "3 notebooks with AI access on", "No notebook has AI access on". */
+export function aiScope(entries: readonly { aiAccess: boolean; deletedAt: number | null }[]): string {
+  const n = entries.filter((e) => e.aiAccess && !e.deletedAt).length;
+  if (!n) return 'No notebook has AI access on';
+  return `${n} notebook${n === 1 ? '' : 's'} with AI access on`;
 }
 
 /** Agents following a notebook right now (GET /ai/presence): a pending wait, or a call in the last minute. */

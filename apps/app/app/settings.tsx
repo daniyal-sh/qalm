@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DeleteAccountSheet } from '../src/account/DeleteAccountSheet';
 import { formatBytes, summarizeUsage, type StorageUsage } from '../src/api/storage';
-import { denyRequest, getAiOverview, grantSummary, revokeGrant, toggleId, updateGrant, type AiOverview, type Grant } from '../src/api/ai';
+import { aiScope, denyRequest, getAiOverview, grantSummary, revokeGrant, updateGrant, type AiOverview, type Grant } from '../src/api/ai';
 import { rejectedTouchText } from '../src/lib/palm';
 import { relativeTime } from '../src/library/actions';
 import { useLibraryData, useSession } from '../src/state/session';
@@ -248,14 +248,9 @@ function PenSection() {
 function GrantCard({ g, onChange, onRevoke }: { g: Grant; onChange(next: Grant): void; onRevoke(): void }) {
   const { c } = useTheme();
   const s = useSession();
-  const { entries, folders } = useLibraryData();
+  const { entries } = useLibraryData();
   const [open, setOpen] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
-  const notebooks = entries.filter((e) => !e.deletedAt);
-  const scope = [
-    ...g.folderIds.map((id) => `Folder: ${folders.find((f) => f.id === id)?.name ?? 'Folder'}`),
-    ...g.notebookIds.map((id) => entries.find((e) => e.id === id)?.title ?? 'Notebook'),
-  ];
   const patch = async (p: Parameters<typeof updateGrant>[2]) => {
     if (!s.tm) return;
     setErr(null);
@@ -274,7 +269,7 @@ function GrantCard({ g, onChange, onRevoke }: { g: Grant; onChange(next: Grant):
         <View style={{ flex: 1 }}>
           <Text variant="bodyStrong">{g.clientName}</Text>
           <Text variant="meta" numberOfLines={2}>
-            {scope.length ? scope.join(', ') : 'No notebooks'} · {g.lastUsedAt ? `active ${relativeTime(g.lastUsedAt).toLowerCase()}` : 'not used yet'}
+            {aiScope(entries)} · {g.lastUsedAt ? `active ${relativeTime(g.lastUsedAt).toLowerCase()}` : 'not used yet'}
           </Text>
         </View>
         <Pill label={grantSummary(g)} tone="assistant" />
@@ -288,22 +283,6 @@ function GrantCard({ g, onChange, onRevoke }: { g: Grant; onChange(next: Grant):
           <Row title="Save readings" description="Stores what it reads in your handwriting. You can edit it under Reading">
             <Toggle label="Save readings" value={g.canTranscribe} onChange={(v) => void patch({ canTranscribe: v })} />
           </Row>
-          <SectionLabel style={{ paddingHorizontal: 16 }}>Notebooks it can see</SectionLabel>
-          {notebooks.length === 0 ? (
-            <Text variant="meta" style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-              No notebooks yet.
-            </Text>
-          ) : (
-            notebooks.map((e) => {
-              const viaFolder = !!e.folderId && g.folderIds.includes(e.folderId);
-              const on = viaFolder || g.notebookIds.includes(e.id);
-              return (
-                <Row key={e.id} title={e.title || 'Untitled notebook'} description={viaFolder ? 'Included through its folder' : undefined}>
-                  <Toggle label={e.title} value={on} disabled={viaFolder} onChange={(v) => void patch({ notebookIds: toggleId(g.notebookIds, e.id, v) })} />
-                </Row>
-              );
-            })
-          )}
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, gap: 12 }}>
             <Text variant="meta" tone="faint">
               Expires {new Date(g.expiresAt).toLocaleDateString()}
@@ -351,7 +330,7 @@ function AiSection() {
         <EmptyState
           icon="cpu"
           title="Sign in to connect an agent"
-          body="Agents connect over MCP to the notebooks you pick. They can read and comment, but never change your ink."
+          body="Agents connect over MCP to the notebooks you turn AI access on for. They can read and comment, but never change your ink."
           action={s.serverUrl ? <Button label="Sign in" variant="primary" onPress={() => router.push('/sign-in')} /> : undefined}
         />
       </Panel>
@@ -360,7 +339,10 @@ function AiSection() {
   const mcpUrl = data?.mcpUrl ?? `${s.serverUrl}/mcp`;
   return (
     <View style={{ gap: 8 }}>
-      <Text tone="muted">Agents connect over MCP. They can read the notebooks you pick and leave comments. They can never change your ink.</Text>
+      <Text tone="muted">
+        Agents connect over MCP. Every agent you approve can read the notebooks you've turned AI access on for (in each notebook's
+        menu) and leave comments. They can never change your ink.
+      </Text>
       {data?.pending.map((p) => (
         <View key={p.id} style={[styles.pending, { backgroundColor: c.warnSoft, borderColor: c.line }]}>
           <Avatar name={p.clientName} kind="agent" size={30} />
