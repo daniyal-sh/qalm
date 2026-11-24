@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in qalm doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. For security issues, don't use this form: email privacy@apollolearn.app (see SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a notebook
+        2. Select the lasso
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - Web (qalm.apollolearn.app/app)
+        - Windows app
+        - macOS app
+        - Android
+        - iPad
+        - MCP / AI agent
+        - Self-hosted server
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device, OS, browser and pen
+      placeholder: e.g. Galaxy Tab S9, Android 15, S Pen
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, recordings or logs
+      description: Please leave out anything personal, like your notes or your email.

@@ -1,4 +1,4 @@
-// The qalm mark ("A, nib in orbit, refined"; mockups/logo-options.html) as plain SVG, in one place.
+// The qalm mark ("A, nib in orbit, refined"; docs/design/mockups/logo-options.html) as plain SVG, in one place.
 // Every consumer that can import ES modules builds from here (desktop and app icons, the site); the rest inline the
 // generated files (`node assets/brand/build.mjs` writes them next to this file).
 //

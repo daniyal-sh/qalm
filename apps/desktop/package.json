@@ -2,6 +2,7 @@
   "name": "@qalm/desktop",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "qalm by Apollo for Windows and macOS",
   "author": "Apollo",
   "homepage": "https://apollolearn.app",

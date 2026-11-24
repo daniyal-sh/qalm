@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: qalm website
+    url: https://qalm.apollolearn.app
+    about: Try qalm, download it, and read the privacy notice and terms.
+  - name: Report a security vulnerability
+    url: https://github.com/daniyal-sh/qalm/blob/main/SECURITY.md
+    about: Please don't open a public issue. Email privacy@apollolearn.app instead.
