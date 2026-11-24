@@ -32,6 +32,25 @@ describe('sync', () => {
     c.close();
   });
 
+  it('answers the heartbeat ping with pong (a runtime auto-response)', async () => {
+    const t = await signIn('ping@example.com');
+    const docId = 'pg:nbping:p1';
+    const a = await YClient.connect(t.accessToken, docId);
+    const pongs: string[] = [];
+    a.ws.addEventListener('message', (ev) => {
+      if (typeof ev.data === 'string') pongs.push(ev.data);
+    });
+    a.ws.send('ping');
+    await until(() => pongs.length === 1);
+    expect(pongs).toEqual(['pong']);
+    // Still syncing afterwards: the ping never reached webSocketMessage as an update.
+    const b = await YClient.connect(t.accessToken, docId);
+    new Page(a.doc).addItem(stroke('s1', 50, 100, 150, 120));
+    await until(() => new Page(b.doc).items().length === 1);
+    a.close();
+    b.close();
+  });
+
   it('tickets are single-use, bound to the doc, and owner-only', async () => {
     const owner = await signIn('owner@example.com');
     const other = await signIn('other@example.com');

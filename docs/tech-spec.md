@@ -324,7 +324,8 @@ from the region images with its own vision. That keeps the app about 20 MB light
 
 - **Durable Objects:** there's one `DocRoom` per doc ID (`nb:`, `pg:`, `lib:`). It speaks the Yjs sync and awareness protocol over a hibernating WebSocket,
   persists updates in DO storage, and compacts them into a snapshot every 200 updates. A page `DocRoom` notifies its notebook's `DocRoom` on each
-  client update (`lastClientUpdateAt`, `changedPage`).
+  client update (`lastClientUpdateAt`, `changedPage`). A text `ping` gets `pong` through `setWebSocketAutoResponse`, so heartbeats
+  never wake a hibernating room.
 - **Sync auth:** `POST /sync/ticket {docId}` with `Authorization: Bearer <accessToken>` returns a single-use ticket that expires in 30 s. Then
   `GET /sync/{docId}?ticket=…` upgrades. Access tokens never appear in URLs.
 - **R2** `ASSETS`: `PUT /assets/{sha256}` and `GET /assets/{sha256}` (Bearer auth; content-addressed).
@@ -391,6 +392,11 @@ from the region images with its own vision. That keeps the app about 20 MB light
 - **Sync:** the client uses the `y-websocket` provider (with tickets) for each loaded doc, with IndexedDB persistence on web and file persistence on native.
   Native snapshot files are replaced crash-safely: write `.tmp`, rename the old file to `.bak`, rename `.tmp` into place, delete `.bak`; reads fall
   back to a complete `.tmp`, then `.bak`.
+  - **Dropped connections:** after 20 s without a message the provider sends `ping`; if nothing arrives within 8 s (or a socket doesn't
+    open within 16 s) it drops the socket and reconnects with backoff (0.5 s doubling to 30 s), each time with a fresh ticket. The browser's
+    `offline` event drops the socket at once and stops retrying until `online`, which reconnects at once. Back in the foreground (page
+    visible, or `AppState` active on iOS/Android) it pings at once. The editor shows "Reconnecting…" while retrying and "Offline" when the
+    device is offline. No edit is lost: every connect starts with sync step 1 both ways, which also resends updates sent into a dead socket.
 - **Big notebooks:** the editor renders views only for pages near the viewport (mounted pages ±2, plus plain page outlines a few pages further)
   and re-renders on scroll only when the shown pages change. Page docs open one at a time, nearest the current page first (`pageDocQueue`),
   and stay in an LRU of 24 idle docs (flushed before they are dropped; pages with undo history are dropped last). PDF renders run 2 at a

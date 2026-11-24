@@ -50,6 +50,8 @@ export class DocRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    // Client heartbeat (app sync provider): answered by the runtime, so it never wakes a hibernating room.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     this.createTables();
     this.load();
     const id = this.kvGet<string>('docId');
