@@ -25,6 +25,7 @@ export {
 export { adjustShape, recognizeShape, snapShape, SNAP_HOLD_MS, SNAP_HOLD_TOLERANCE_MM } from './geometry/shape';
 export { hitTestErase, lassoSelect } from './geometry/hit';
 export { splitStroke, planPartialErase, emptyPlan, EraseSession, type ErasePlan } from './geometry/erase';
+export { projectOnLine, rulerDegrees, rulerEdgeAt, rulerEdges, rulerLine, snapRulerAngle, snapToLine, RULER, type RulerEdge, type RulerPose } from './geometry/ruler';
 export { detectScribble, isScribble, scribbleShape, scribbleTargets, SCRIBBLE, UNITS_PER_MM, type ScribbleShape } from './geometry/scribble';
 export { itemBBox, unionBBox, textHeight, setTextMeasure, boxCorners, TEXT_LINE_HEIGHT, type TextMeasure } from './geometry/bbox';
 export { shapePolylines, ellipseAxes } from './geometry/shape';
