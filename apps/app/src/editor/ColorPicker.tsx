@@ -132,7 +132,7 @@ export function ColorPicker({ visible, tool, initial: given, saved, anchor, onCl
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} supportedOrientations={['portrait', 'landscape']}>
-      <Pressable accessibilityLabel="Close colour picker" style={[StyleSheet.absoluteFill, narrow && { backgroundColor: 'rgba(0,0,0,0.32)' }]} onPress={onClose} />
+      <Pressable accessibilityLabel="Close colour picker" style={[StyleSheet.absoluteFill, narrow && { backgroundColor: c.scrim }]} onPress={onClose} />
       <View accessibilityViewIsModal style={[styles.pop, shadow2, { backgroundColor: c.surface, borderColor: c.line }, narrow ? null : { width: WIDTH }, pos]}>
         <View style={{ width: WIDTH - 32, gap: 12 }}>
           <View style={styles.head}>

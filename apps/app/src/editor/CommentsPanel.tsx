@@ -3,9 +3,10 @@ import * as React from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { relativeTime } from '../library/actions';
+import { hoverTransition } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
 import { indicatorStyleFor } from '../theme/scrollbars';
-import { PANEL_HEADER, radius } from '../theme/tokens';
+import { PANEL_HEADER, radius, space } from '../theme/tokens';
 import { Avatar, Button, focusRing, IconButton, Segmented, TextField } from '../ui/controls';
 import { EmptyState } from '../ui/layout';
 import { Text } from '../ui/Text';
@@ -41,17 +42,30 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
   const { where, hasLine } = whereText(row);
   const accent = agent ? c.assistant : c.accent;
   const replies = t.kinds.length - 1;
+  const [hover, setHover] = React.useState(false);
+  // "On your ink" / "On this page" ride in the meta line; a quote of the ink, or "Ink removed", gets its own line.
+  const plainWhere = where === 'On your ink' || where === 'On this page';
+  const rest = agent ? c.assistantLine : c.line;
   return (
-    <View style={[styles.card, { backgroundColor: agent ? c.assistantSoft : c.surface, borderColor: active ? accent : agent ? c.assistantLine : c.line }]}>
+    <View
+      style={[
+        styles.card,
+        hoverTransition,
+        { backgroundColor: agent ? c.assistantSoft : c.surface, borderColor: active || hover ? accent : rest },
+        active && { borderWidth: 1.5, margin: -0.5 },
+      ]}
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${t.author.name}${agent ? ', AI agent' : ''}, page ${row.index + 1}: ${t.text}`}
         accessibilityHint={row.data ? (hasLine ? 'Highlights it on the page' : undefined) : 'Goes to its page'}
         accessibilityState={{ selected: active }}
         onPress={onSelect}
+        onHoverIn={() => setHover(true)}
+        onHoverOut={() => setHover(false)}
         style={(s) => {
           const st = s as PressState;
-          return [styles.summary, (st.hovered || st.pressed) && { backgroundColor: c.soft }, focusRing(c, st.focused)];
+          return [styles.summary, st.pressed && { opacity: 0.85 }, focusRing(c, st.focused)];
         }}
       >
         <View style={styles.head}>
@@ -61,14 +75,17 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
               {t.author.name}
               {agent ? <Text variant="meta" tone="assistant">{'  AI agent'}</Text> : null}
             </Text>
-            <Text variant="meta" tone="faint">
-              Page {row.index + 1} · {relativeTime(t.createdAt)}
+            <Text variant="meta" tone="faint" numberOfLines={1}>
+              Page {row.index + 1}
+              {plainWhere ? ` · ${where === 'On your ink' ? 'on your ink' : 'whole page'}` : ''} · {relativeTime(t.createdAt)}
             </Text>
           </View>
         </View>
-        <Text variant="meta" tone="muted" numberOfLines={2} style={{ fontStyle: 'italic' }}>
-          {where}
-        </Text>
+        {!plainWhere ? (
+          <Text variant="small" tone="muted" numberOfLines={2} style={[styles.quote, { borderLeftColor: rest }]}>
+            {where}
+          </Text>
+        ) : null}
         <Text numberOfLines={row.comment ? undefined : 3}>{row.comment ? row.comment.text : t.text}</Text>
       </Pressable>
       {row.comment && row.data ? (
@@ -86,7 +103,7 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
               </Text>
             </View>
           ) : null}
-          <View style={styles.actionRow}>
+          <View style={[styles.actionRow, { borderTopColor: rest }]}>
             <Button label={`Go to page ${row.index + 1}`} size="sm" variant="ghost" icon="arrow-right" onPress={onJump} />
           </View>
         </>
@@ -128,7 +145,7 @@ function Thread({ comment: cm, data, hasLine, onJump }: { comment: Comment; data
         </View>
       ) : (
         // One row: Reply and Resolve on the left, Show on the right.
-        <View style={styles.actionRow}>
+        <View style={[styles.actionRow, { borderTopColor: data && cm.author.kind === 'agent' ? c.assistantLine : c.line2 }]}>
           <Button label="Reply" size="sm" variant="ghost" icon="corner-up-left" onPress={() => setReply('')} />
           {!cm.resolved ? <Button label="Resolve" size="sm" variant="ghost" icon="check" onPress={() => data.page.resolveComment(cm.id)} /> : null}
           {hasLine ? (
@@ -300,12 +317,13 @@ const styles = StyleSheet.create({
   panel: { flex: 1, width: PANEL_W, maxWidth: '100%', minWidth: 0, overflow: 'hidden', borderLeftWidth: StyleSheet.hairlineWidth },
   top: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingLeft: 16, paddingRight: 8, ...PANEL_HEADER },
   filter: { paddingHorizontal: 12, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  list: { padding: 12, gap: 12, flexGrow: 1 },
-  card: { borderRadius: radius.panel, borderWidth: 1, padding: 6, gap: 4 },
-  summary: { borderRadius: radius.control, paddingHorizontal: 10, paddingVertical: 8, gap: 8 },
+  list: { padding: space.md, gap: space.md, flexGrow: 1 },
+  card: { borderRadius: radius.panel, borderWidth: 1, padding: space.xxs, gap: 2 },
+  summary: { borderRadius: radius.control, paddingHorizontal: 10, paddingTop: 10, paddingBottom: space.sm, gap: space.sm },
   head: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  quote: { borderLeftWidth: 2, paddingLeft: space.sm, fontStyle: 'italic' },
   reply: { borderLeftWidth: 2, paddingLeft: 10, marginLeft: 10, marginRight: 4, marginVertical: 2, gap: 2 },
   actions: { paddingHorizontal: 4, gap: 8 },
-  actionRow: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 0 },
+  actionRow: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingTop: space.xxs, marginHorizontal: space.xs, borderTopWidth: StyleSheet.hairlineWidth },
   foot: { paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
 });

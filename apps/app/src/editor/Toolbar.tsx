@@ -1,36 +1,39 @@
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { HIGHLIGHTER_WIDTH, PEN_WIDTHS, type PaperColor, type PenStyle } from '@qalm/core';
 import * as React from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { hoverTransition } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
-import { radius, shadow2 } from '../theme/tokens';
+import { CONTROL_H, CONTROL_H_SM, radius, shadow2, space } from '../theme/tokens';
 import { IconButton } from '../ui/controls';
+import { Icon } from '../ui/Icon';
 import { Text } from '../ui/Text';
 import type { ToolState } from './context';
 import { SwatchStrip } from './Swatches';
+import { ToolIcon, type ToolIconName } from './toolIcons';
 import { toolbarOverflow } from './toolbar.logic';
 import type { ToolId } from './view';
 
-type MciName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
-
-const TOOLS: { id: ToolId; icon: MciName; label: string }[] = [
-  { id: 'pen', icon: 'fountain-pen-tip', label: 'Pen' },
-  { id: 'highlighter', icon: 'marker', label: 'Highlighter' },
+const TOOLS: { id: ToolId; icon: ToolIconName; label: string }[] = [
+  { id: 'pen', icon: 'pen', label: 'Pen' },
+  { id: 'highlighter', icon: 'highlighter', label: 'Highlighter' },
   { id: 'eraser', icon: 'eraser', label: 'Eraser' },
   { id: 'lasso', icon: 'lasso', label: 'Lasso select' },
-  { id: 'text', icon: 'format-text', label: 'Text box' },
+  { id: 'text', icon: 'text', label: 'Text box' },
 ];
 
 export const ERASER_SIZES = [4, 10, 22] as const;
 
-const PEN_STYLE_OPTIONS: { id: PenStyle; icon: MciName; label: string }[] = [
-  { id: 'fountain', icon: 'fountain-pen-tip', label: 'Fountain pen' },
-  { id: 'ball', icon: 'pen', label: 'Ballpoint pen' },
+const PEN_STYLE_OPTIONS: { id: PenStyle; icon: ToolIconName; label: string }[] = [
+  { id: 'fountain', icon: 'fountain', label: 'Fountain pen' },
+  { id: 'ball', icon: 'ballpoint', label: 'Ballpoint pen' },
   { id: 'brush', icon: 'brush', label: 'Brush pen' },
 ];
 
-function ToolButton({ icon, label, selected, onPress }: { icon: MciName; label: string; selected?: boolean; onPress(): void }) {
+/** A web hover tooltip with the control's name (icon-only controls). */
+const tip = (label: string) => (Platform.OS === 'web' ? ({ title: label } as object) : {});
+
+function ToolButton({ icon, label, selected, onPress }: { icon: ToolIconName; label: string; selected?: boolean; onPress(): void }) {
   const { c } = useTheme();
   return (
     <Pressable
@@ -38,19 +41,23 @@ function ToolButton({ icon, label, selected, onPress }: { icon: MciName; label: 
       accessibilityLabel={label}
       accessibilityState={{ selected }}
       onPress={onPress}
+      {...tip(label)}
+      // Web: a tool is a toggle button, so screen readers hear "pressed" for the current one.
+      {...((Platform.OS === 'web' && selected !== undefined ? { 'aria-pressed': selected } : {}) as object)}
       style={(s) => [
         styles.tool,
-        { backgroundColor: selected ? c.accent : (s as { hovered?: boolean }).hovered || s.pressed ? c.soft : 'transparent' },
+        hoverTransition,
+        { backgroundColor: selected ? c.accent : s.pressed ? c.soft : (s as { hovered?: boolean }).hovered ? c.surface2 : 'transparent' },
       ]}
     >
-      <MaterialCommunityIcons name={icon} size={21} color={selected ? c.onAccent : c.ink2} />
+      <ToolIcon name={icon} size={22} color={selected ? c.onAccent : c.ink2} />
     </Pressable>
   );
 }
 
 function Sep() {
   const { c } = useTheme();
-  return <View style={{ width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginVertical: 8, backgroundColor: c.line }} />;
+  return <View style={{ width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginVertical: space.md, marginHorizontal: space.xxs, backgroundColor: c.line }} />;
 }
 
 function SizeDot({ size, selected, label, onPress }: { size: number; selected: boolean; label: string; onPress(): void }) {
@@ -61,7 +68,13 @@ function SizeDot({ size, selected, label, onPress }: { size: number; selected: b
       accessibilityLabel={label}
       accessibilityState={{ checked: selected }}
       onPress={onPress}
-      style={[styles.sizeHit, { backgroundColor: selected ? c.accentSoft : 'transparent', borderColor: selected ? c.accentLine : 'transparent' }]}
+      hitSlop={4}
+      {...tip(label)}
+      style={(s) => [
+        styles.sizeHit,
+        hoverTransition,
+        { backgroundColor: selected ? c.accentSoft : (s as { hovered?: boolean }).hovered ? c.surface2 : 'transparent', borderColor: selected ? c.accentLine : 'transparent' },
+      ]}
     >
       <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: selected ? c.accentInk : c.ink2 }} />
     </Pressable>
@@ -69,7 +82,7 @@ function SizeDot({ size, selected, label, onPress }: { size: number; selected: b
 }
 
 /** A tool option or an on/off toggle: accent-soft with an accent-line border when on (never a solid fill). */
-function StyleOption({ icon, label, selected, onPress, toggle }: { icon: MciName; label: string; selected: boolean; onPress(): void; toggle?: boolean }) {
+function StyleOption({ icon, label, selected, onPress, toggle }: { icon: ToolIconName; label: string; selected: boolean; onPress(): void; toggle?: boolean }) {
   const { c } = useTheme();
   return (
     <Pressable
@@ -77,9 +90,15 @@ function StyleOption({ icon, label, selected, onPress, toggle }: { icon: MciName
       accessibilityLabel={label}
       accessibilityState={{ checked: selected }}
       onPress={onPress}
-      style={[styles.sizeHit, { backgroundColor: selected ? c.accentSoft : 'transparent', borderColor: selected ? c.accentLine : 'transparent' }]}
+      hitSlop={4}
+      {...tip(label)}
+      style={(s) => [
+        styles.sizeHit,
+        hoverTransition,
+        { backgroundColor: selected ? c.accentSoft : (s as { hovered?: boolean }).hovered ? c.surface2 : 'transparent', borderColor: selected ? c.accentLine : 'transparent' },
+      ]}
     >
-      <MaterialCommunityIcons name={icon} size={19} color={selected ? c.accentInk : c.ink2} />
+      <ToolIcon name={icon} size={19} color={selected ? c.accentInk : c.ink2} />
     </Pressable>
   );
 }
@@ -99,7 +118,7 @@ function EdgeChevron({ side, onPress }: { side: 'left' | 'right'; onPress(): voi
         { backgroundColor: (s as { hovered?: boolean }).hovered || s.pressed ? c.soft : c.surface, borderColor: c.line },
       ]}
     >
-      <MaterialCommunityIcons name={side === 'left' ? 'chevron-left' : 'chevron-right'} size={20} color={c.ink2} />
+      <Icon name={side === 'left' ? 'chevron-left' : 'chevron-right'} size={18} color={c.ink2} />
     </Pressable>
   );
 }
@@ -114,10 +133,12 @@ export interface ToolbarProps {
   onZoomReset(): void;
   /** The current page's paper: the colour picker previews pen ink on it. */
   paper?: PaperColor;
+  /** Controls placed before the tools (Undo / Redo on a phone, where the header has no room for them). */
+  leading?: React.ReactNode;
 }
 
 /** The floating toolbar: a solid surface with shadow-2 (brand.md). Scrolls sideways on narrow screens. */
-export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoomReset, paper }: ToolbarProps) {
+export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoomReset, paper, leading }: ToolbarProps) {
   const { c } = useTheme();
   const t = tools.tool;
   const [dragging, setDragging] = React.useState(false);
@@ -145,10 +166,16 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
         }}
         onContentSizeChange={(content) => setM((p) => (p.content === content ? p : { ...p, content }))}
       >
+        {leading ? (
+          <>
+            {leading}
+            <Sep />
+          </>
+        ) : null}
         {TOOLS.map((x) => (
           <ToolButton key={x.id} icon={x.icon} label={x.label} selected={t === x.id} onPress={() => onTool(x.id)} />
         ))}
-        <ToolButton icon="image-outline" label="Insert image" onPress={onImage} />
+        <ToolButton icon="image" label="Insert image" onPress={onImage} />
         <Sep />
         {t === 'pen' || t === 'text' ? (
           <>
@@ -164,7 +191,7 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
                   <SizeDot key={w} size={4 + i * 3} label={['Fine', 'Medium', 'Bold'][i]!} selected={tools.penWidth === w} onPress={() => onChange({ penWidth: w })} />
                 ))}
                 <Sep />
-                <StyleOption toggle icon="shape-outline" label="Shape snapping" selected={tools.snapShapes} onPress={() => onChange({ snapShapes: !tools.snapShapes })} />
+                <StyleOption toggle icon="shapes" label="Shape snapping" selected={tools.snapShapes} onPress={() => onChange({ snapShapes: !tools.snapShapes })} />
               </>
             ) : null}
           </>
@@ -188,20 +215,26 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
         {t === 'lasso' ? (
           <>
             <StyleOption icon="lasso" label="Freeform lasso" selected={tools.lassoMode !== 'rect'} onPress={() => onChange({ lassoMode: 'free' })} />
-            <StyleOption icon="selection-drag" label="Rectangle select" selected={tools.lassoMode === 'rect'} onPress={() => onChange({ lassoMode: 'rect' })} />
-            <Text variant="meta" style={{ paddingHorizontal: 8 }}>
+            <StyleOption icon="rect-select" label="Rectangle select" selected={tools.lassoMode === 'rect'} onPress={() => onChange({ lassoMode: 'rect' })} />
+            <Text variant="meta" tone="muted" numberOfLines={1} style={{ paddingHorizontal: space.sm }}>
               {tools.lassoMode === 'rect' ? 'Tap or drag a box to select' : 'Tap or circle to select'}
             </Text>
           </>
         ) : null}
         <Sep />
-        <IconButton icon="zoom-out" label="Zoom out" size={40} onPress={() => onZoom(-1)} />
-        <Pressable accessibilityRole="button" accessibilityLabel="Reset zoom" onPress={onZoomReset} style={styles.zoomLabel}>
-          <Text variant="label" style={{ fontVariant: ['tabular-nums'], color: c.ink2 }}>
+        <IconButton icon="zoom-out" label="Zoom out" size={CONTROL_H_SM} onPress={() => onZoom(-1)} {...tip('Zoom out')} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Reset zoom"
+          onPress={onZoomReset}
+          {...tip('Reset zoom')}
+          style={(s) => [styles.zoomLabel, hoverTransition, (s as { hovered?: boolean }).hovered || s.pressed ? { backgroundColor: c.surface2 } : null]}
+        >
+          <Text variant="smallStrong" style={{ fontVariant: ['tabular-nums'], color: c.ink2 }}>
             {Math.round(zoom * 100)}%
           </Text>
         </Pressable>
-        <IconButton icon="zoom-in" label="Zoom in" size={40} onPress={() => onZoom(1)} />
+        <IconButton icon="zoom-in" label="Zoom in" size={CONTROL_H_SM} onPress={() => onZoom(1)} {...tip('Zoom in')} />
       </ScrollView>
       {more.left ? <EdgeChevron side="left" onPress={() => page(-1)} /> : null}
       {more.right ? <EdgeChevron side="right" onPress={() => page(1)} /> : null}
@@ -212,8 +245,8 @@ export function Toolbar({ tools, onTool, onChange, onImage, zoom, onZoom, onZoom
 const styles = StyleSheet.create({
   bar: { borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth, maxWidth: '100%', alignSelf: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 4 },
-  tool: { width: 44, height: 44, borderRadius: radius.control, alignItems: 'center', justifyContent: 'center' },
-  sizeHit: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: radius.control, borderWidth: StyleSheet.hairlineWidth },
+  tool: { width: CONTROL_H, height: CONTROL_H, borderRadius: radius.control, alignItems: 'center', justifyContent: 'center' },
+  sizeHit: { width: CONTROL_H_SM, height: CONTROL_H_SM, alignItems: 'center', justifyContent: 'center', borderRadius: radius.control, borderWidth: StyleSheet.hairlineWidth },
   edge: { position: 'absolute', top: 0, bottom: 0, width: 32, alignItems: 'center', justifyContent: 'center' },
-  zoomLabel: { minWidth: 52, height: 44, alignItems: 'center', justifyContent: 'center' },
+  zoomLabel: { minWidth: 48, height: CONTROL_H_SM, paddingHorizontal: space.xxs, borderRadius: radius.control, alignItems: 'center', justifyContent: 'center' },
 });

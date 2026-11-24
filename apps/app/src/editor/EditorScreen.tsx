@@ -14,6 +14,7 @@ import { kvGet, kvSet } from '../lib/kv';
 import { pickFile } from '../lib/files';
 import { docIds, openLoaded, type DocHandle } from '../sync/docs';
 import { useDoc, useLibraryData, useSession, useSyncStatus, useVersion } from '../state/session';
+import { Appear } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
 import { indicatorStyleFor } from '../theme/scrollbars';
 import { PEN_COLORS, HIGHLIGHTER_COLORS, radius, shadow2 } from '../theme/tokens';
@@ -893,19 +894,33 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const syncPill =
     sync === null ? null : sync === 'synced' ? <Pill label="Synced" tone="good" dot /> : sync === 'offline' ? <Pill label="Offline" tone="warn" dot /> : sync === 'reconnecting' ? <Pill label="Reconnecting…" tone="warn" dot /> : <Pill label="Syncing" tone="neutral" dot />;
   const narrow = win.width < 640;
+  // A phone: Undo / Redo move into the floating toolbar so the title keeps room, and header buttons are 40 px wide.
+  const phone = win.width < 480;
+  const hb = phone ? 40 : undefined;
+  const undoRedo = (
+    <>
+      <IconButton icon="rotate-ccw" label="Undo" size={hb} disabled={!undo.canUndo} onPress={() => undo.undo()} />
+      <IconButton icon="rotate-cw" label="Redo" size={hb} disabled={!undo.canRedo} onPress={() => undo.redo()} />
+    </>
+  );
 
   return (
     <EditorContext.Provider value={edCtx}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top', 'left', 'right']}>
-        {/* Header */}
-        <View style={[styles.header, { backgroundColor: c.surface, borderBottomColor: c.line }]}>
-          <IconButton icon="chevron-left" label="Back to library" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
-          <IconButton icon={navWide ? 'sidebar' : 'grid'} label="Pages" selected={navOpen} onPress={() => setNavOpen((x) => !x)} />
-          <View style={{ flex: 1, minWidth: 0 }}>
+      <View style={{ flex: 1, backgroundColor: c.bg }}>
+        {/* Header: its surface runs under the status bar and any landscape display cutout; its controls stay in the safe area. */}
+        <View
+          style={[
+            styles.header,
+            { backgroundColor: c.surface, borderBottomColor: c.line, paddingTop: insets.top, paddingLeft: 6 + insets.left, paddingRight: 6 + insets.right, minHeight: 60 + insets.top },
+          ]}
+        >
+          <IconButton icon="chevron-left" label="Back to library" size={hb} onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+          <IconButton icon={navWide ? 'sidebar' : 'grid'} label="Pages" size={hb} selected={navOpen} onPress={() => setNavOpen((x) => !x)} />
+          <View style={{ flex: 1, minWidth: 0, paddingLeft: 4 }}>
             <Text variant="bodyStrong" numberOfLines={1} onPress={() => setRenaming(true)} accessibilityRole="button" accessibilityHint="Rename the notebook">
               {meta.title}
             </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 20 }}>
               <Text variant="meta" tone="faint" onPress={openGoTo} accessibilityRole="button" accessibilityHint="Go to a page">
                 Page {current + 1} of {pages.length}
               </Text>
@@ -917,27 +932,26 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
               ) : null}
             </View>
           </View>
-          <IconButton icon="rotate-ccw" label="Undo" disabled={!undo.canUndo} onPress={() => undo.undo()} />
-          <IconButton icon="rotate-cw" label="Redo" disabled={!undo.canRedo} onPress={() => undo.redo()} />
+          {phone ? null : undoRedo}
           <View>
-            <IconButton icon="message-square" label={unread ? `Comments, ${unread} unread` : 'Comments'} selected={commentsOpen} onPress={() => setCommentsOpen((x) => !x)} />
+            <IconButton icon="message-square" label={unread ? `Comments, ${unread} unread` : 'Comments'} size={hb} selected={commentsOpen} onPress={() => setCommentsOpen((x) => !x)} />
             {unread > 0 ? (
               <View pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden style={[styles.badge, { backgroundColor: c.assistant }]}>
-                <Text variant="meta" tone="onAccent" style={{ fontSize: 10, lineHeight: 14 }}>
+                <Text variant="meta" style={{ fontSize: 10, lineHeight: 14, color: c.onAssistant, fontWeight: '600' }}>
                   {unread}
                 </Text>
               </View>
             ) : null}
           </View>
           {win.width < 480 ? (
-            <IconButton icon="message-circle" label="Ask" tone="assistant" onPress={() => openAsk()} />
+            <IconButton icon="message-circle" label="Ask" tone="assistant" size={hb} onPress={() => openAsk()} />
           ) : (
             <Button label="Ask" icon="message-circle" variant="assistant" size="sm" onPress={() => openAsk()} />
           )}
-          <IconButton icon="more-vertical" label="More" onPress={(e) => moreMenu({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY + 20 })} />
+          <IconButton icon="more-vertical" label="More" size={hb} onPress={(e) => moreMenu({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY + 20 })} />
         </View>
 
-        <View style={{ flex: 1, flexDirection: 'row' }}>
+        <View style={{ flex: 1, flexDirection: 'row', marginLeft: insets.left, marginRight: insets.right }}>
           {navOpen && navWide && thumbs ? (
             <PageNavigator
               mode="sidebar"
@@ -1055,12 +1069,13 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                 zoom={zoom * liveScale}
                 onZoom={(d) => zoomSoon(stepZoom(zoomTarget.current ?? zoom, d), 250)}
                 onZoomReset={() => zoomSoon(1, 0)}
+                leading={phone ? undoRedo : undefined}
               />
             </View>
 
             {selection && selectionPage ? (
               <View style={[styles.selWrap, { bottom: 20 + insets.bottom }]} pointerEvents="box-none">
-                <View style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
+                <Appear style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
                   {recoloring ? (
                     <>
                       <IconButton icon="chevron-left" label="Back" onPress={() => setRecoloring(false)} />
@@ -1068,35 +1083,41 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                     </>
                   ) : (
                     <>
-                      <Text variant="label" style={{ paddingHorizontal: 8 }}>
-                        {selection.ids.length} selected
+                      {/* A phone shows just the count, so the bar stays one row with Close at its end. */}
+                      <Text variant="label" numberOfLines={1} accessibilityLabel={`${selection.ids.length} selected`} style={[styles.selCount, { color: c.ink2 }]}>
+                        {phone ? selection.ids.length : `${selection.ids.length} selected`}
                       </Text>
-                      <IconButton icon="droplet" label="Recolour" onPress={() => setRecoloring(true)} />
+                      <IconButton icon="droplet" label="Recolour" size={hb} onPress={() => setRecoloring(true)} />
                       {narrow ? (
                         // Under 640 px the secondary actions go in a menu so the bar stays one row (F27).
                         <IconButton
                           icon="more-horizontal"
                           label="More selection actions"
+                          size={hb}
                           onPress={(e) => setMenu({ anchor: { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }, items: selMore })}
                         />
                       ) : (
                         selMore.map((m) => <IconButton key={m.label} icon={m.icon!} label={m.label} onPress={m.onPress} />)
                       )}
                       {/* Reading stays on the bar at every width (F6). */}
-                      {selInk.length ? <IconButton icon="type" label="Reading" onPress={openReading} /> : null}
-                      <Button label="Ask" accessibilityLabel="Ask about selection" icon="message-circle" variant="assistant" size="sm" onPress={() => openSelection('ask')} />
-
-                      <IconButton icon="trash-2" label="Delete selection" tone="bad" onPress={deleteSelection} />
-                      <IconButton icon="x" label="Deselect" onPress={() => setSelection(null)} />
+                      {selInk.length ? <IconButton icon="type" label="Reading" size={hb} onPress={openReading} /> : null}
+                      {phone ? (
+                        <IconButton icon="message-circle" label="Ask about selection" tone="assistant" size={hb} onPress={() => openSelection('ask')} />
+                      ) : (
+                        <Button label="Ask" accessibilityLabel="Ask about selection" icon="message-circle" variant="assistant" size="sm" onPress={() => openSelection('ask')} />
+                      )}
+                      <View style={[styles.selSep, { backgroundColor: c.line }]} />
+                      <IconButton icon="trash-2" label="Delete selection" tone="bad" size={hb} onPress={deleteSelection} />
+                      <IconButton icon="x" label="Deselect" size={hb} onPress={() => setSelection(null)} />
                     </>
                   )}
-                </View>
+                </Appear>
               </View>
             ) : tools.tool === 'lasso' && clip ? (
               <View style={[styles.selWrap, { bottom: 20 + insets.bottom }]} pointerEvents="box-none">
-                <View style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
-                  <Button label="Paste" icon="clipboard" size="sm" onPress={sel.paste} />
-                </View>
+                <Appear style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
+                  <Button label="Paste" icon="clipboard" size="sm" variant="ghost" onPress={sel.paste} />
+                </Appear>
               </View>
             ) : null}
           </View>
@@ -1145,10 +1166,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
         </View>
 
         {busy ? (
-          <View style={[styles.busy, { backgroundColor: c.surface, borderColor: c.line }]} pointerEvents="none">
+          <Appear from="top" pointerEvents="none" style={[styles.busy, shadow2, { top: 72 + insets.top, backgroundColor: c.surface, borderColor: c.line }]}>
             <ActivityIndicator color={c.accent} size="small" />
             <Text variant="label">{busy}</Text>
-          </View>
+          </Appear>
         ) : null}
         {toast}
 
@@ -1289,7 +1310,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             else notebook.setMeta({ title });
           }}
         />
-      </SafeAreaView>
+      </View>
     </EditorContext.Provider>
   );
 }
@@ -1310,7 +1331,9 @@ const styles = StyleSheet.create({
   pageFoot: { position: 'absolute', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 32 },
   toolbarWrap: { position: 'absolute', top: 12, left: 12, right: 12, alignItems: 'center' },
   selWrap: { position: 'absolute', bottom: 20, left: 12, right: 12, alignItems: 'center' },
-  selBar: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 2, padding: 4, borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth },
+  selBar: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 4, maxWidth: '100%', borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth },
+  selCount: { paddingHorizontal: 8, minWidth: 28, textAlign: 'center', fontVariant: ['tabular-nums'] },
+  selSep: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginVertical: 8, marginHorizontal: 2 },
   busy: {
     position: 'absolute',
     top: 72,
@@ -1320,7 +1343,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 8,
+    borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
   },
 });
