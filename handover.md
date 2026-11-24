@@ -395,7 +395,7 @@ listed in `apps/server/.dev.vars.example`.
 ## 9. Thread history (brief)
 
 1. **Discovery:**
-   - Rounds of questions with the question tool, and HTML mockups (`mockups/`).
+   - Rounds of questions with the question tool, and HTML mockups (`docs/design/mockups/`).
    - The token-cost analysis.
    - Q-ink Live simplified to v0.2: no server AI, image plus guess, `transcribe`.
 2. **Brand:** inspired by the Apollo and Board repos: tokens, the pen-nib-in-orbit mark (`assets/brand/qalm-mark.svg`).
@@ -422,7 +422,7 @@ listed in `apps/server/.dev.vars.example`.
      drove the fix PRs.
    - **Environment:** T3 restarts and API rate limits interrupted agents repeatedly; agents now push early as draft
      PRs. Use a random free Chrome debug port in browser checks (two agents once shared 9333).
-   - **Mockup:** `mockups/ai-integration.html` explains the AI integration end to end.
+   - **Mockup:** `docs/design/mockups/ai-integration.html` explains the AI integration end to end.
 9. **Regions (PRs #29, #31):** after a live test where line grouping split maths apart (a superscript ² on its own
    line, each ∫ a separate drawing, two expressions on one rule split) and the agent "corrected" correct work, the owner
    removed lines and on-device recognition (ML Kit, #28): agents get cropped stroke changes (regions) with context and

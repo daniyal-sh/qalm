@@ -2,7 +2,7 @@
 
 qalm is part of the Apollo family, alongside Board. It follows **Apollo Study Space**, Apollo's design system,
 as Board adapts it (`daniyal-sh/board` → `apps/desktop/src/renderer/src/styles.css`, `packages/shared/src/brand.ts`).
-The mockups in `/mockups` set **layout and flows only**. Colours, type and surfaces come from this file.
+The mockups in [`design/mockups/`](design/mockups/) set **layout and flows only**. Colours, type and surfaces come from this file.
 Where this file and a mockup differ, this file wins.
 
 ## Naming
@@ -16,7 +16,7 @@ export const BRAND = {
 Lockup: the mark, then "qalm" (semibold, -0.02em tracking) with "by Apollo" under it (medium, muted, 0.58×).
 
 ## Mark
-**Mark A, "nib in orbit, refined"** (chosen from `mockups/logo-options.html`): a **pen nib** outline (qalam = pen) with a
+**Mark A, "nib in orbit, refined"** (chosen from [`design/mockups/logo-options.html`](design/mockups/logo-options.html)): a **pen nib** outline (qalam = pen) with a
 slit and a breather hole, ringed by Apollo's orbit (an ellipse tilted −20°) that passes **behind** the nib at the top and
 **in front** of it at the bottom, with Apollo's planet riding the front of the ring inside a small halo.
 

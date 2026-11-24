@@ -1,4 +1,4 @@
-// Expo config plugin: signs Android release builds with the owner's release keystore instead of the debug key.
+// Expo config plugin: signs Android release builds with your release keystore instead of the debug key.
 // The keystore lives outside the repo. Its properties file (storeFile, storePassword, keyAlias, keyPassword) is at
 // QALM_ANDROID_KEYSTORE_PROPERTIES, default ~/.qalm/android/keystore.properties. When that file is missing at prebuild
 // time, the template's debug signing is left as is. The generated build.gradle reads the file at build time, so the

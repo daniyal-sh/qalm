@@ -1,6 +1,7 @@
 {
   "name": "qalm",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@12.21.0",
   "scripts": {
     "test": "pnpm -r --if-present test",

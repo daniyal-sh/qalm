@@ -1,4 +1,4 @@
-// qalm server. Resource ids below are placeholders: see README.md ("Setting up Cloudflare").
+// qalm server. The top-level ids are placeholders for local dev; staging and production are configured below.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "qalm-server",

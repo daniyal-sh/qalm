@@ -15,7 +15,7 @@
     // App routes go to the Worker (SPA fallback); the app's own files skip it. Downloads always go to the Worker.
     "run_worker_first": ["/app", "/app/*", "!/app/_expo/*", "!/app/assets/*", "!/app/*.wasm", "!/app/*.mjs", "!/app/*.ico", "/download/*"]
   },
-  // The installers (too big for static assets): windows/qalm-setup.exe and android/qalm.apk. The lead creates the
+  // The installers (too big for static assets): windows/qalm-setup.exe and android/qalm.apk. Create the
   // buckets and uploads the files; until then /download/* shows the "not available yet" page. Bindings aren't
   // inherited by envs, so each env repeats it. This top-level one is for `wrangler dev` (a local, empty bucket).
   "r2_buckets": [{ "binding": "DOWNLOADS", "bucket_name": "qalm-downloads" }],

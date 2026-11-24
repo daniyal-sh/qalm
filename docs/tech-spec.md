@@ -1,7 +1,7 @@
 # qalm v1 technical spec (rev 3)
 
 Read with `decisions.md` (scope), `qink-live.md` (AI format) and **`brand.md` (qalm by Apollo: colours, type, mark)**.
-Layouts and flows come from `mockups/editor.html`, `mockups/screens-library.html` and `mockups/screens-ai.html`.
+Layouts and flows come from [`design/mockups/editor.html`](design/mockups/editor.html), [`screens-library.html`](design/mockups/screens-library.html) and [`screens-ai.html`](design/mockups/screens-ai.html).
 Their colours and fonts are superseded by `brand.md`.
 This file is the **contract between packages**. If you must change a contract, change it here too.
 

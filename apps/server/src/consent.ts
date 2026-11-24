@@ -179,7 +179,7 @@ async function authError(err: unknown): Promise<Response> {
   throw err;
 }
 
-/** GET/POST /authorize and POST /authorize/signin: the MCP consent flow (mockups/screens-ai.html screen 5). */
+/** GET/POST /authorize and POST /authorize/signin: the MCP consent flow (docs/design/mockups/screens-ai.html screen 5). */
 export async function handleAuthorize(req: Request, env: Env, path: string): Promise<Response | null> {
   const oauth = env.OAUTH_PROVIDER;
   if (path === '/authorize/signin' && req.method === 'POST') {
