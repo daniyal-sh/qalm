@@ -73,8 +73,18 @@ const MD_FONT_B64: Record<Exclude<MdFont, 'r'>, string> = { b: FONT_B_B64, i: FO
  * after a deploy), maths is drawn as its TeX source, as a TeX error is, and the export still succeeds; `math.failed`
  * keeps the rest of the export from trying again for every box.
  */
-async function drawMarkdown(out: PDFPage, H: number, item: TextItem, font: (f: MdFont) => Promise<PDFFont>, math: { failed: boolean }): Promise<void> {
-  if (!math.failed) await loadMathFor([item]).catch(() => void (math.failed = true));
+async function drawMarkdown(out: PDFPage, H: number, item: TextItem, font: (f: MdFont) => Promise<PDFFont>, math: { failed: boolean; onFail?: () => void }): Promise<void> {
+  if (!math.failed) {
+    // One failed request isn't the network being gone: try once more before the rest of the export does without.
+    const loaded = await loadMathFor([item]).then(
+      () => true,
+      () => loadMathFor([item]).then(() => true, () => false),
+    );
+    if (!loaded) {
+      math.failed = true;
+      math.onFail?.();
+    }
+  }
   const color = parseColor(item.color);
   const rot = item.rot ?? 0;
   const [cos, sin] = [Math.cos(rot), Math.sin(rot)];
@@ -107,6 +117,11 @@ export interface ExportPdfOptions {
   toPng?: (bytes: Uint8Array) => Promise<Uint8Array | null>;
   /** Called once for each image asset that still couldn't go in (it is left out of the PDF). */
   onSkippedImage?: (assetId: string) => void;
+  /**
+   * Called once if MathJax couldn't load (offline web, a chunk gone after a deploy; tried twice): Markdown boxes' maths
+   * is in the PDF as TeX source. The app says so and offers to export again.
+   */
+  onMathUnavailable?: () => void;
 }
 
 /**
@@ -136,7 +151,7 @@ export async function exportPdf(
   };
   // Markdown boxes' fonts, each embedded (subset) on first use.
   const mdFonts = new Map<MdFont, Promise<PDFFont>>();
-  const mdMath = { failed: false };
+  const mdMath = { failed: false, onFail: opts.onMathUnavailable };
   const mdFont = (f: MdFont) => {
     let p = mdFonts.get(f);
     if (!p) mdFonts.set(f, (p = pdf.embedFont(f === 'r' ? figtreeBytes() : fromBase64(MD_FONT_B64[f]), { subset: true, features: NO_LIGATURES })));

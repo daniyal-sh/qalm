@@ -218,7 +218,11 @@ export function renderTex(tex: string, display: boolean): MathBox | null {
     const { adaptor, doc } = mj;
     const container = doc.convert(tex, { display, em: 16, ex: 8, containerWidth: 80 * 16 }) as LiteElement;
     const svg = adaptor.firstChild(container) as LiteElement;
-    if (!svg || adaptor.kind(svg) !== 'svg' || adaptor.outerHTML(container).includes('data-mjx-error')) return null;
+    const html = adaptor.outerHTML(container);
+    if (!svg || adaptor.kind(svg) !== 'svg' || html.includes('data-mjx-error')) return null;
+    // Characters MathJax's fonts lack (`\text{café}`, `\text{日本}`) come out as <text> for a browser to draw: as paths
+    // they'd vanish, leaving a gap, so the formula shows its source.
+    if (/<text[\s>]/.test(html)) return null;
     const [minX = 0, minY = 0, vw = 0, vh = 0] = String(adaptor.getAttribute(svg, 'viewBox') ?? '').split(/\s+/).map(Number);
     const paths: string[] = [];
     const bounds = emptyBounds();

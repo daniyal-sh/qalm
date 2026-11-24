@@ -25,6 +25,15 @@ describe('the 50 em cap holds for what a formula paints, not just its box', () =
     for (const tex of ['\\smash{x}', '\\rlap{/}=', '\\hspace{1em}\\rule{1em}{1pt}', '\\rule{10em}{1pt}', '\\sum_{i=1}^{n} \\frac{a}{b}']) expect(texToPath(tex, false), tex).not.toBeNull();
   });
 
+  it('letters MathJax’s fonts lack (in \\text) show the source instead of vanishing', () => {
+    for (const tex of ['\\text{café}', '\\text{日本}', 'x + \\text{naïve}']) {
+      expect(texToPath(tex, false), tex).toBeNull();
+      expect(layoutMarkdown(`see $${tex}$`, 4000, 16).ops.some((o) => o.k === 'text' && o.text.includes('\\text{'))).toBe(true);
+    }
+    // Text MathJax can draw still renders.
+    expect(texToPath('\\text{cafe} = 1', false)).not.toBeNull();
+  });
+
   it('transformPath reports the bounds of everything it writes', () => {
     const b = emptyBounds();
     transformPath('M0 0L10 0Q20 30 0 5Z', [2, 1, 100, -1], b);

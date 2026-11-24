@@ -401,7 +401,7 @@ describe('the lazy load and the app’s time slice (setMathTimeSlice)', () => {
     expect(fontsOf(pdf).some((n) => n.includes('GeistMono'))).toBe(false);
     expect(paths(await core.layoutMarkdownSettled(text, 4000, 16))).toBe(8);
 
-    // Offline: no waiting on slices or loads that can't come (and one try for the whole export).
+    // Offline: no waiting on slices or loads that can't come (and two tries, one retry, for the whole export).
     core = await fresh();
     core.setMathTimeSlice(0);
     const load = vi.fn(() => Promise.reject(new Error('offline')));
@@ -411,7 +411,7 @@ describe('the lazy load and the app’s time slice (setMathTimeSlice)', () => {
     const t0 = performance.now();
     pdf = await PDFDocument.load(await core.exportPdf(newNotebook(), async () => page, async () => new Uint8Array()));
     expect(performance.now() - t0).toBeLessThan(3000);
-    expect(load).toHaveBeenCalledTimes(1);
+    expect(load).toHaveBeenCalledTimes(2);
     expect(fontsOf(pdf).some((n) => n.includes('GeistMono'))).toBe(true);
     const settled = await core.layoutMarkdownSettled(text, 4000, 16);
     expect(settled.pending).toBeUndefined();
@@ -542,5 +542,84 @@ describe('filling in settles when the visible maths outgrows the formula cache',
       await task();
     }
     expect(fills).not.toHaveBeenCalled();
+  });
+
+  it('boxes needing more complete layouts than the layout cache holds: fill-in stops asking, then stays idle', async () => {
+    const core = await fresh();
+    const savedMath = { ...core.MATH_CACHE };
+    const savedLayout = { ...core.LAYOUT_CACHE };
+    core.MATH_CACHE.count = 4;
+    core.LAYOUT_CACHE.count = 4; // 6 boxes on screen: completed layouts are evicted while still shown
+    core.setMathTimeSlice(0);
+    try {
+      await core.loadMath();
+      const texts = Array.from({ length: 6 }, (_, k) => Array.from({ length: 8 }, (_, i) => `$o_{${k}}^{${i}}$`).join(' '));
+      const pass = () => texts.forEach((t) => core.layoutMarkdown(t, 4000, 16));
+      // Render like the app (again only when a fill-in is asked for) until no more is asked for.
+      let passes = 0;
+      for (;;) {
+        const epoch = core.mathDeferredEpoch();
+        pass();
+        passes++;
+        await task();
+        if (core.mathDeferredEpoch() === epoch) break;
+        if (passes > 6 * 8 + 10) throw new Error(`still filling in after ${passes} passes`);
+      }
+      // Idle: rendering again re-renders evicted formulas, but that isn't progress, so no fill-in is asked for.
+      const epoch = core.mathDeferredEpoch();
+      for (let i = 0; i < 10; i++) {
+        pass();
+        await task();
+      }
+      expect(core.mathDeferredEpoch()).toBe(epoch);
+      // An edit (new maths) is new progress: filling in runs again, and ends again.
+      core.layoutMarkdown('edited $w_{new}+1$ and $w_{new}+2$', 4000, 16);
+      await task();
+      for (let i = 0; i < 20 && core.layoutMarkdown('edited $w_{new}+1$ and $w_{new}+2$', 4000, 16).partial; i++) await task();
+      expect(core.layoutMarkdown('edited $w_{new}+1$ and $w_{new}+2$', 4000, 16).ops.filter((o) => o.k === 'path')).toHaveLength(2);
+    } finally {
+      Object.assign(core.MATH_CACHE, savedMath);
+      Object.assign(core.LAYOUT_CACHE, savedLayout);
+    }
+  });
+});
+
+describe('the last edge cases', () => {
+  it('a PDF export tries the load twice: a single failed request still gets real maths', async () => {
+    const core = await fresh();
+    let calls = 0;
+    core.MATH_LOADER.load = vi.fn(() => (++calls === 1 ? Promise.reject(new Error('blip')) : import('../src/markdown/mathjax')));
+    const unavailable = vi.fn();
+    const page = new core.Page(new Y.Doc());
+    page.addItem(md('area $\\int_0^1 x^2\\,dx$'));
+    const pdf = await PDFDocument.load(await core.exportPdf(newNotebook(), async () => page, async () => new Uint8Array(), { onMathUnavailable: unavailable }));
+    expect(calls).toBe(2);
+    expect(unavailable).not.toHaveBeenCalled();
+    expect(fontsOf(pdf).some((n) => n.includes('GeistMono'))).toBe(false);
+  });
+
+  it('when MathJax really can’t load, the export says so once (the app offers to retry)', async () => {
+    const core = await fresh();
+    const load = vi.fn(() => Promise.reject(new Error('offline')));
+    core.MATH_LOADER.load = load;
+    const unavailable = vi.fn();
+    const page = new core.Page(new Y.Doc());
+    page.addItem(md('one $a^2$', { id: 'a' }));
+    page.addItem(md('two $b^2$', { id: 'b', y: 300 }));
+    const pdf = await PDFDocument.load(await core.exportPdf(newNotebook(), async () => page, async () => new Uint8Array(), { onMathUnavailable: unavailable }));
+    expect(pdf.getPageCount()).toBe(1);
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(unavailable).toHaveBeenCalledTimes(1);
+    expect(fontsOf(pdf).some((n) => n.includes('GeistMono'))).toBe(true);
+  });
+
+  it('if MathJax fails to start, layouts showing sources aren’t cached as complete', async () => {
+    const core = await fresh();
+    core.MATH_LOADER.load = () => Promise.resolve({ renderTex: () => { throw new Error('MathJax could not start'); } });
+    await core.loadMath();
+    const a = core.layoutMarkdown('broken $x^2$', 240, 16);
+    expect(a.partial).toBe(true);
+    expect(a.ops.some((o) => o.k === 'text' && o.text.includes('x^2'))).toBe(true);
+    expect(core.layoutMarkdown('broken $x^2$', 240, 16)).not.toBe(a);
   });
 });

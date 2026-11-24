@@ -199,8 +199,15 @@ let sliceMs: number | null = null;
 let sliceUntil = 0;
 let sliceOpen = false;
 let sliceDeferred = false;
-/** Formulas rendered (new) in the current task: a task that deferred maths but rendered none made no progress. */
+/** Formulas rendered for the first time this fill-in run, in the current task: none means no progress. */
 let renderedInTask = 0;
+/**
+ * Formulas (by key) rendered since the last task that deferred nothing: the current fill-in run. Rendering one again in
+ * the same run isn't progress: the boxes on screen need more than the caches hold (a box's resolved formulas are let go
+ * once its layout completes, and the layout cache may then drop it), and counting those renders kept filling in forever.
+ * Such boxes may show some source until the next change; the run ends instead of spinning.
+ */
+const renderedInRun = new Set<string>();
 let deferredEpoch = 0;
 const deferredListeners = new Set<() => void>();
 const timers = globalThis as unknown as { setTimeout(fn: () => void, ms: number): unknown };
@@ -231,7 +238,11 @@ function endSlice(): void {
   sliceOpen = false;
   const progressed = renderedInTask > 0;
   renderedInTask = 0;
-  if (!sliceDeferred) return;
+  if (!sliceDeferred) {
+    // Nothing waits: the run is over.
+    renderedInRun.clear();
+    return;
+  }
   sliceDeferred = false;
   // Another pass only helps if this one resolved something (renderers keep what they resolved: `MathMemo`).
   if (progressed) notifyDeferred();
@@ -292,9 +303,13 @@ export function texToPath(tex: string, display: boolean): MathBox | null | undef
   let box: MathBox | null;
   try {
     box = render(tex, display);
-    renderedInTask++;
+    if (!renderedInRun.has(key)) {
+      renderedInRun.add(key);
+      renderedInTask++;
+    }
   } catch {
-    // MathJax couldn't start here: show sources (not cached, so a later call may try again).
+    // MathJax couldn't start here: show sources, not cached (a later call may try again), nor the layouts using them.
+    skipped++;
     return null;
   }
   remember(key, box);
