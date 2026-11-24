@@ -63,7 +63,9 @@ export async function deleteNotebook(env: Env, userId: string, notebookId: strin
   if (!row || row.owner_id !== userId) return false;
   if (!row.deleted_at) await env.DB.prepare('UPDATE notebooks SET deleted_at = ?2 WHERE id = ?1').bind(notebookId, now()).run();
   const pg = `pg:${notebookId}:`;
-  await env.DB.prepare('DELETE FROM sync_tickets WHERE doc_id = ?1 OR substr(doc_id, 1, ?3) = ?2').bind(nbDocId(notebookId), pg, pg.length).run();
+  await env.DB.batch(
+    ['sync_tickets', 'doc_sizes'].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE doc_id = ?1 OR substr(doc_id, 1, ?3) = ?2`).bind(nbDocId(notebookId), pg, pg.length)),
+  );
   try {
     const id = nbDocId(notebookId);
     await room(env, id).purgeNotebook(id);

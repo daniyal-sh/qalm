@@ -5,12 +5,13 @@ import { handleAuthorize, messagePage } from './consent';
 import { canAccess, deleteNotebook, nbDocId, parseDocId, room } from './docs';
 import { type GrantRow, userNotebooks } from './grants';
 import { HttpError, error, json, now, origin, randomToken, readJson, sha256Hex } from './util';
+import { storageFull, storageUsage } from './storage';
 
 const TICKET_TTL_MS = 30_000;
 const SHA = /^[0-9a-f]{64}$/;
 
 /** Paths the app calls cross-origin (web build on another origin, Electron from file://). Bearer auth only, no cookies. */
-const CORS_PATHS = /^\/(auth\/(email\/start|email\/lookup|email\/verify|apple|google|refresh|logout)|sync\/ticket|notebooks\/[^/]+|assets\/[^/]+|ai\/.*|health)$/;
+const CORS_PATHS = /^\/(auth\/(email\/start|email\/lookup|email\/verify|refresh|logout)|me\/storage|sync\/ticket|notebooks\/[^/]+|assets\/[^/]+|ai\/.*|health)$/;
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
@@ -92,6 +93,12 @@ async function route(req: Request, env: Env, url: URL): Promise<Response | null>
     return room(env, docId).fetch(new Request(req.url, { headers }));
   }
 
+  // ---- Settings → Storage: what counts towards the cap ----
+  if (path === '/me/storage' && req.method === 'GET') {
+    const userId = await requireUser(req, env);
+    return json(await storageUsage(env, userId), 200, { 'Cache-Control': 'no-store' });
+  }
+
   // ---- Delete forever (owner only) ----
   const nm = /^\/notebooks\/([^/]+)$/.exec(path);
   if (nm && req.method === 'DELETE') {
@@ -129,17 +136,19 @@ async function route(req: Request, env: Env, url: URL): Promise<Response | null>
 
 async function putAsset(req: Request, env: Env, userId: string, sha: string): Promise<Response> {
   const max = num(env.MAX_ASSET_BYTES, 50 * 1024 * 1024);
-  const quota = num(env.MAX_USER_STORAGE_BYTES, 1024 * 1024 * 1024);
   const len = Number(req.headers.get('Content-Length') ?? NaN);
   if (Number.isFinite(len) && len > max) throw new HttpError(413, `Asset larger than ${max} bytes`);
   const mine = await env.DB.prepare('SELECT bytes FROM user_assets WHERE user_id = ?1 AND sha256 = ?2').bind(userId, sha).first<{ bytes: number }>();
   if (mine) return json({ sha256: sha, bytes: mine.bytes, existed: true });
+  // Refuse early when the declared size can't fit (before reading the body).
+  const before = await storageUsage(env, userId);
+  if (before.usedBytes + (Number.isFinite(len) ? len : 1) > before.limitBytes) return storageFull(before);
   // Always read and verify the body, even when the object exists: owning an asset requires having its bytes.
   const body = await req.arrayBuffer();
   if (body.byteLength > max) throw new HttpError(413, `Asset larger than ${max} bytes`);
   if ((await sha256Hex(body)) !== sha) throw new HttpError(400, 'Body does not match its sha256');
-  const used = (await env.DB.prepare('SELECT COALESCE(SUM(bytes), 0) AS n FROM user_assets WHERE user_id = ?1').bind(userId).first<{ n: number }>())?.n ?? 0;
-  if (used + body.byteLength > quota) throw new HttpError(507, 'Storage limit reached');
+  const usage = await storageUsage(env, userId);
+  if (usage.usedBytes + body.byteLength > usage.limitBytes) return storageFull(usage);
   const existing = await env.ASSETS.head(sha);
   if (!existing) {
     await env.ASSETS.put(sha, body, { httpMetadata: { contentType: req.headers.get('Content-Type') ?? 'application/octet-stream' }, sha256: sha });

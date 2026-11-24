@@ -1,4 +1,4 @@
-import { SignJWT, jwtVerify, createRemoteJWKSet, type JWTPayload } from 'jose';
+import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import type { Env } from './env';
 import { b64url, enc, HttpError, json, now, origin, parseCookies, randomToken, readJson, sha256Hex } from './util';
 import { magicLinkEmail, sendEmail } from './email';
@@ -279,47 +279,6 @@ async function webCookie(env: Env, userId: string): Promise<string> {
   return `${WEB_COOKIE}=${await sign(env, userId, 'web', WEB_TTL_S)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${WEB_TTL_S}`;
 }
 
-// ---- Apple / Google identity tokens ----
-
-const jwks = {
-  apple: createRemoteJWKSet(new URL('https://appleid.apple.com/auth/keys')),
-  google: createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs')),
-};
-
-async function verifyIdentity(env: Env, provider: 'apple' | 'google', idToken: string): Promise<{ sub: string; email?: string; emailVerified: boolean }> {
-  const auds = (provider === 'apple' ? env.APPLE_AUDIENCES : env.GOOGLE_AUDIENCES)?.split(',').map((s) => s.trim()).filter(Boolean) ?? [];
-  if (!auds.length) throw new HttpError(501, `${provider} sign-in is not configured`);
-  let payload: JWTPayload;
-  try {
-    ({ payload } = await jwtVerify(idToken, jwks[provider], {
-      issuer: provider === 'apple' ? 'https://appleid.apple.com' : ['https://accounts.google.com', 'accounts.google.com'],
-      audience: auds,
-    }));
-  } catch {
-    throw new HttpError(401, 'Invalid identity token');
-  }
-  const ev = payload.email_verified;
-  return {
-    sub: payload.sub!,
-    email: typeof payload.email === 'string' ? normEmail(payload.email) : undefined,
-    emailVerified: ev === true || ev === 'true',
-  };
-}
-
-async function userByIdentity(env: Env, provider: 'apple' | 'google', id: { sub: string; email?: string; emailVerified: boolean }, name?: string): Promise<string> {
-  const col = provider === 'apple' ? 'apple_sub' : 'google_sub';
-  const row = await env.DB.prepare(`SELECT id FROM users WHERE ${col} = ?1`).bind(id.sub).first<{ id: string }>();
-  if (row) return row.id;
-  if (id.email && id.emailVerified) {
-    const userId = await userByEmail(env, id.email, name);
-    await env.DB.prepare(`UPDATE users SET ${col} = ?2 WHERE id = ?1 AND ${col} IS NULL`).bind(userId, id.sub).run();
-    return userId;
-  }
-  const userId = crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO users (id, ${col}, name, created_at) VALUES (?1, ?2, ?3, ?4)`).bind(userId, id.sub, name ?? null, now()).run();
-  return userId;
-}
-
 // ---- routes ----
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
@@ -373,14 +332,6 @@ export async function handleAuth(req: Request, env: Env, path: string): Promise<
       if (!email) throw new HttpError(400, nonce ? `${BAD_LINK}, or was requested on another device` : BAD_LINK);
     }
     return json({ ...(await issueTokens(env, await userByEmail(env, email))), email }, 200, NO_STORE);
-  }
-  if ((path === '/auth/apple' || path === '/auth/google') && req.method === 'POST') {
-    const provider = path === '/auth/apple' ? 'apple' : 'google';
-    const body = await readJson<{ identityToken?: string; idToken?: string; name?: string }>(req);
-    const token = body.identityToken ?? body.idToken;
-    if (!token) throw new HttpError(400, 'identityToken is required');
-    const id = await verifyIdentity(env, provider, token);
-    return json(await issueTokens(env, await userByIdentity(env, provider, id, body.name)));
   }
   if (path === '/auth/refresh' && req.method === 'POST') {
     const body = await readJson<{ refreshToken?: string }>(req);

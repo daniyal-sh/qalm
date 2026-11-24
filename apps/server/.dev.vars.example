@@ -10,7 +10,6 @@ MAGIC_LINK_URL=http://localhost:8081/auth/email/verify
 # EMAIL_PROVIDER=resend
 # RESEND_API_KEY=re_...
 # EMAIL_FROM=qalm <signin@qalm.app>
-# APPLE_AUDIENCES=app.qalm.ios,app.qalm.web
-# GOOGLE_AUDIENCES=1234-abc.apps.googleusercontent.com
 # MAX_ASSET_BYTES=52428800
-# MAX_USER_STORAGE_BYTES=1073741824
+# Per-user cap (PDFs and images + notebook data), default 250 MB:
+# MAX_USER_STORAGE_BYTES=250000000
