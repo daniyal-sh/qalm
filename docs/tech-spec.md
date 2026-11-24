@@ -525,16 +525,24 @@ that ink is all deleted, the thread shows only in the panel ("Ink removed").
   within the eraser radius plus half the stroke width, so the pieces' round ends just touch the eraser and the gap is as
   wide as the eraser. Cuts are found by sampling near the eraser and bisection (one interpolated point per cut); every
   other point is the stroke's own, so pieces keep pressure, tilt and time, and the tool, colour, width, style, smoothing
-  and `createdAt`. Pieces under ~0.5 units are dropped. **Highlighters split too. Shapes are erased whole** (they are
+  and `createdAt`. Pieces under ~0.5 units are dropped. **The longest piece keeps the stroke's id**: it is stored as a
+  `cut` of its points (the fractional point indexes `[from, to]` it now runs between, applied when the stroke is read;
+  `geometry/cut.ts`), so a rub writes two numbers rather than the points again (one 50-move rub along a 1000-point
+  stroke grows the doc by ~2 KB, against ~0.9 MB when every move re-created the pieces), and writing new points (a
+  move) ends the cut. Only the other pieces are new strokes, with `splitFrom` naming the stroke as drawn (a timeline
+  can follow it). Two devices at once: a delete of the stroke elsewhere keeps it deleted (only a split-off piece can
+  remain); a move elsewhere (which writes `points`) and a split (which writes `cut`) both apply; two splits keep one
+  stroke with one device's cut, plus each device's new pieces (some ink may show twice, never the whole stroke). **Highlighters split too. Shapes are erased whole** (they are
   geometric, so a piece of a rectangle isn't a rectangle); text boxes and images are never erased. The radius is the
   eraser size (4 / 10 / 22 units). Each overlay `onErase` segment is one `applyErase` transaction; the app merges a
   gesture's segments into one undo entry (`CrossPageUndo.merging('erase')`), so **one undo restores the strokes whole**.
   While erasing in Partial mode the overlay draws a faint trail of the eraser's last 250 ms (`ERASE_TRAIL_MS`) on web,
   Android and iOS. Cost: the box cull in `hitTestErase` first, then only hit strokes are split (a pass over a
   3000-stroke page is a few ms).
-- **Agents and readings:** a split is an erase plus new ink. In Q-ink the old stroke is erased (faint red) and the pieces
-  are fresh, so the region is reported as `+pieces -1 (was R…)`. A reading of a split stroke reads its pieces and goes
-  stale; a thread anchored to it follows the pieces (the old id is kept for undo). Lecture mode and anything else that
+- **Agents and readings:** a split is an erase plus new ink. In Q-ink a stroke whose new path is a shorter one inside
+  its old box counts as erased (its old shape, faint red) and fresh (what's left), and the pieces are fresh, so the
+  region is reported as `+pieces -1 (was R…)`. A reading of a split stroke reads its pieces too and goes stale; a
+  thread anchored to it follows the new pieces as well. Lecture mode and anything else that
   follows the page's items sees the same add/remove events as any edit.
 - **Scribble to erase** (GoodNotes 6 style; Settings → Pen, `scribbleErase`, on by default): when a pen stroke ends
   (not a snapped shape), `detectScribble` runs. Both must hold, else the stroke is ink:
@@ -544,14 +552,19 @@ that ink is all deleted, the thread shows only in the panel ("Ink removed").
      length** (the legs lie side by side; "m", "w", "MMM", "NNN" spread theirs out); average speed **≥ 60 mm/s** and
      at most **3 s** long.
   2. **It covers ink** (`scribbleTargets`): strokes and shapes with **≥ 60% of their points** inside the scribble's convex
-     hull (grown by 1 mm plus half the pen width) that the scribble also passes over. Text and images are never deleted.
+     hull (grown by 1 mm plus half the pen width) that the **middles of ≥ 3 legs cross** (a leg is the path between
+     two reversals, less **1.2 mm** at each end where it turns; marks under **3 mm** across need one). Ink whose box,
+     grown by **1.5 mm**, holds the whole scribble is never a target. So shading inside a box or circle keeps the
+     outline: the hatching turns at the outline, so no leg's middle crosses it. Text and images are never deleted.
   A scribble over empty paper (or shading) covers nothing and stays ink. Otherwise the covered ink is removed in one
   transaction (one undo brings it back), the scribble is never added (the overlay drops it through `committedIds`, as
   a hand-off), and the deleted ink fades out over 320 ms (`EraseFade`; at once with reduced motion). Thresholds are in
   page mm (1 unit = 1/72 in), so the same scribble works at any zoom. Tests: real-looking zig-zags (horizontal,
   vertical scratch-out, diagonal, small, uneven) and a corpus of ~150 handwriting strokes that must not trigger (m, mmm,
   w, www, MMM, NNN, ZZZ, eee, lll, sine, 8, spiral, a slow spring, a sparse sawtooth, a double underline, a tremor;
-  2.5–8 mm at 25–90 mm/s) in `packages/core/test/scribble.test.ts`.
+  2.5–8 mm at 25–90 mm/s, plus tall fast coils at 120–260 mm/s), and shading inside a 30 × 15 mm box and a 10 mm circle
+  (hand-drawn and snapped; 0.6 / 1 / 1.5 mm apart at 80 / 150 / 200 mm/s; turning at the outline or overshooting it by
+  1 mm; diagonal) that must keep the outline, in `packages/core/test/scribble.test.ts`.
 - **Limits:** a vertical scratch-out with legs further apart than ~0.4 × their length (e.g. 6 mm legs moving on 1.5 mm
   each) is kept as ink; scribble back and forth along the words instead. Circular scribbles ("@@@") aren't detected.
 

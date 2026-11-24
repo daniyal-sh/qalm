@@ -274,9 +274,12 @@ try {
     await penLine(Array.from({ length: 11 }, (_, i) => [ex, ly - 30 + i * 6]));
     await shot('erase-1-partial.png');
     const split = await pageItems();
-    const pieces = strokesOf(split).filter((it) => !withLine.some((b) => b.id === it.id));
-    if (split.some((it) => it.id === lineItem.id) || pieces.length !== 2) {
-      throw new Error(`partial erase: expected the line split in two, got ${pieces.length} new strokes (line ${split.some((it) => it.id === lineItem.id) ? 'kept' : 'gone'})`);
+    // The longest piece keeps the line's id; the other is new and says where it came from.
+    const added = strokesOf(split).filter((it) => !withLine.some((b) => b.id === it.id));
+    const kept = split.find((it) => it.id === lineItem.id);
+    const pieces = kept ? [kept, ...added] : added;
+    if (!kept || added.length !== 1 || added[0].splitFrom !== lineItem.id) {
+      throw new Error(`partial erase: expected the line split in two (one piece keeping its id), got ${added.length} new strokes (line ${kept ? 'kept' : 'gone'})`);
     }
     const [a4c, b4c] = pieces.map(xRange).sort((p, q) => p[0] - q[0]);
     if (!(a4c[1] < b4c[0]) || pieces.some((p) => p.width !== lineItem.width || p.color !== lineItem.color || p.style !== lineItem.style)) {
@@ -285,7 +288,8 @@ try {
     await win.keyboard.press('Control+z');
     await win.waitForTimeout(500);
     const unsplit = await pageItems();
-    if (!unsplit.some((it) => it.id === lineItem.id) || unsplit.length !== withLine.length) throw new Error('partial erase: one undo should restore the line');
+    const restored = unsplit.find((it) => it.id === lineItem.id);
+    if (!restored || unsplit.length !== withLine.length || restored.points.length !== lineItem.points.length) throw new Error('partial erase: one undo should restore the line');
     log(`partial eraser: split the line in two (gap ${((b4c[0] - a4c[1]) * pxPerUnit).toFixed(0)} px), one undo restored it`);
     // Back to whole-stroke mode (the default), so later steps and runs start as a new user would.
     await win.keyboard.press('e');

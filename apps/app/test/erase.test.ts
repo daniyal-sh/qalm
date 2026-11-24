@@ -49,10 +49,14 @@ describe('the eraser in the editor', () => {
     }
     const strokes = page.items() as StrokeItem[];
     expect(strokes.length).toBe(3);
-    expect(strokes.every((s) => s.id !== 's' && s.style === 'ball' && s.smoothing === 2)).toBe(true);
+    // The longest piece keeps the stroke's id (updated in place); the others are new and say where they came from.
+    expect(strokes.filter((s) => s.id === 's')).toHaveLength(1);
+    expect(strokes.filter((s) => s.id !== 's').every((s) => s.splitFrom === 's')).toBe(true);
+    expect(strokes.every((s) => s.style === 'ball' && s.smoothing === 2)).toBe(true);
     expect(undo.canUndo).toBe(true);
     undo.undo();
     expect(page.items().map((i) => i.id)).toEqual(['s']);
+    expect((page.item('s') as StrokeItem).points).toHaveLength(line('s', 0, 200, 100).points.length);
     undo.redo();
     expect(page.items()).toHaveLength(3);
   });

@@ -33,6 +33,11 @@ export interface StrokeItem {
   /** Stored per stroke so a stroke never changes look when the defaults change. */
   style?: PenStyle;
   smoothing?: Smoothing;
+  /**
+   * A piece the partial eraser split off: the id of the stroke it came from, as drawn (the longest piece keeps that
+   * id). Lets a timeline follow a piece back to when its ink was written.
+   */
+  splitFrom?: string;
 }
 /** `rot` (radians, clockwise on the page) turns a text box or image about its top-left corner `(x, y)`; missing = 0. */
 export interface TextItem { id: string; type: 'text'; x: number; y: number; w: number; text: string; fontSize: number; color: string; rot?: number }

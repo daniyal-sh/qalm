@@ -261,7 +261,8 @@ email-only sign-in, and `grants.notebook_ids` / `folder_ids` since grants cover 
     place; one undo restores the stroke. Tested on web/Electron (desktop e2e step); Android built only as a JVM test of
     `LiveShape.kt` (the view wiring is uncompiled); iOS never compiled. Needs a real-stylus feel check.
   - **Partial eraser and scribble to erase** (PR "Partial eraser and scribble to erase"): the eraser's Whole stroke /
-    Partial switch (E toggles), pieces keep style and pressure, shapes erase whole, one undo per gesture; a quick zig-zag
+    Partial switch (E toggles), pieces keep style and pressure (the longest keeps the stroke's id, as a `cut`; new ones
+    have `splitFrom`), shapes erase whole, one undo per gesture; a quick zig-zag
     with the pen over ink deletes it (Settings → Pen, on by default). Thresholds in `docs/tech-spec.md` §7, Erasing.
     Tested on web/Electron (desktop e2e steps); the Android and iOS overlays only add the partial-erase trail (the
     splitting and detection run in JS on every platform); Android unbuilt as an APK, iOS never compiled. Needs a

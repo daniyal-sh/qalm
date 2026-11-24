@@ -5,8 +5,10 @@
 //    straight legs that are packed closely side by side (the distance between legs on the same side is small next
 //    to their length), drawn quickly. Letters like "m", "w", "MMM" or "N" have reversals too, but their legs are
 //    spread out (or curved, or slow); a back-and-forth scribble's legs lie almost on top of each other.
-// 2. It covers ink (`scribbleTargets`): strokes and shapes the scribble passes over and that lie mostly inside it.
-//    Shading or a scribble over empty paper covers nothing, so it stays ink.
+// 2. It covers ink (`scribbleTargets`): strokes and shapes that lie mostly inside it and that it crosses, back and
+//    forth, with the middles of several legs. Shading or a scribble over empty paper covers nothing, so it stays ink;
+//    so does shading inside an outline (a box, a circle): its legs turn at the outline, so their middles never cross
+//    it, and an outline whose box holds the whole scribble is never a target.
 //
 // Lengths are in page units (PDF points), converted from mm: the gesture is judged on the page, at any zoom.
 import type { InkPoint, Item } from '../types';
@@ -37,8 +39,18 @@ export const SCRIBBLE = {
   /** Quick: at least this fast on average, and done within `maxMs`. */
   minSpeedMmPerS: 60,
   maxMs: 3000,
-  /** A stroke or shape counts as covered when this share of its points lies inside the scribble. */
+  /** A stroke or shape counts as covered when this share of its points lies inside the scribble… */
   minCovered: 0.6,
+  /**
+   * …and the middles of this many legs cross it (each leg without `legTrimMm` at either end, where it turns: shading
+   * turns at the outline it fills, a scribble turns beyond the ink it rubs out). Marks smaller than `smallMm` across (a
+   * dot) need one.
+   */
+  minCrossLegs: 3,
+  legTrimMm: 1.2,
+  smallMm: 3,
+  /** Never a target: ink whose box, grown by this, holds the whole scribble (an outline being shaded inside). */
+  enclosesMm: 1.5,
 } as const;
 
 const mm = (v: number) => v * UNITS_PER_MM;
@@ -200,19 +212,57 @@ function grow(h: P[], d: number): P[] {
  */
 export function scribbleTargets(items: readonly Item[], points: readonly Pick<InkPoint, 'x' | 'y'>[], width: number): string[] {
   if (points.length < 3) return [];
-  const h = grow(hull(points.map((q): P => [q.x, q.y])), mm(1) + width / 2);
+  const raw = points.map((q): P => [q.x, q.y]);
+  const h = grow(hull(raw), mm(1) + width / 2);
   if (h.length < 3) return [];
-  // Mostly inside first (cheap), then whether the scribble really passes over it (on the scribble resampled every mm).
+  const [sx0, sy0, sx1, sy1] = raw.reduce<[number, number, number, number]>(
+    (b, [x, y]) => [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)],
+    [Infinity, Infinity, -Infinity, -Infinity],
+  );
+  const pad = mm(SCRIBBLE.enclosesMm);
+  // Mostly inside first (cheap), and not an outline around the whole scribble.
   const inside: Item[] = [];
   for (const it of items) {
     const pts: P[] = it.type === 'stroke' ? it.points.map((q): P => [q.x, q.y]) : it.type === 'shape' ? shapePolylines(it).flatMap((pl) => resample(pl, mm(1))) : [];
     if (!pts.length) continue;
+    const b = itemBBox(it);
+    if (b[0] - pad <= sx0 && b[1] - pad <= sy0 && b[2] + pad >= sx1 && b[3] + pad >= sy1) continue;
     const n = pts.filter((p) => pointInPolygon(p, h)).length;
     if (n >= SCRIBBLE.minCovered * pts.length) inside.push(it);
   }
   if (!inside.length) return [];
-  const path = resample(points.map((q): P => [q.x, q.y]), mm(1)).map(([x, y]) => ({ x, y }));
-  const out = hitTestErase(inside, path, width / 2);
+  // Then whether the scribble really crosses it: the middles of enough legs pass over it.
+  const legs = legMiddles(raw);
+  const out: string[] = [];
+  for (const it of inside) {
+    const b = itemBBox(it);
+    const need = Math.hypot(b[2] - b[0], b[3] - b[1]) < mm(SCRIBBLE.smallMm) ? 1 : SCRIBBLE.minCrossLegs;
+    let crossing = 0;
+    for (const leg of legs) {
+      if (hitTestErase([it], leg, width / 2).length && ++crossing >= need) break;
+    }
+    if (crossing >= need) out.push(it.id);
+  }
+  return out;
+}
+
+/**
+ * The scribble's legs (between its sharp reversals, as `scribbleShape` finds them), each without its ends: where a leg
+ * turns it may touch the ink around it (shading turns at the outline it fills), but its middle crosses what it rubs out.
+ */
+function legMiddles(raw: readonly P[]): { x: number; y: number }[][] {
+  const step = mm(0.4);
+  const r = resample(raw, step);
+  const k = Math.max(1, Math.round(mm(SCRIBBLE.turnMm) / step));
+  const rev = reversals(r, k);
+  const out: { x: number; y: number }[][] = [];
+  for (let i = 1; i < rev.length; i++) {
+    const a = rev[i - 1]!;
+    const b = rev[i]!;
+    const trim = Math.round(mm(SCRIBBLE.legTrimMm) / step);
+    if (b - trim - (a + trim) < 1) continue;
+    out.push(r.slice(a + trim, b - trim + 1).map(([x, y]) => ({ x, y })));
+  }
   return out;
 }
 

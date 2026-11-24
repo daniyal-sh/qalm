@@ -1,7 +1,8 @@
 import * as Y from 'yjs';
 import { LOCAL_ORIGIN } from '../origin';
 import { encodePoints, decodePoints } from '../points';
-import { itemBBox, unionBBox } from '../geometry/bbox';
+import { itemBBox, pointsBBox, unionBBox } from '../geometry/bbox';
+import { composeCut, cutPoints, type Cut } from '../geometry/cut';
 import { boxGap, NEAR, pageUnit, ROW_GAP, ROW_OVERLAP } from '../geometry/regions';
 import type { ErasePlan } from '../geometry/erase';
 import { newId } from '../ids';
@@ -9,7 +10,7 @@ import type { Author, BBox, Comment, InkPoint, Item, Reading, ReadingSrc } from 
 
 type YItem = Y.Map<unknown>;
 
-const GEOMETRY_KEYS = new Set(['points', 'bbox', 'x', 'y', 'w', 'h', 'pts']);
+const GEOMETRY_KEYS = new Set(['points', 'bbox', 'x', 'y', 'w', 'h', 'pts', 'cut']);
 const isInkType = (t: unknown) => t === 'stroke' || t === 'shape';
 
 /** A fresh reading as a transaction found it, kept up to date as its strokes move (see `InkChanges`). */
@@ -63,27 +64,41 @@ function union(boxes: Iterable<BBox>): BBox {
   return bb ?? [0, 0, 0, 0];
 }
 
+/** A stroke's `cut` (partly erased, see geometry/cut.ts), if it has a valid one. */
+function cutOf(m: YItem): Cut | null {
+  const c = m.get('cut');
+  return Array.isArray(c) && c.length === 2 && typeof c[0] === 'number' && typeof c[1] === 'number' ? [c[0], c[1]] : null;
+}
+
 function readItem(m: YItem): Item {
   const o: Record<string, unknown> = {};
   m.forEach((v, k) => {
-    if (k === 'line') return; // left by notebooks from before regions (see migratePage)
+    if (k === 'line' || k === 'cut') return; // `line`: left by notebooks from before regions (see migratePage)
     o[k] = k === 'points' && v instanceof Uint8Array ? decodePoints(v) : v;
   });
+  // A partly erased stroke: only its kept range of points, and the box of those (a move elsewhere rewrites `bbox`).
+  const cut = o.type === 'stroke' ? cutOf(m) : null;
+  if (cut && Array.isArray(o.points)) {
+    o.points = cutPoints(o.points as InkPoint[], cut).points;
+    o.bbox = pointsBBox(o.points as InkPoint[], (Number(o.width) || 0) / 2);
+  }
   return o as unknown as Item;
 }
 
-/** Reads only what `itemBBox` needs (no points decoding). */
+/** Reads only what `itemBBox` needs (no points decoding, unless the stroke is partly erased). */
 function readGeometry(m: YItem): Item {
-  if (m.get('type') === 'stroke') return { type: 'stroke', bbox: m.get('bbox') } as Item;
+  if (m.get('type') === 'stroke' && !m.has('cut')) return { type: 'stroke', bbox: m.get('bbox') } as Item;
   return readItem(m);
 }
 
 function setFields(m: YItem, fields: Record<string, unknown>): void {
   for (const [k, v] of Object.entries(fields)) {
-    if (k === 'id' || k === 'type' || k === 'line') continue;
+    if (k === 'id' || k === 'type' || k === 'line' || k === 'cut') continue;
     if (v === undefined) m.delete(k);
     else m.set(k, k === 'points' ? encodePoints(v as InkPoint[]) : v);
   }
+  // New points are the stroke as it is now (items are read with their cut applied): the cut is done.
+  if ('points' in fields && m.has('cut')) m.delete('cut');
 }
 
 export function readReading(m: Y.Map<unknown>): Reading | null {
@@ -310,12 +325,66 @@ export class Page {
     });
   }
 
-  /** Applies a partial-erase pass (`planPartialErase`) in one transaction: strokes split, shapes removed. */
+  /**
+   * Applies a partial-erase pass (`planPartialErase`) in one transaction: strokes split, shapes removed. A split stroke
+   * keeps its id for its longest piece, updated in place as a `cut` of its points (two numbers, not the points again),
+   * so a delete or move of it on another device still applies; the other pieces are added right after it in the
+   * z-order. Readings of the stroke read its pieces too and go stale; comment threads on it follow the new pieces as
+   * well. A stroke with nothing left is removed.
+   */
   applyErase(plan: ErasePlan): void {
     if (!plan.split.length && !plan.remove.length) return;
     this.tx(() => {
-      this.replaceItems(plan.split.map((s) => ({ id: s.id, with: s.pieces })));
-      if (plan.remove.length) this.removeItems(plan.remove);
+      const gone: string[] = [];
+      const added = new Map<string, string[]>();
+      for (const sp of plan.split) {
+        if (!this.itemMap.has(sp.id)) continue;
+        if (!sp.pieces.length || !sp.keep) gone.push(sp.id);
+        else added.set(sp.id, sp.pieces.filter((p) => p.id !== sp.id).map((p) => p.id));
+      }
+      // Readings first, before this transaction notes any ink (see inkChanges): they read the new pieces too, and the
+      // ink they read changed.
+      this.readingMap.forEach((m) => {
+        const ids = m.get('ids');
+        if (!Array.isArray(ids) || !ids.some((id) => added.has(id as string))) return;
+        m.set('ids', [...new Set((ids as string[]).flatMap((id) => [id, ...(added.get(id) ?? [])]))]);
+        m.set('stale', true);
+      });
+      this.commentMap.forEach((m) => {
+        const ids = m.get('anchorIds');
+        if (!Array.isArray(ids) || !ids.some((id) => added.has(id as string))) return;
+        m.set('anchorIds', [...new Set((ids as string[]).flatMap((id) => [id, ...(added.get(id) ?? [])]))]);
+      });
+      for (const sp of plan.split) {
+        const m = this.itemMap.get(sp.id);
+        if (!m || !added.has(sp.id) || !sp.keep) continue;
+        this.noteInk(sp.id);
+        this.dirty(m);
+        // The kept range, in the stored points' indexes (the stroke may be partly erased already).
+        const stored = m.get('points');
+        const n = stored instanceof Uint8Array ? decodePoints(stored).length : 0;
+        const prev = cutOf(m);
+        const src = prev && n ? cutPoints(decodePoints(stored as Uint8Array), prev).src : null;
+        const cut = src ? composeCut(src, sp.keep) : sp.keep;
+        m.set('cut', cut);
+        const kept = sp.pieces.find((p) => p.id === sp.id);
+        if (kept) m.set('bbox', kept.bbox);
+        const fresh = sp.pieces.filter((p) => p.id !== sp.id);
+        for (const item of fresh) {
+          this.noteInk(item.id);
+          const pm = new Y.Map<unknown>();
+          this.itemMap.set(item.id, pm);
+          pm.set('id', item.id);
+          pm.set('type', item.type);
+          setFields(pm, item as unknown as Record<string, unknown>);
+        }
+        if (fresh.length) {
+          const at = this.order.toArray().indexOf(sp.id);
+          if (at >= 0) this.order.insert(at + 1, fresh.map((p) => p.id));
+          else this.order.push(fresh.map((p) => p.id));
+        }
+      }
+      if (gone.length || plan.remove.length) this.removeItems([...gone, ...plan.remove]);
     });
   }
 

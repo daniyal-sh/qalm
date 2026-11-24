@@ -125,6 +125,17 @@ export function sigPolyline(sig: string): [number, number][] {
 const sigBox = (pl: [number, number][]): BBox => pointsBBox(pl.map(([x, y]) => ({ x, y })), 0.5);
 
 /** Current ink signatures of a page. */
+const polyLength = (pl: readonly [number, number][]) => pl.reduce((n, p, i) => (i ? n + Math.hypot(p[0] - pl[i - 1]![0], p[1] - pl[i - 1]![1]) : 0), 0);
+
+/** Whether a stroke's new path is a shorter one inside its old box (partly erased), not a move or a new stroke. */
+function shrank(before: [number, number][], now: [number, number][]): boolean {
+  if (before.length < 2 || now.length < 1) return false;
+  const a = sigBox(before);
+  const b = sigBox(now);
+  const tol = 0.5;
+  return b[0] >= a[0] - tol && b[1] >= a[1] - tol && b[2] <= a[2] + tol && b[3] <= a[3] + tol && polyLength(now) < polyLength(before) - tol;
+}
+
 export function pageInk(page: Page): InkSeen {
   const out: InkSeen = {};
   for (const it of page.items()) if (isInk(it)) out[it.id] = inkSig(it);
@@ -358,6 +369,8 @@ export function encodeQinkUpdate(
     }
     const fresh = Object.keys(cur).filter((id) => before[id] !== cur[id]);
     const erased = Object.keys(before).filter((id) => !(id in cur)).map((id) => sigPolyline(before[id]!));
+    // A stroke the partial eraser shortened keeps its id: the agent sees what it was as erased, and what's left as new.
+    for (const id of fresh) if (before[id] && shrank(sigPolyline(before[id]!), sigPolyline(cur[id]!))) erased.push(sigPolyline(before[id]!));
     ctxs.push({ ...ctx, first: false, drafts: changeRegions(ctx, fresh, erased) });
   }
 
