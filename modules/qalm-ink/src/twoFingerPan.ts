@@ -77,11 +77,18 @@ export function createTwoFingerPan() {
       last = at;
       samples = [at];
     },
-    /** The midpoint moved; `rebase` after a finger came or went, so the midpoint jumping doesn't scroll. */
+    /**
+     * The midpoint moved; `rebase` after a finger came or went, so the midpoint jumping doesn't scroll. The velocity
+     * history moves with it: fingers lift a few ms apart, and the fling must still see the drag before the first lift.
+     */
     move(at: PanSample, rebase = false) {
       if (!last) return;
       if (!rebase) scrollBy(at.x - last.x, at.y - last.y);
-      else samples = [];
+      else {
+        const dx = at.x - last.x;
+        const dy = at.y - last.y;
+        samples = samples.map((p) => ({ x: p.x + dx, y: p.y + dy, t: p.t }));
+      }
       last = at;
       samples.push(at);
       if (samples.length > 32) samples.splice(0, samples.length - 32);

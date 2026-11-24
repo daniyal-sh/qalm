@@ -182,6 +182,7 @@ try {
   await drag([{ x: px - 250, y: py + 40, mm: FINGER }], 0, 0, 1);
   check('test area: left hand, a finger left of and below the pen', (await message()) === 'Ignored: on your writing hand’s side');
   await choose('Right');
+  await penLine(px - 60, py - 30, px + 60, py - 30);
   await sleep(1500);
   await drag([{ x: px + 120, y: py + 40, mm: FINGER }], 0, 0, 1);
   check('test area: the hand side still holds after 1.5 s', (await message()) === 'Ignored: on your writing hand’s side');
@@ -310,15 +311,20 @@ try {
     }
     await touch('touchEnd', []);
   };
+  const scrollHome = () =>
+    win.evaluate(() => document.querySelectorAll('div').forEach((d) => d.scrollTop > 0 && (d.scrollTop = 0)));
   await open({ drawWith: 'any' });
   before = await ink(clip);
   top = await scrollTops();
-  await twoFingers({ x: cx - 40, y: cy + 150 }, { x: cx + 40, y: cy + 150 }, { x: 0, y: -15 }, { x: 0, y: -15 });
+  // A short, quick pan (the page scrolls ~170 px at most at 100%), so the fling has room to go on.
+  await twoFingers({ x: cx - 40, y: cy + 150 }, { x: cx + 40, y: cy + 150 }, { x: 0, y: -10 }, { x: 0, y: -10 }, 6);
   const panned = (await scrollTops()) - top;
   await sleep(800);
   const flung = (await scrollTops()) - top;
-  check('pen and finger: two fingers scroll', panned > 100, `scrolled ${panned} px`);
-  check('pen and finger: …with momentum after lifting', flung > panned + 20, `${panned} → ${flung} px`);
+  check('pen and finger: two fingers scroll', panned > 30, `scrolled ${panned} px`);
+  check('pen and finger: …with momentum after lifting', flung > panned + 8, `${panned} → ${flung} px`);
+  await scrollHome();
+  await sleep(300);
   check('pen and finger: …and draw nothing', Math.abs((await ink(clip)) - before) < 40, `${(await ink(clip)) - before} px`);
   await open({ drawWith: 'any' });
   before = await ink(clip);
@@ -353,9 +359,11 @@ try {
   }
   await touch('touchEnd', []);
   await sleep(800);
+  check('pen and finger: …and then scrolls', (await scrollTops()) > top + 50, `scrolled ${(await scrollTops()) - top} px`);
+  await scrollHome();
+  await sleep(300);
   const kept = (await ink(clip)) - before;
   check('pen and finger: a second finger after a real stroke keeps it', kept > 50, `${kept} px`);
-  check('pen and finger: …and then scrolls', (await scrollTops()) > top + 50, `scrolled ${(await scrollTops()) - top} px`);
 
   // Pen only
   await open({ drawWith: 'pen' });
