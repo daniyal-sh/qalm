@@ -117,7 +117,8 @@ ask C1 R5 [1] p1 @99,154 495x68 "is this right?"
 
 **Thread IDs** (`C1`, `C2`, …) are assigned by the server too, notebook-wide, and never reused. Only the student's words
 are sent (each entry once per agent); the agent's own comments never come back to it. Comment text is cut at 1000
-characters.
+characters. Comments are Markdown: the app renders bold, lists, code, links and TeX maths (`$x^2$`, `$$…$$`) and strips
+raw HTML; agents send and receive the text exactly as written.
 
 **A new agent gets no replay of history.** Asks from before it connected are not sent. On a page's first look, the
 page's threads are not replayed either: each **unresolved** thread goes out once as `open C2 p3@… student "latest

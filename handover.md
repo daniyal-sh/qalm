@@ -137,11 +137,11 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
 
 | Package | Tests | Other verification |
 |---|---|---|
-| core | 137 | Regions (clustering, context, the owner's page, first look, erased, labels, refs), readings stale rules, migration |
-| server | 33 | `wrangler dev` smoke test; `wrangler deploy --dry-run` (bundle ~1.1 MB gzipped) |
-| app | 128 | Every round-2 PR checked in headless Chrome, offline and signed in against `wrangler dev` with a scripted MCP agent |
+| core | 173 | Regions (clustering, context, the owner's page, first look, erased, labels, refs), readings stale rules, migration |
+| server | 47 | `wrangler dev` smoke test; `wrangler deploy --dry-run` (bundle ~1.9 MB gzipped, ~0.8 MB of it MathJax) |
+| app | 219 | Every round-2 PR checked in headless Chrome, offline and signed in against `wrangler dev` with a scripted MCP agent |
 | qalm-ink | JVM freehand parity test (31 style × smoothing cases) | Android `assembleDebug` (x86_64); drawing on an emulator and on web |
-| desktop | 3 unit | Packaged `qalm.exe` end-to-end test (Playwright): library, open notebook, draw, reload route, PDF export via the native save dialog, deep link, no console errors |
+| desktop | 3 unit | Packaged `qalm.exe` end-to-end test (Playwright): library, open notebook, draw, live shapes, a Markdown text box via the format bar, reload route, PDF export (with the Markdown fonts) via the native save dialog, deep link, no console errors |
 
 **Round 2 (PRs #1–#24, all merged; audit issue #14 covers the findings):**
 - **Ink:** no blank frame when a stroke ends (PageCanvas reports what it drew; #5); pen styles fountain/ball/brush and
@@ -178,6 +178,11 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
   - **Pages:** a virtualised page list, the toolbar, zoom (pinch, Ctrl+wheel, ±), undo/redo, and add or delete pages.
   - **Writing tools:** pen, highlighter, eraser, lasso (move, recolour, duplicate, delete), text boxes, images and
     shape snapping.
+  - **Markdown** (tech-spec §2, Markdown): new text boxes render Markdown with TeX maths when they lose focus; a format
+    bar under the toolbar inserts the syntax while typing. Only boxes with `format: 'md'` render it (new boxes, pasted
+    text, and any box the bar touches); older boxes stay plain text. Comments render Markdown too, with raw HTML stripped.
+    Library choice: markdown-it + MathJax 3 in core, drawn by our own layout everywhere; Enriched Markdown (Software
+    Mansion) renders native text views, which can't feed the Skia page, PDF export or the server's crops.
   - **PDFs:** PDF backgrounds.
   - **AI:** the comments panel (starts closed at every width; docked at ≥ 1100 px, floating below that, closed when the
     window narrows), Ask, and Reading (what an agent read in the selected ink, with a "stale" badge; editable).
@@ -252,6 +257,11 @@ email-only sign-in, and `grants.notebook_ids` / `folder_ids` since grants cover 
   - **Live shapes** (#60): hold 400 ms within 2.5 mm and the shape snaps under the pen; drag to resize/rotate, lift to
     place; one undo restores the stroke. Tested on web/Electron (desktop e2e step); Android built only as a JVM test of
     `LiveShape.kt` (the view wiring is uncompiled); iOS never compiled. Needs a real-stylus feel check.
+  - **Markdown** is verified on web (headless Chrome, light and dark) and in the packaged desktop app (e2e step: format
+    bar keeps focus, box stored as `format: 'md'`, Figtree Bold in the PDF export). On Android and iPad it's unverified on
+    a device: the RN TextInput selection restore (`setSelection`), inline maths SVG inside `<Text>` in comments, and the
+    format bar staying clear of the keyboard need a check. MathJax adds ~0.8 MB gzipped to the Worker (now ~1.9 MB) and
+    to the app bundle. Lists don't continue on Enter (type `- ` or use the bar).
   - Fractions like ⅔ have no glyph on the page; PDF export uses Symbol, so symbol-heavy lines may wrap differently.
   - "Pen and finger" two-finger pan and pinch are verified with synthetic touch on Electron only; Android and iPad need
     a device check (iOS changes are unbuilt).

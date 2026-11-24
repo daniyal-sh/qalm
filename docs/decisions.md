@@ -5,6 +5,8 @@ Keep it simple. Anything not listed here is out of v1.
 ## Product
 - Handwritten notes for general note-takers, in a GoodNotes-style page layout. Infinite canvas comes later.
 - v1 tools: pen, highlighter, eraser, lasso select and move, typed text boxes, shape snapping, PDF import and annotation, images.
+- Text boxes and comments render Markdown (with TeX maths). Only new boxes, and boxes formatted with the format bar, are
+  Markdown (`format: 'md'`); older boxes stay plain text. Raw HTML in comments is never rendered.
 - Not in v1: handwriting search, sharing with other people, audio, stickers, templates marketplace.
 - Export: PDF (ink flattened) and `.qalm` (full-fidelity backup).
 - Handwriting recognition: none in the app; the agent reads handwriting itself.
