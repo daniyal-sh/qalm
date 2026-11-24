@@ -3,7 +3,7 @@ import { createUndoManager, Page, type Item } from '@qalm/core';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 
-import { BAKE, commonPrefix, jobStillValid, planBake, type Baked, type BakeOptions } from '../../../modules/qalm-ink/src/bake';
+import { BAKE, BakeBudget, commonPrefix, jobStillValid, planBake, type Baked, type BakeOptions } from '../../../modules/qalm-ink/src/bake';
 import { A4, fillPage } from '../src/bench/gen';
 
 const OPTS: BakeOptions = { minInk: 10, tailMin: 4, tailMax: 12, maxPixels: 1_000_000 };
@@ -113,5 +113,30 @@ describe('bake plan on a real 5000-stroke page', () => {
     const undone = page.items();
     expect(undone).toHaveLength(before.length);
     expect(planBake(base, undone, target, inkOnly, null)).toMatchObject({ use: true, tailStart: base.items.length, job: null });
+  });
+});
+
+describe('bake budget', () => {
+  it('bounds the pixels all bases hold together, and lets a waiting page retry on release', () => {
+    const b = new BakeBudget(100);
+    const [p1, p2, p3] = [{}, {}, {}];
+    expect(b.fits(p1, 60)).toBe(true);
+    b.hold(p1, 60);
+    expect(b.fits(p2, 50)).toBe(false);
+    expect(b.fits(p1, 90)).toBe(true); // re-baking at another zoom replaces its own base
+    expect(b.fits(p2, 40)).toBe(true);
+    b.hold(p2, 40);
+    let retried = 0;
+    const off = b.onRelease(() => retried++);
+    expect(b.fits(p3, 10)).toBe(false);
+    b.release(p1);
+    expect(retried).toBe(1);
+    expect(b.fits(p3, 10)).toBe(true);
+    b.release(p1); // not held: no wake-up
+    expect(retried).toBe(1);
+    off();
+    b.release(p2);
+    expect(retried).toBe(1);
+    expect(b.total).toBe(0);
   });
 });

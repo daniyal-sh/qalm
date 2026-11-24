@@ -20,7 +20,47 @@ export interface BakeOptions {
   maxPixels: number;
 }
 
-export const BAKE: BakeOptions = { minInk: 400, tailMin: 16, tailMax: 96, maxPixels: 8_000_000 };
+export const BAKE: BakeOptions = { minInk: 100, tailMin: 16, tailMax: 96, maxPixels: 8_000_000 };
+
+/**
+ * Pixels all mounted pages' bases may hold together (4 bytes each), so memory stays bounded at any zoom: about ten
+ * pages at 1× on a phone, two or three zoomed in. A page that doesn't fit draws pictures until another page lets go.
+ */
+export class BakeBudget {
+  private held = new Map<object, number>();
+  private waiting = new Set<() => void>();
+  constructor(readonly maxPixels: number) {}
+
+  /** Whether `owner` may hold a base of `pixels` (what it holds already doesn't count against it). */
+  fits(owner: object, pixels: number): boolean {
+    let others = 0;
+    for (const [o, p] of this.held) if (o !== owner) others += p;
+    return others + pixels <= this.maxPixels;
+  }
+
+  hold(owner: object, pixels: number): void {
+    this.held.set(owner, pixels);
+  }
+
+  release(owner: object): void {
+    if (!this.held.delete(owner)) return;
+    for (const f of [...this.waiting]) f();
+  }
+
+  /** Called whenever a base is released (pages that didn't fit try again). */
+  onRelease(f: () => void): () => void {
+    this.waiting.add(f);
+    return () => void this.waiting.delete(f);
+  }
+
+  get total(): number {
+    let n = 0;
+    for (const p of this.held.values()) n += p;
+    return n;
+  }
+}
+
+export const bakeBudget = new BakeBudget(16_000_000);
 
 /** A baked base: the items it holds (a prefix of the page's items, same objects) and what it was drawn with. */
 export interface Baked {

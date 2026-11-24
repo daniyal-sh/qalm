@@ -30,7 +30,7 @@ import { PixelRatio, Platform } from 'react-native';
 
 import figtree from '../assets/fonts/Figtree-Regular.ttf';
 import notoMath from '../assets/fonts/NotoSansMath-Subset.ttf';
-import { jobStillValid, planBake, type Baked, type BakePlan } from './bake';
+import { bakeBudget, jobStillValid, planBake, type Baked, type BakePlan } from './bake';
 import { disposeLater } from './dispose';
 import { provideTextFonts, textParagraph } from './textMetrics';
 import { INK_CHUNK, inkGeometryKey, inkRuns, sameItems, type InkItem, type Run } from './inkRuns';
@@ -441,16 +441,23 @@ function useBase(
   const running = React.useRef<RunningBake | null>(null);
   const [version, setVersion] = React.useState(0);
   const bakeable = React.useCallback((it: Item) => it.type === 'stroke' || it.type === 'shape' || (it.type === 'text' && !!fonts), [fonts]);
-  const plan = React.useMemo(
-    () => (BAKE_ENABLED ? planBake(base.current?.baked ?? null, items, target, bakeable, live) : NO_BAKE),
+  const plan = React.useMemo(() => {
+    if (!BAKE_ENABLED) return NO_BAKE;
+    const p = planBake(base.current?.baked ?? null, items, target, bakeable, live);
+    return p.enabled && !bakeBudget.fits(base, target.w * target.h) ? NO_BAKE : p;
+  },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [items, target.key, target.w, target.h, bakeable, live, version],
   );
   const inputs = React.useRef({ backdrop, pathOf, fonts });
   inputs.current = { backdrop, pathOf, fonts };
 
+  // A page that didn't fit the budget tries again when another page lets go of its base.
+  React.useEffect(() => bakeBudget.onRelease(() => !base.current && !running.current && setVersion((v) => v + 1)), []);
+
   const install = React.useCallback((next: Base) => {
     if (base.current) disposeLater(base.current.image);
+    bakeBudget.hold(base, next.baked.w * next.baked.h);
     base.current = next;
     hadBase.current = true;
     setVersion((v) => v + 1);
@@ -463,6 +470,7 @@ function useBase(
       if (base.current) disposeLater(base.current.image);
       base.current = null;
       hadBase.current = false;
+      bakeBudget.release(base);
       return;
     }
     const job = plan.job;
@@ -543,6 +551,7 @@ function useBase(
       install({ baked: { items: snapshot.slice(0, job.to), key, w, h }, image });
     };
     running.current = bake;
+    bakeBudget.hold(base, Math.max(w * h, base.current ? base.current.baked.w * base.current.baked.h : 0));
     timer = setTimeout(step, hadBase.current && !plan.use ? REBAKE_DELAY_MS : 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan]);
@@ -559,6 +568,7 @@ function useBase(
         running.current = null;
         if (base.current) disposeLater(base.current.image);
         base.current = null;
+        bakeBudget.release(base);
       }, 0);
     };
   }, []);
