@@ -165,7 +165,16 @@ Refs: a region `R7`, a box `p6@120,300,260,80` (x,y,w,h on the grid), a page `p6
 | `wait` | `s?` | waits for the next update (long-poll). With no `s`, it lists the live sessions the agent can see |
 | `read` | `ref` | anything on demand: `outline`; a page `p3` (all its ink as regions, read ones as text); a region `R7` (its strokes now, plus any readings of them, marked `stale` if so); a box (a crop of everything in it); `pdf:p2`; a thread `C5` |
 | `transcribe` | `ref`, `text` | saves the agent's reading of a region or a box's ink (strokes whose centre is inside). The student can edit it |
-| `comment` | `ref` or `thread`, `text`, `resolve?` | with `ref` (a region, box or page) starts a thread on those strokes, with the box as a fallback position, and says its label (`as thread C8`); with `thread` (`C3`) replies in it. `resolve` also marks the thread resolved: use it only when the thread is trivially done. Never changes ink |
+| `comment` | `ref` or `thread`, `text`, `resolve?` | with `ref` (a region, box or page) starts a thread on those strokes, with the box as a fallback position, and says its label (`as thread C8`); with `thread` (`C3`) replies in it. `text` is Markdown with TeX maths (`$…$`, `$$…$$`), rendered in the app. `resolve` also marks the thread resolved: use it only when the thread is trivially done. Never changes ink |
+
+**Protocol versions.** `/mcp` speaks both MCP eras. Clients on 2025-11-25 and older send `initialize` and are served
+exactly as before. 2026-07-28 clients skip the handshake: each request carries
+`_meta["io.modelcontextprotocol/protocolVersion"]` and `clientCapabilities`, plus the `MCP-Protocol-Version`, `Mcp-Method`
+and (for `tools/call`) `Mcp-Name` headers, and may start with `server/discover`. Results add `resultType: "complete"` and
+`serverInfo` in `_meta`; `tools/list` and `server/discover` add `ttlMs` (1 h) and `cacheScope: "public"`. Missing or
+mismatched headers get 400 with -32020, missing `_meta` 400 with -32602, an unknown version 400 with -32022 and
+`data.supported`, and methods 2026-07-28 dropped (`initialize`, `ping`, …) 404 with -32601. The tools, OAuth and
+long-poll `wait` are the same in both eras.
 
 **Which notebooks an agent sees.** An approved agent can use every notebook whose **AI access** is on, now and in the
 future, and none other: there is no per-agent notebook choice. `wait()` lists exactly those, and every tool checks the

@@ -124,7 +124,10 @@ apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Objec
     their stored bytes to D1 `doc_sizes`; `GET /me/storage` sums both. Over the cap, asset uploads get a 413; sync never stops.
   - **Agents:** MCP at `/mcp` (Streamable HTTP, OAuth 2.1 with dynamic client registration, via
     `@cloudflare/workers-oauth-provider`) exposes 4 tools: `wait`, `read`, `transcribe`, `comment`. Region images are
-    rendered to PNG with resvg-wasm.
+    rendered to PNG with resvg-wasm. It is **dual-era**: `initialize` (2025-11-25 and older) is served as before by
+    `mcp.ts`; a request with the 2026-07-28 `_meta` protocol version is checked and shaped by `mcp-protocol.ts`
+    (headers, `server/discover`, `resultType`, -32020/-32022), then runs the same tools. `test/mcp-sdk.test.ts` connects
+    the official v2 SDK client (`@modelcontextprotocol/client`, dev only) in `auto`, pinned and `legacy` modes.
   - **Grants:** an approved agent can use every notebook of the user whose AI access is on, now and later
     (`grantedNotebooks` in `apps/server/src/grants.ts` reads each notebook's switch live from its room). There is no
     per-agent notebook choice: the consent page has no picker, and `PATCH /ai/grants` ignores `notebookIds`/`folderIds`

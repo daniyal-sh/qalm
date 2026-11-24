@@ -56,10 +56,12 @@ const fail = (status: number, id: unknown, code: number, message: string, data?:
 /** A header value, Base64-sentinel decoded (`=?base64?…?=`); null when it isn't valid. */
 function headerValue(v: string): string | null {
   if (!/^[\x20-\x7e\t]*$/.test(v)) return null;
-  const b = /^=\?base64\?([A-Za-z0-9+/]*={0,2})\?=$/.exec(v);
-  if (!b) return v;
+  // Clients must encode any value shaped like the sentinel, so one that doesn't decode is malformed, not literal.
+  if (!(v.startsWith('=?base64?') && v.endsWith('?=') && v.length >= 11)) return v;
+  const b64 = v.slice(9, -2);
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) return null;
   try {
-    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(Uint8Array.from(atob(b[1]!), (c) => c.charCodeAt(0)));
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
   } catch {
     return null;
   }
