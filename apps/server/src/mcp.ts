@@ -21,14 +21,15 @@ const INSTRUCTIONS =
   'transcribe(R7, text) and later updates send that text instead of an image. Comment on a region, a box "p6@120,300,260,80" ' +
   'or a page "p6" with comment; the comment follows the ink. "note C5 …", "re C3 …" and "ask C6 R9 …" are the student writing ' +
   'to you: answer with comment(thread). "open C2 …" is a thread from before you joined, with its latest message; read("C2") ' +
-  'shows all of it. You can never change ink.';
+  'shows all of it. You can never change ink. You only get a notebook while the student has pressed Play for AI in qalm; ' +
+  'while it is paused every tool says so and wait(s) returns "paused" or parks until they press Play, so keep calling wait.';
 
 const sArg = { type: 'string', description: 'Session (from wait with no arguments). Defaults to the last session you waited on.' };
 const REF = 'a region "R7", a box "p6@120,300,260,80" (x,y,w,h on the 0-1000 grid)';
 const TOOLS = [
   {
     name: 'wait',
-    description: 'Waits for the next update of a live session (long-poll). Without s, lists the sessions you can see.',
+    description: 'Waits for the next update of a live session (long-poll). Without s, lists the sessions you can see: live ones with their title, paused ones as "s=… paused".',
     inputSchema: { type: 'object', properties: { s: { type: 'string', description: 'Session to follow' } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
@@ -73,7 +74,6 @@ interface ToolResult { content: Content[]; isError?: boolean }
 
 class ToolError extends Error {}
 
-const LIVE_MS = 10 * 60 * 1000;
 const MAX_TEXT = 4000;
 
 export const mcpHandler = {
@@ -171,10 +171,13 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
   if (!g || g.user_id !== props.userId) throw new ToolError('Access to qalm has expired or was revoked. Reconnect to continue.');
 
   if (name === 'wait' && (args.s === undefined || args.s === '')) {
+    // Playing notebooks with their titles, newest edit first; paused ones only as `s=… paused` (no title: nothing of a
+    // paused notebook goes out, but the agent can park a wait(s) on it until the student presses Play).
     const rows = await grantedNotebooks(env, g);
-    const t = now();
-    rows.sort((a, b) => b.at - a.at);
-    const lines = ['#q sessions', ...rows.map((n) => `s=${sessionOf(n.id)} ${JSON.stringify(n.title)}${t - n.at < LIVE_MS ? ' live' : ''}${n.paused ? ' paused' : ''}`)];
+    // Live ones by last edit; paused ones by session id, so their order says nothing about when they were edited.
+    const sid = (n: (typeof rows)[number]) => sessionOf(n.id);
+    rows.sort((a, b) => Number(b.live) - Number(a.live) || (a.live ? b.at - a.at : sid(a) < sid(b) ? -1 : sid(a) > sid(b) ? 1 : 0));
+    const lines = ['#q sessions', ...rows.map((n) => (n.live ? `s=${sessionOf(n.id)} ${JSON.stringify(n.title)} live` : `s=${sessionOf(n.id)} paused`))];
     const text = lines.join('\n');
     await log(env, g, 'wait', 'sessions', text, null);
     return { content: [{ type: 'text', text }] };
@@ -189,7 +192,7 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
 
   if (name === 'wait') {
     const r = await stub.agentWait(docId, who, session, agentCfg(env));
-    return result(env, g, 'wait', `${nb.title}${r.changed ? '' : ' (no changes)'}`, r);
+    return result(env, g, 'wait', `${nb.title}${r.changed ? '' : r.text.endsWith(' paused') ? ' (paused)' : ' (no changes)'}`, r);
   }
   if (name === 'read') {
     const ref = str(args.ref, 'ref', 64);

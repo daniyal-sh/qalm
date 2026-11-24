@@ -69,7 +69,8 @@ export async function userNotebooks(env: Env, userId: string): Promise<{ folders
 }
 
 export interface GrantedNotebook extends NotebookChoice {
-  paused: boolean;
+  /** Playing AI sharing in qalm right now (the only time agents get its data). */
+  live: boolean;
   /** The student's last edit in the notebook (ms). */
   at: number;
 }
@@ -84,7 +85,7 @@ export async function grantedNotebooks(env: Env, g: GrantRow): Promise<GrantedNo
   const infos = await Promise.all(
     notebooks.map(async (n) => {
       const info = await room(env, nbDocId(n.id)).agentInfo(nbDocId(n.id));
-      return { ...n, aiAccess: info.aiAccess, paused: info.paused, at: info.at };
+      return { ...n, aiAccess: info.aiAccess, live: info.live, at: info.at };
     }),
   );
   return infos.filter((n) => n.aiAccess);

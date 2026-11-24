@@ -29,7 +29,7 @@ import { Text } from '../ui/Text';
 import { CommentsPanel, PANEL_W } from './CommentsPanel';
 import { threadRows } from './CommentsPanel.logic';
 import { mirrorLoadedThreads, useThreadBackfill, useThreadIndex } from './threadIndex';
-import { MARGIN_CARD_H, MarginCard, PresencePill, usePresence, useReadAfterDwell } from './ai';
+import { AiControl, MARGIN_CARD_H, MarginCard, useAiLive, usePresence, useReadAfterDwell } from './ai';
 import { fitColumn, MARGIN_CARD_GAP, marginColumn } from './margin.logic';
 import { aiUi, COMMENTS_START_OPEN, marginCards, markSeen, newestAgentEntry, startThinking, stillThinking, THINKING_MS, unreadCount, unreadIds, type SeenThreads, type Thinking } from './ai.logic';
 import { EditorContext, UndoRegistry, type EditingText, type EditorCtx, type PageData, type Selection, type ToolState } from './context';
@@ -174,8 +174,30 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     if (notebook) mirrorLoadedThreads(notebook, pageData);
   }, [notebook, pageData]);
   const indexing = useThreadBackfill(s.dm, notebook, notebookId);
-  // ---- live agent: presence, "thinking…" after an Ask, unread agent comments ----
-  const agents = usePresence(s.user ? s.tm : null, notebookId, !!meta?.aiAccess);
+  // ---- live agent: Play / Pause AI, presence, "thinking…" after an Ask, unread agent comments ----
+  // Agents get this notebook only while a device plays it (server-verified heartbeat; aiLive.ts). Opening starts paused.
+  const aiOn = !!s.user && !!meta?.aiAccess;
+  const aiLive = useAiLive(aiOn ? (h?.provider() ?? null) : null, aiOn);
+  const [liveBump, setLiveBump] = React.useState(0);
+  const presence = usePresence(s.user ? s.tm : null, notebookId, !!meta?.aiAccess, liveBump);
+  const agents = presence.agents;
+  // Live here, or on another device (unless this one has a Pause queued for it).
+  const shared = aiLive.playing || (presence.live && !aiLive.pausePending);
+  const playAi = () => {
+    // Apps from before Play / Pause write `aiPaused` ("Pause sharing"); the server still honours it, so Play clears it.
+    if (meta?.aiPaused) notebook?.setMeta({ aiPaused: false });
+    aiLive.play();
+    setLiveBump((x) => x + 1);
+  };
+  const pauseAi = () => {
+    if (!aiLive.pause()) showToast('Offline: AI is paused here. Your other devices pause when this one reconnects');
+    setLiveBump((x) => x + 1);
+  };
+  // "Pause sharing" on an old device: pause every device playing, so it isn't silently undone when cleared there.
+  const oldPause = !!meta?.aiPaused;
+  React.useEffect(() => {
+    if (oldPause && aiLive.playing) aiLive.pause();
+  }, [oldPause, aiLive.playing]); // eslint-disable-line react-hooks/exhaustive-deps
   const [seen, setSeen] = React.useState<SeenThreads>({});
   const seenKey = `seen:${notebookId}`;
   React.useEffect(() => {
@@ -817,8 +839,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     setAskOpen(false);
     setAskScope(null);
     if (scope?.mode === 'comment') return;
-    if (meta?.aiAccess && agents.length && !meta.aiPaused) setThinking(startThinking(summaries, Date.now(), askThread));
-    else showToast(!meta?.aiAccess ? 'Saved. Turn on AI access so agents can see it' : meta.aiPaused ? 'Saved. Sharing is paused' : 'Sent. No agent is following right now');
+    if (meta?.aiAccess && agents.length && shared) setThinking(startThinking(summaries, Date.now(), askThread));
+    else showToast(!meta?.aiAccess ? 'Saved. Turn on AI access so agents can see it' : !shared ? 'Saved. Press Play AI to share it' : 'Sent. No agent is following right now');
   };
 
   const scopeInfo = askScope ? pages.find((x) => x.id === askScope.pageId) : undefined;
@@ -972,10 +994,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                 Page {current + 1} of {pages.length}
               </Text>
               {!narrow ? syncPill : null}
-              {ui.presence && (agents.length || meta.aiPaused) ? (
-                <PresencePill agents={agents} notebook={notebook} paused={!!meta.aiPaused} thinking={isThinking} compact={narrow} />
-              ) : !narrow && ui.presence ? (
-                <Pill label="AI can read" tone="assistant" />
+              {ui.presence && s.user ? (
+                <AiControl agents={agents} live={shared} here={aiLive.playing} thinking={isThinking} compact={narrow} onPlay={playAi} onPause={pauseAi} />
               ) : null}
             </View>
           </View>
@@ -1299,7 +1319,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             style={{ minHeight: 72 }}
           />
           <View style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: c.line, borderRadius: radius.control }}>
-            <Row title="AI access" description={meta.aiAccess ? 'Agents you approved can read and comment' : 'Off: agents can’t see this notebook'} last>
+            <Row title="AI access" description={meta.aiAccess ? 'Agents you approved can read and comment while you press Play AI' : 'Off: agents can’t see this notebook'} last>
               <Toggle label="AI access" value={meta.aiAccess} onChange={(v) => notebook.setMeta({ aiAccess: v })} />
             </Row>
           </View>

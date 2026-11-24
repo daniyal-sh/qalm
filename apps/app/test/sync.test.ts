@@ -5,6 +5,7 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
 
 import { TokenManager, type Tokens } from '../src/auth/tokens';
+import { AiLive } from '../src/editor/aiLive';
 import { DocManager } from '../src/sync/docs';
 import { MESSAGE_SYNC, PING, PONG, SyncProvider, type NetworkEvents, type SocketLike } from '../src/sync/provider';
 import { MemoryStorage, SnapshotPersistence } from '../src/sync/snapshot';
@@ -51,6 +52,8 @@ class FakeSocket implements SocketLike {
   /** The network under this socket is gone: nothing arrives, sends vanish, and no close event fires. */
   dead = false;
   pings = 0;
+  /** Text frames sent other than pings (Play / Pause AI). */
+  readonly texts: string[] = [];
   constructor(private server: FakeServer) {}
   open() {
     this.readyState = 1;
@@ -70,7 +73,7 @@ class FakeSocket implements SocketLike {
       if (data === PING) {
         this.pings++;
         this.onmessage?.({ data: PONG });
-      }
+      } else this.texts.push(data);
       return;
     }
     const dec = decoding.createDecoder(data);
@@ -411,5 +414,189 @@ describe('local persistence', () => {
     await again.provider()!.whenSynced();
     expect(server.doc.getMap('m').get('k')).toBe(1);
     await m.closeAll();
+  });
+});
+
+describe('Play / Pause AI (AiLive over SyncProvider)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  async function open() {
+    vi.useFakeTimers();
+    const server = new FakeServer();
+    // Long socket heartbeats so the fake clock only exercises AI heartbeats.
+    const p = new SyncProvider(new Y.Doc(), 'nb:1', { serverUrl: 'https://api.test', getTicket: async () => 't', createSocket: server.create, heartbeatMs: 600_000, heartbeatTimeoutMs: 600_000, minBackoffMs: 100 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(p.status).toBe('synced');
+    const live = new AiLive(p, { everyMs: 15_000, ttlMs: 40_000 });
+    const sock = () => server.sockets[server.sockets.length - 1]!;
+    /** The server's answer to a Play or resume. */
+    const answer = (m: string) => sock().onmessage?.({ data: m });
+    return { server, p, live, sock, answer };
+  }
+
+  it('starts paused; Play sends ai:play then a heartbeat every 15 s; Pause stops and tells the server', async () => {
+    const { p, live, sock, answer } = await open();
+    expect(live.playing).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sock().texts).toEqual([]);
+    let changes = 0;
+    live.onChange(() => changes++);
+    live.play();
+    answer('ai:playing:0');
+    expect(live.playing).toBe(true);
+    expect(sock().texts).toEqual(['ai:play']);
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(sock().texts).toEqual(['ai:play', 'ai:live', 'ai:live', 'ai:live']);
+    expect(live.pause()).toBe(true);
+    expect(live.playing).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sock().texts).toEqual(['ai:play', 'ai:live', 'ai:live', 'ai:live', 'ai:pause']);
+    expect(changes).toBe(2);
+    live.destroy();
+    p.destroy();
+  });
+
+  it('closing the notebook stops this device only; ai:paused from the server pauses here and sends ai:stop back', async () => {
+    const { p, live, sock, answer } = await open();
+    live.play();
+    live.stop();
+    expect(live.playing).toBe(false);
+    expect(sock().texts).toEqual(['ai:play', 'ai:stop']);
+    live.stop(); // already stopped: nothing more
+    live.play();
+    answer('ai:playing:0');
+    // Pause on another device (or a refused heartbeat): paused here, and a stop in case a heartbeat crossed it.
+    answer('ai:paused');
+    expect(live.playing).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sock().texts).toEqual(['ai:play', 'ai:stop', 'ai:play', 'ai:stop']);
+    live.play();
+    live.destroy();
+    expect(sock().texts.at(-1)).toBe('ai:stop');
+    p.destroy();
+  });
+
+  it('a reconnect within the expiry resumes with the epoch; the server refuses it after a Pause elsewhere', async () => {
+    const { server, p, live, sock, answer } = await open();
+    live.play();
+    answer('ai:playing:4');
+    sock().drop(); // Wi-Fi drops; meanwhile someone presses Pause on the laptop
+    await vi.advanceTimersByTimeAsync(200);
+    expect(server.sockets.length).toBe(2);
+    expect(sock().texts).toEqual(['ai:resume:4']); // never a bare Play or heartbeat after a reconnect
+    // The room's epoch moved on: it says paused, and this device stops (no more heartbeats).
+    answer('ai:paused');
+    expect(live.playing).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sock().texts).toEqual(['ai:resume:4', 'ai:stop']);
+    live.destroy();
+    p.destroy();
+  });
+
+  it('stays paused after an outage longer than the expiry, or a Play the server never answered', async () => {
+    const { server, p, live, sock, answer } = await open();
+    live.play();
+    answer('ai:playing:0');
+    p.setNetwork(false);
+    await vi.advanceTimersByTimeAsync(41_000);
+    expect(live.playing).toBe(false);
+    p.setNetwork(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sock().texts).toEqual([]);
+    expect(server.sockets.length).toBe(2);
+    // Play goes out but the socket drops before the answer: no epoch to resume with, so paused.
+    live.play();
+    sock().drop();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(live.playing).toBe(false);
+    expect(sock().texts).toEqual([]);
+    live.destroy();
+    p.destroy();
+  });
+
+  it('pauses on wake when the device slept (heartbeat timer frozen past the expiry)', async () => {
+    const { p, live, sock, answer } = await open();
+    live.play();
+    answer('ai:playing:0');
+    vi.setSystemTime(Date.now() + 120_000); // asleep: the clock jumps, timers didn't run
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(live.playing).toBe(false);
+    expect(sock().texts).toEqual(['ai:play', 'ai:stop']);
+    live.destroy();
+    p.destroy();
+  });
+
+  it('a Pause pressed offline is queued, reported, and sent first on reconnect', async () => {
+    const { p, live, sock, answer } = await open();
+    live.play();
+    answer('ai:playing:2');
+    p.setNetwork(false);
+    let changes = 0;
+    live.onChange(() => changes++);
+    expect(live.pause()).toBe(false);
+    expect(live.playing).toBe(false);
+    expect(live.pausePending).toBe(true);
+    p.setNetwork(true);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(sock().texts).toEqual(['ai:pause']); // the Pause, and no resume
+    expect(live.pausePending).toBe(false);
+    expect(changes).toBe(2);
+    live.destroy();
+    p.destroy();
+  });
+
+  it('a Play pressed offline goes out on reconnect (within the expiry)', async () => {
+    const { p, live, sock } = await open();
+    p.setNetwork(false);
+    live.play();
+    expect(live.playing).toBe(true);
+    p.setNetwork(true);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(sock().texts).toEqual(['ai:play']);
+    live.destroy();
+    p.destroy();
+  });
+
+  it('background stops this device unless held (Lecture recording); releasing in the background stops it then', async () => {
+    const { p, live, sock, answer } = await open();
+    live.play();
+    answer('ai:playing:0');
+    live.background();
+    expect(live.playing).toBe(false);
+    expect(sock().texts).toEqual(['ai:play', 'ai:stop']);
+    live.foreground();
+    // Held: backgrounding keeps sharing (heartbeats go on), Pause still works.
+    const release = live.holdWhileBackgrounded('lecture');
+    live.play();
+    answer('ai:playing:0');
+    live.background();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(live.playing).toBe(true);
+    expect(sock().texts.slice(2)).toEqual(['ai:play', 'ai:live', 'ai:live']);
+    // The recording stops while still in the background: sharing stops now.
+    release();
+    expect(live.playing).toBe(false);
+    expect(sock().texts.at(-1)).toBe('ai:stop');
+    // Released in the foreground: nothing happens until the next background.
+    live.foreground();
+    const r2 = live.holdWhileBackgrounded('lecture');
+    live.play();
+    r2();
+    expect(live.playing).toBe(true);
+    live.background();
+    expect(live.playing).toBe(false);
+    live.destroy();
+    p.destroy();
+  });
+
+  it('delivers server text frames to listeners but not pongs', async () => {
+    const { p, sock } = await open();
+    const got: string[] = [];
+    p.onText((m) => got.push(m));
+    sock().onmessage?.({ data: 'pong' });
+    sock().onmessage?.({ data: 'ai:paused' });
+    expect(got).toEqual(['ai:paused']);
+    p.destroy();
+    expect(p.sendText('ai:live')).toBe(false);
   });
 });

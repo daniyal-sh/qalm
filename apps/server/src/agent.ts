@@ -22,7 +22,7 @@ import {
   type QinkThreads,
 } from '@qalm/core';
 import type { Env } from './env';
-import { pgDocId, room } from './docs';
+import { nbDocId, pgDocId, room } from './docs';
 import type { DocRoom } from './room';
 
 export interface AgentConfig { idleMs: number; minIntervalMs: number; timeoutMs: number }
@@ -58,7 +58,7 @@ const agentKey = (clientId: string) => `agent:${clientId}`;
 const inkKey = (clientId: string, pageId: string) => `ink:${clientId}:${pageId}`;
 
 export const AI_OFF = 'AI access is off for this notebook. The student can turn it on in the notebook.';
-export const PAUSED = 'The student paused sharing for this notebook. Keep calling wait: updates resume when they unpause.';
+export const PAUSED = "The student hasn't turned on AI for this notebook right now. Keep calling wait(s): it resumes when they press Play in qalm.";
 /** An agent counts as following for this long after its last call. */
 export const PRESENCE_MS = 60_000;
 
@@ -67,6 +67,9 @@ export interface AgentWho { clientId: string; name: string; canComment: boolean;
 interface Seen { name: string; at: number; canComment?: boolean; canTranscribe?: boolean }
 export interface Presence {
   aiAccess: boolean;
+  /** One of the owner's devices is playing AI sharing (Play / Pause AI). */
+  live: boolean;
+  /** `!live`, for apps from before Play / Pause. */
   paused: boolean;
   agents: { name: string; waiting: boolean; lastAt: number; canComment: boolean; canTranscribe: boolean }[];
 }
@@ -102,14 +105,26 @@ export class AgentHub {
     return this.nb().meta().aiAccess === true;
   }
 
-  /** "Pause sharing" in the editor: no updates and no tool calls until the student resumes. The grant stays. */
-  paused(): boolean {
-    return this.nb().meta().aiPaused === true;
+  /**
+   * THE gate for every MCP path (wait, read, transcribe, comment, and anything new such as Lecture mode's live
+   * transcript): AI access is on and one of the owner's devices is playing AI sharing right now (a live heartbeat
+   * on the notebook's sync socket; DocRoom.liveUntil). Paused or not open in qalm: agents get nothing.
+   * The synced `aiPaused` flag that apps from before Play / Pause still write ("Pause sharing") pauses it too, so
+   * Pause on an old device isn't ignored while a new one plays.
+   */
+  isLive(): boolean {
+    return this.aiAccess() && this.nb().meta().aiPaused !== true && this.r.liveUntil() > 0;
   }
 
-  private requireAccess(): void {
+  /** Throws the message an agent should see when `isLive()` is false. */
+  requireLive(): void {
     if (!this.aiAccess()) throw new Error(AI_OFF);
-    if (this.paused()) throw new Error(PAUSED);
+    if (!this.isLive()) throw new Error(PAUSED);
+  }
+
+  /** Play or Pause (or a device's heartbeat lapsing or its socket closing): pending waits re-check at once. */
+  onLiveChanged(): void {
+    this.wakeAll();
   }
 
   // ---- presence: who is following this notebook ----
@@ -133,7 +148,8 @@ export class AgentHub {
           .map(([id, a]) => ({ name: a.name, waiting: (this.waiting.get(id) ?? 0) > 0, lastAt: a.at, canComment: !!a.canComment, canTranscribe: !!a.canTranscribe }))
           .sort((a, b) => b.lastAt - a.lastAt)
       : [];
-    return { aiAccess: this.aiAccess(), paused: this.paused(), agents };
+    const live = this.isLive();
+    return { aiAccess: this.aiAccess(), live, paused: !live, agents };
   }
 
   lastClientUpdateAt(): number {
@@ -214,6 +230,9 @@ export class AgentHub {
     // Only a delivered update counts as a call when the wait ends. A wait that times out doesn't: an agent that
     // went away mid-wait (its wait runs on here until the timeout) drops out a minute after it started that wait.
     let delivered = false;
+    // A wait that starts paused parks until Play (or its timeout); one that was live and pauses ends at once as "paused".
+    let wasLive = this.isLive();
+    const paused = { text: `#q s=${session} paused`, svg: null, changed: false };
     try {
       for (;;) {
         const r = await this.tryDeliver(clientId, session, cfg);
@@ -221,9 +240,13 @@ export class AgentHub {
           delivered = r.changed;
           return r;
         }
+        const until = this.isLive() ? this.r.liveUntil() : 0;
+        if (until) wasLive = true;
+        else if (wasLive) return paused;
         const t = Date.now();
-        if (t >= deadline) return { text: `#q s=${session} ${this.paused() ? 'paused' : 'no changes'}`, svg: null, changed: false };
-        await this.sleep(Math.min(r.retryAt, deadline) - t);
+        if (t >= deadline) return until ? { text: `#q s=${session} no changes`, svg: null, changed: false } : paused;
+        // Re-check when the heartbeat would lapse, so a device that went silent pauses the wait too.
+        await this.sleep(Math.min(r.retryAt, deadline, until || Infinity) - t);
       }
     } finally {
       const n = (this.waiting.get(clientId) ?? 1) - 1;
@@ -235,9 +258,10 @@ export class AgentHub {
 
   private async tryDeliver(clientId: string, session: string, cfg: AgentConfig): Promise<AgentResult | { retryAt: number }> {
     // Checked on every pass: turning AI access off ends a wait at once (meta changes wake waiters).
-    // While paused nothing goes out; resuming wakes the wait and the next update catches up.
+    // While paused nothing goes out (ink, asks, comments and replies wait); Play wakes the wait and the next update
+    // catches up on everything since the last one.
     if (!this.aiAccess()) throw new Error(AI_OFF);
-    if (this.paused()) return { retryAt: Infinity };
+    if (!this.isLive()) return { retryAt: Infinity };
     const st = this.state(clientId);
     const nb = this.nb();
     const allAsks = nb.asks();
@@ -261,7 +285,7 @@ export class AgentHub {
 
     const pages = await this.loadPages([...changedIds, ...asks.map((a) => a.pageId).filter((id) => live.has(id))]);
     if (!this.aiAccess()) throw new Error(AI_OFF);
-    if (this.paused()) return { retryAt: Infinity };
+    if (!this.isLive()) return { retryAt: Infinity };
     // Re-read after the await: another call may have delivered meanwhile.
     const cur = this.state(clientId);
     if (cur.rev !== st.rev || cur.askCount !== st.askCount) return { retryAt: 0 };
@@ -290,20 +314,20 @@ export class AgentHub {
   /** `outline`, a page `p3`, a region `R7`, a box `p3@120,300,260,80`, `pdf:p2`, or a whole thread `C5`. */
   async read(ref: string, who: AgentWho): Promise<AgentResult> {
     this.touch(who);
-    this.requireAccess();
+    this.requireLive();
     const nb = this.nb();
     const r0 = ref.trim();
     if (/^c\d+$/i.test(r0)) {
       const threads = this.threads();
       const pages = await this.loadPages([resolveThread(threads, r0).pageId].filter((id) => nb.pages().some((p) => p.id === id)));
-      this.requireAccess();
+      this.requireLive();
       return { text: encodeQinkThread(nb, pages, threads, r0), svg: null, changed: false };
     }
     let ids: string[] = [];
     if (r0 === 'outline') ids = nb.pages().map((p) => p.id);
     else if (!/^pdf:/i.test(r0)) ids = [resolveTarget(nb, this.regions(), r0).pageId];
     const pages = await this.loadPages(ids);
-    this.requireAccess();
+    this.requireLive();
     const regions = this.regions();
     const r = encodeQinkRead(nb, pages, regions, r0, who.clientId);
     this.r.kvPut('regions', regions);
@@ -312,7 +336,7 @@ export class AgentHub {
 
   async edit(edit: AgentEdit, who: AgentWho): Promise<string> {
     this.touch(who);
-    this.requireAccess();
+    this.requireLive();
     if (edit.op === 'comment' && edit.thread) {
       const ref = edit.thread.trim().toUpperCase();
       const { pageId, commentId } = resolveThread(this.threads(), ref);
@@ -333,7 +357,8 @@ export class AgentHub {
   /** Runs an edit in the page's room. A new thread gets its label here (only this room assigns labels). */
   private async applyOn(pageId: string, edit: PageEdit): Promise<string> {
     const docId = pgDocId(this.notebookId, pageId);
-    const r = await room(this.env, docId).applyAgentEdit(docId, edit);
+    // The page room asks this room again right before it writes, so nothing lands once the student paused.
+    const r = await room(this.env, docId).applyAgentEdit(docId, edit, nbDocId(this.notebookId));
     if (!r.ok) throw new Error(r.text);
     // The app's notebook-wide comments list and unread badge read the thread index, not every page.
     if (r.threads?.length) this.r.putThreads(r.threads);

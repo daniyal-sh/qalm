@@ -126,7 +126,10 @@ export class YClient {
   }
 
   private onMessage(data: ArrayBuffer | string) {
-    if (typeof data === 'string') return;
+    if (typeof data === 'string') {
+      this.texts.push(data);
+      return;
+    }
     const d = decoding.createDecoder(new Uint8Array(data));
     const type = decoding.readVarUint(d);
     if (type !== MSG_SYNC) return;
@@ -137,7 +140,65 @@ export class YClient {
     if (kind === syncProtocol.messageYjsSyncStep2) this.markSynced();
   }
 
+  /** Text frames from the server (e.g. `ai:paused`). */
+  readonly texts: string[] = [];
+  private beat: ReturnType<typeof setInterval> | null = null;
+
+  /** The pause epoch from the room's last `ai:playing:<n>` answer (for a resume after a reconnect). */
+  epoch(): number | null {
+    const m = [...this.texts].reverse().find((t) => t.startsWith('ai:playing:'));
+    return m ? Number(m.slice('ai:playing:'.length)) : null;
+  }
+
+  /** Play AI on this socket: `ai:play` now, then an `ai:live` heartbeat every `everyMs` (the editor: every 15 s). */
+  play(everyMs = 400) {
+    this.stopBeat();
+    this.ws.send('ai:play');
+    this.heartbeat(everyMs);
+  }
+
+  /** A reconnected socket asks to be live again (refused if anyone paused since `epoch`), then keeps beating. */
+  resume(epoch: number, everyMs = 400) {
+    this.stopBeat();
+    this.ws.send(`ai:resume:${epoch}`);
+    this.heartbeat(everyMs);
+  }
+
+  /** Sends one raw text frame (e.g. a lone `ai:live`). */
+  send(text: string) {
+    this.ws.send(text);
+  }
+
+  private heartbeat(everyMs: number) {
+    this.beat = setInterval(() => {
+      try {
+        this.ws.send('ai:live');
+      } catch {
+        this.stopBeat();
+      }
+    }, everyMs);
+  }
+
+  /** Pause AI (on every device). */
+  pause() {
+    this.stopBeat();
+    this.ws.send('ai:pause');
+  }
+
+  /** Stops this device only (backgrounded, notebook closing): other devices keep playing. */
+  stop() {
+    this.stopBeat();
+    this.ws.send('ai:stop');
+  }
+
+  /** Stops heartbeats without saying so: the device went to sleep. */
+  stopBeat() {
+    if (this.beat) clearInterval(this.beat);
+    this.beat = null;
+  }
+
   close() {
+    this.stopBeat();
     this.ws.close(1000, 'bye');
   }
 }

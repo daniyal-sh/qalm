@@ -105,11 +105,12 @@ describe('live agent logic', () => {
     const tm = {
       fetch: async (path: string) => {
         expect(path).toBe('/ai/presence?nb=nb%201');
-        return new Response(JSON.stringify({ aiAccess: true, paused: false, agents: [{ name: 'Claude', waiting: true, lastAt: 1, canComment: true, canTranscribe: false }] }));
+        return new Response(JSON.stringify({ aiAccess: true, live: true, paused: false, agents: [{ name: 'Claude', waiting: true, lastAt: 1, canComment: true, canTranscribe: false }] }));
       },
     };
     const p = await getPresence(tm, 'nb 1');
     expect(p.agents[0]!.name).toBe('Claude');
+    expect(p.live).toBe(true);
     expect(presenceNames(['Claude'])).toBe('Claude');
     expect(presenceNames(['Claude', 'Tutor'])).toBe('Claude and Tutor');
     expect(presenceNames(['A', 'B', 'C'])).toBe('A and 2 others');
