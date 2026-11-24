@@ -4,7 +4,7 @@ import * as React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { folderCounts, visibleEntries, type LibraryFilter } from '../src/library/actions';
+import { DEFAULT_TITLE, folderCounts, visibleEntries, type LibraryFilter } from '../src/library/actions';
 import { CoverSheet, DEFAULT_FORM, FolderTile, MoveSheet, NameSheet, NewNotebookSheet, NotebookCard } from '../src/library/components';
 import { createNotebook, deleteForever, exportNotebook, importPdf, importQalm, updateNotebookMeta, type Ctx } from '../src/library/ops';
 import { pickFile } from '../src/lib/files';
@@ -141,7 +141,14 @@ export default function LibraryScreen() {
             label: 'Delete forever',
             icon: 'trash-2',
             tone: 'bad',
-            onPress: () => confirm('Delete forever?', `"${e.title}" will be removed from this device and your account. This can't be undone.`, 'Delete', () => void run('Deleting…', () => deleteForever(ctx, e.id))),
+            onPress: () =>
+              confirm(
+                'Delete forever?',
+                // Signed out, a notebook only lives on this device.
+                `"${e.title || DEFAULT_TITLE}" will be removed from this device${s.user ? ' and your account' : ''}. This can't be undone.`,
+                'Delete',
+                () => void run('Deleting…', () => deleteForever(ctx, e.id)),
+              ),
           },
         ]
       : [
