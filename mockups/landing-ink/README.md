@@ -31,8 +31,8 @@ The output is deterministic: every piece of ink uses a seeded random generator, 
 - **Different handwriting on the hero:** edit the `layout([...])` lines in `hero()` (`pieces.mjs`). Lines marked
   `pre: true` are already on the page; the rest write themselves on. Add any missing glyph to `G` in `ink.mjs`.
 - **Change the seed** (`rng(7)` etc.) to get a differently imperfect hand. This also changes the output bytes.
-- **Faster or slower writing:** `v` (pen speed) and `t0` (start delay) at the end of `hero()`. The comment card's timing
-  follows `--end` automatically.
+- **Faster or slower writing:** `v` (pen speed) and `t0` (start delay) at the end of `hero()`, or `speed` on one block. The "Write it again" button
+  appears at `--end`, which the build sets from the timeline.
 
 ## Screenshots
 

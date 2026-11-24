@@ -11,30 +11,40 @@ function timeline(blocks, { v = 300, t0 = 0.5 } = {}) {
     for (const s of b.strokes) {
       if (b.pre && s.pts) { const st = penStroke(s.pts, { size: b.size, rand: b.rand }); out.push({ ...st, color: b.color, pre: true, group: b.group }); continue; }
       if (b.pre) continue;
-      if (s.pause) { t += s.pause === 'word' ? 0.1 : 0.03; continue; }
+      if (s.pause) { t += s.pause === 'word' ? 0.08 : 0.018; continue; }
       const st = b.hl ? highlighterStroke(s.pts, b.size) : penStroke(s.pts, { size: b.size, rand: b.rand, style: b.style });
-      const dur = Math.max(0.09, st.len / (b.hl ? v * 1.8 : v));
+      const dur = Math.max(0.06, st.len / ((b.hl ? v * 1.8 : v) * (b.speed ?? 1)));
       out.push({ ...st, color: b.color, hl: !!b.hl, delay: t, dur, group: b.group });
-      t += dur + 0.03;
+      t += dur + 0.02;
     }
   }
   return { strokes: out, end: t };
 }
 
-// ---------- hero page: integration by parts ----------
+// ---------- hero page: a page of notes on integration by parts ----------
+// The heading and first line are already on the page; the working, a highlight and a reminder write themselves in.
 export function hero() {
   const r = rng(7);
   const S = 0.34;
-  const l1 = layout(['∫', ' ', 'x', ' ', 'l', 'n', ' ', 'x', ' ', 'd', 'x'], 58, 150, S, r);
-  const side = layout(['u', ' ', '=', ' ', 'l', 'n', ' ', 'x', ',', ' ', ' ', 'd', 'v', ' ', '=', ' ', 'x', ' ', 'd', 'x'], 300, 146, 0.25, r);
-  const l3 = layout(['=', ' ', { frac: [['x', { sup: ['2'] }], ['2']] }, 'l', 'n', ' ', 'x', ' ', '-', ' ', '∫', ' ', { frac: [['x'], ['2']] }, 'd', 'x'], 62, 250, S, r);
-  const l4 = layout(['=', ' ', { frac: [['x', { sup: ['2'] }], ['2']] }, 'l', 'n', ' ', 'x', ' ', '-', ' ', { frac: [['x', { sup: ['2'] }], ['4']] }, '+', ' ', 'C'], 62, 352, S, r);
+  const chars = (t) => t.split('');
+  const title = layout(chars('Integration by parts'), 56, 84, 0.4, r);
+  const rule = freePath(`M52,98 C140,95 230,96 ${title.x + 2},93`, 0.8);
+  const l1 = layout(['∫', ' ', 'x', ' ', 'l', 'n', ' ', 'x', ' ', 'd', 'x'], 58, 166, S, r);
+  const side = layout(['u', ' ', '=', ' ', 'l', 'n', ' ', 'x', ',', ' ', ' ', 'd', 'v', ' ', '=', ' ', 'x', ' ', 'd', 'x'], 304, 162, 0.25, r);
+  const l3 = layout(['=', ' ', { frac: [['x', { sup: ['2'] }], ['2']] }, 'l', 'n', ' ', 'x', ' ', '-', ' ', '∫', ' ', { frac: [['x'], ['2']] }, 'd', 'x'], 62, 256, S, r);
+  const l4 = layout(['=', ' ', { frac: [['x', { sup: ['2'] }], ['2']] }, 'l', 'n', ' ', 'x', ' ', '-', ' ', { frac: [['x', { sup: ['2'] }], ['4']] }, '+', ' ', 'C'], 62, 346, S, r);
+  const hlPts = freePath(`M98,338 C190,341 300,336 ${l4.x + 4},339`, 1);
+  const note = layout(chars('check: differentiate it!'), 64, 414, 0.27, r);
   const tl = timeline([
+    { strokes: title.strokes, size: 3.4, color: PEN, rand: r, group: 'title', pre: true },
+    { strokes: [{ pts: rule }], size: 2.6, color: INDIGO, rand: r, group: 'rule', pre: true },
     { strokes: l1.strokes, size: 3.1, color: PEN, rand: r, group: 'l1', pre: true },
     { strokes: side.strokes, size: 2.4, color: INDIGO, rand: r, group: 'side', pre: true },
-    { strokes: l3.strokes, size: 3.1, color: PEN, rand: r, before: 0.3, group: 'l3' },
+    { strokes: l3.strokes, size: 3.1, color: PEN, rand: r, group: 'l3' },
     { strokes: l4.strokes, size: 3.1, color: PEN, rand: r, before: 0.3, group: 'l4' },
-  ], { v: 560, t0: 0.9 });
+    { strokes: [{ pts: hlPts }], size: 30, hl: true, color: '#fde68a', before: 0.25, group: 'hl' },
+    { strokes: note.strokes, size: 2.5, color: INDIGO, rand: r, before: 0.35, group: 'note', speed: 1.5 },
+  ], { v: 720, t0: 0.8 });
   return { ...tl, l4end: l4.x };
 }
 

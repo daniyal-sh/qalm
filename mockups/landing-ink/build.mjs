@@ -1,9 +1,10 @@
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { hero, animatedSvgInner, staticSvgInner, penStyles, regionCrop } from './pieces.mjs';
 import { layout, penStroke, highlighterStroke, freePath, rng } from './ink.mjs';
 
 // Usage: node build.mjs [out.html]   (default: ../landing.html)
-const OUT = process.argv[2] ?? new URL('../landing.html', import.meta.url);
+const OUT = process.argv[2] ?? fileURLToPath(new URL('../landing.html', import.meta.url));
 let html = fs.readFileSync(new URL('./template.html', import.meta.url), 'utf8');
 const set = (k, v) => { if (!html.includes(`{{${k}}}`)) throw new Error('missing ' + k); html = html.replaceAll(`{{${k}}}`, String(v)); };
 const f1 = (n) => Math.round(n * 10) / 10;
@@ -11,12 +12,6 @@ const paths = (arr, fill) => arr.map((d) => `<path d="${d}"${fill ? ` fill="${fi
 
 // ---- hero ----
 const h = hero();
-const l4 = h.strokes.filter((s) => s.group === 'l4');
-const bx = [Math.min(...l4.map((s) => s.box[0])), Math.min(...l4.map((s) => s.box[1])), Math.max(...l4.map((s) => s.box[2])), Math.max(...l4.map((s) => s.box[3]))];
-const AX = bx[0] - 10, AY = bx[1] - 9, AW = bx[2] - bx[0] + 20, AH = bx[3] - bx[1] + 18;
-set('AX', f1(AX)); set('AY', f1(AY)); set('AW', f1(AW)); set('AH', f1(AH));
-set('PX', f1(AX + AW + 16)); set('PY', f1(AY + AH / 2));
-set('CARD_TOP', f1(((AY + AH / 2) / 440) * 100 - 9));
 set('END', h.end.toFixed(2));
 set('HERO_INK', animatedSvgInner(h).replace('<g class="hl">', '<g class="hl-ink">').replace('<g class="pen">', '<g class="pen-ink">'));
 // (the sync devices reuse the hero ink with <use>, so there is no static copy)
@@ -37,9 +32,9 @@ set('HERO_INK', animatedSvgInner(h).replace('<g class="hl">', '<g class="hl-ink"
 
 // ---- nibs ----
 const NIB_TEXT = {
-  fountain: ['Fountain', 'Heavier on slow turns and downstrokes, lighter as you flick away.'],
-  ball: ['Ball', 'An even, steady line, like a good ballpoint.'],
-  brush: ['Brush', 'Swells with pressure. Good for headings and sketches.'],
+  fountain: ['Fountain', 'Thick and thin, like a real nib.'],
+  ball: ['Ball', 'Even and steady.'],
+  brush: ['Brush', 'Swells with pressure.'],
 };
 set('NIBS', penStyles().map((p) => `<div class="card nib"><div class="sample"><svg viewBox="0 0 ${f1(p.w)} 92" aria-hidden="true">${paths(p.paths)}</svg></div><div><h3>${NIB_TEXT[p.style][0]}</h3><p>${NIB_TEXT[p.style][1]}</p></div></div>`).join('\n        '));
 
@@ -49,9 +44,6 @@ set('NIBS', penStyles().map((p) => `<div class="card nib"><div class="sample"><s
   const W = Math.ceil(rc.w);
   set('CROP_W', W);
   set('CROP_GREY', paths(rc.grey)); set('CROP_BLACK', paths(rc.black));
-  const xs = rc.blackBox; // [x0, x1]
-  set('NEWX', f1(xs[0] - 8)); set('NEWW', f1(xs[1] - xs[0] + 16));
-  set('CROP_W3', W + 40); set('ANCW', f1(xs[1] + 6)); set('PIN2X', f1(xs[1] + 26));
 }
 
 // ---- PDF page ----
@@ -96,12 +88,12 @@ set('NIBS', penStyles().map((p) => `<div class="card nib"><div class="sample"><s
 // ---- features ----
 const ic = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const FEATS = [
-  ['PDF import', 'Bring in slides, papers or worksheets and annotate every page.', '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>'],
-  ['Images', 'Drop in a photo or a diagram and write around it.', '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>'],
-  ['Text boxes', 'Type when typing is quicker. Maths symbols included.', '<path d="M5 6V4h14v2M12 4v16M9 20h6"/>'],
-  ['Shapes that snap', 'Draw a shape and hold. It snaps into a clean one.', '<path d="M4 18 12 5l8 13z"/><path d="M4 18h16" stroke-dasharray="2 3"/>'],
-  ['Lasso and tap', 'Circle ink to move, resize, recolour or copy it, or just tap a stroke.', '<path d="M7 17c-3-2-4-6-1-9s10-4 13-1 1 8-4 9c-3 1-6 0-7-1"/><path d="M7 17c0 2-1 3-3 4"/>'],
-  ['Page navigator', 'Thumbnails to jump, reorder, duplicate and bookmark pages.', '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="9" rx="1"/><rect x="3" y="15" width="7" height="6" rx="1"/><rect x="14" y="15" width="7" height="6" rx="1"/>'],
+  ['PDF import', 'Slides, papers, worksheets. Write on every page.', '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>'],
+  ['Images', 'Drop in a photo or a diagram. Write around it.', '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>'],
+  ['Text boxes', 'For when typing is quicker. Maths symbols too.', '<path d="M5 6V4h14v2M12 4v16M9 20h6"/>'],
+  ['Shapes that snap', 'Draw a shape, hold, and it snaps clean.', '<path d="M4 18 12 5l8 13z"/><path d="M4 18h16" stroke-dasharray="2 3"/>'],
+  ['Lasso and tap', 'Circle ink to move, resize or recolour it. Or just tap a stroke.', '<path d="M7 17c-3-2-4-6-1-9s10-4 13-1 1 8-4 9c-3 1-6 0-7-1"/><path d="M7 17c0 2-1 3-3 4"/>'],
+  ['Page navigator', 'Thumbnails to jump, reorder and bookmark.', '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="9" rx="1"/><rect x="3" y="15" width="7" height="6" rx="1"/><rect x="14" y="15" width="7" height="6" rx="1"/>'],
 ];
 set('FEATURES', FEATS.map(([t, p, d]) => `<div>${ic(d)}<h3>${t}</h3><p>${p}</p></div>`).join('\n        '));
 

@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>qalm by Apollo: notes in your own hand</title>
-<meta name="description" content="qalm is a handwriting notebook for Windows, Android tablets and the web, with iPad and Mac coming soon. Smooth ink, palm rejection you can tune, PDFs you can write on, sync across devices, and an AI that can read along but never touches your ink.">
+<title>qalm by Apollo: handwritten notes that keep up with you</title>
+<meta name="description" content="qalm is a handwriting app that keeps up with your pen: ink with no lag, palm rejection that works, real pages and PDFs you can write on, synced across your devices. For Windows, Android tablets and the web; iPad and Mac coming soon.">
 <link rel="canonical" href="https://qalm.apollolearn.app/">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#f6f6f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#151517" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="qalm by Apollo">
-<meta property="og:title" content="qalm: notes in your own hand">
-<meta property="og:description" content="A calm handwriting notebook with smooth ink, real palm rejection, PDFs and sync. Your own AI can read along, and never touches your ink.">
+<meta property="og:title" content="qalm: a handwriting app that doesn't suck">
+<meta property="og:description" content="Ink that keeps up with your pen, palm rejection that actually works, and pages that feel like paper.">
 <meta property="og:url" content="https://qalm.apollolearn.app/">
 <link rel="icon" href="{{FAVICON}}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -95,56 +95,46 @@ h1,h2,h3,p{margin:0}
 
 /* ---------- hero ---------- */
 .hero{padding:clamp(24px,5vw,64px) 0 clamp(56px,8vw,112px)}
-.hero .wrap{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:clamp(32px,5vw,72px);align-items:center}
+.hero .wrap{display:grid;grid-template-columns:minmax(0,5.4fr) minmax(0,6.6fr);gap:clamp(32px,5vw,72px);align-items:center}
 .beta{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);font-size:13px;font-weight:500;color:var(--muted)}
 .beta i{width:6px;height:6px;border-radius:50%;background:var(--good)}
-h1{font-size:clamp(46px,6.6vw,92px);line-height:.98;letter-spacing:-.045em;font-weight:600;margin:22px 0 0;text-wrap:balance}
+h1{font-size:clamp(42px,5.7vw,80px);line-height:.98;letter-spacing:-.045em;font-weight:600;margin:22px 0 0;text-wrap:balance}
 h1 .soft{color:var(--muted)}
-.lede{font-size:clamp(17px,1.5vw,20px);line-height:1.55;color:var(--muted);margin-top:24px;max-width:34em}
+.lede{font-size:clamp(17px,1.5vw,20px);line-height:1.55;color:var(--muted);margin-top:26px;max-width:30em}
 .lede strong{color:var(--ink);font-weight:600}
 .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:32px}
 .soon-note{margin-top:16px;font-size:14px;color:var(--faint)}
 .soon-note b{font-weight:500;color:var(--muted)}
 
 .stage{position:relative;margin:0}
-.appbar{display:flex;align-items:center;gap:10px;height:52px;padding:0 10px 0 14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r12);box-shadow:var(--shadow-1);margin-bottom:14px}
-.appbar .title{display:flex;flex-direction:column;line-height:1.15;min-width:0}
-.appbar .title b{font-size:14px;font-weight:600}
-.appbar .title small{font-size:12px;color:var(--faint)}
-.presence{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 11px;border-radius:999px;background:var(--assistant-soft);border:1px solid var(--assistant-line);color:var(--assistant);font-size:12.5px;font-weight:600;white-space:nowrap}
-.presence i{width:7px;height:7px;border-radius:50%;background:var(--assistant)}
-.appbar .presence{margin-left:auto}
-.ask{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:var(--r8);border:1px solid var(--line);font-size:13px;font-weight:600;color:var(--ink-2);background:var(--surface)}
+.toolbar{position:relative;z-index:2;display:flex;align-items:center;gap:2px;width:max-content;max-width:calc(100% - 24px);margin:0 auto -24px;padding:6px;background:var(--surface);border-radius:var(--r12);box-shadow:var(--shadow-2)}
+.toolbar .tb{width:36px;height:36px;display:grid;place-items:center;border-radius:var(--r8);color:var(--ink-2);flex:none}
+.toolbar .tb svg{width:19px;height:19px}
+.toolbar .tb.on{background:var(--accent-soft);color:var(--accent-ink)}
+.toolbar .sep{width:1px;height:22px;background:var(--line-2);margin:0 6px;flex:none}
+.toolbar .sw{width:18px;height:18px;border-radius:50%;margin:0 4px;flex:none;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
+.toolbar .sw.on{box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--accent)}
+@media (prefers-color-scheme:dark){.toolbar .sw{box-shadow:0 0 0 1px rgba(255,255,255,.14)}}
 .paper{position:relative;background:#fff;border-radius:6px;box-shadow:var(--paper-shadow),0 0 0 1px rgba(0,0,0,.06);overflow:hidden}
 .paper svg{width:100%;height:auto}
 .pen-ink{fill:#27272a}
 .hl-ink path{fill:#fde68a;opacity:.85;mix-blend-mode:multiply}
 .write mask path{fill:none;stroke:#fff;stroke-linecap:butt;stroke-linejoin:round;stroke-dasharray:1 2;stroke-dashoffset:1.001;animation:draw var(--t) var(--d) cubic-bezier(.35,.05,.6,1) forwards}
 @keyframes draw{to{stroke-dashoffset:0}}
-.anchor{opacity:0;animation:fade .3s calc(var(--end) + .35s) ease-out forwards}
-.pin{opacity:0;transform-box:fill-box;transform-origin:50% 50%;animation:pop .28s calc(var(--end) + .45s) cubic-bezier(.3,1.4,.5,1) forwards}
 @keyframes fade{to{opacity:1}}
-@keyframes pop{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
-.sheet{position:relative}
-.mcard{position:absolute;left:53%;right:4%;top:{{CARD_TOP}}%;background:var(--assistant-soft);border:1px solid var(--assistant-line);border-radius:var(--r8);padding:10px 12px 11px;box-shadow:var(--shadow-1);opacity:0;transform:translateX(16px);animation:slidein .2s calc(var(--end) + .6s) ease-out forwards}
-@media (prefers-color-scheme:dark){.sheet .mcard{--assistant:#1d4ed8;--assistant-soft:#ebf0fc;--assistant-line:#bfcdf4;--ink:#27272a;--muted:#5c5c65}}
+.mcard{background:var(--assistant-soft);border:1px solid var(--assistant-line);border-radius:var(--r8);padding:10px 12px 11px}
 .mcard .who{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--assistant)}
 .av{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;background:var(--assistant);color:#fff;font-size:10px;font-weight:700;flex:none}
-@media (prefers-color-scheme:dark){.av{color:#151517}.sheet .mcard .av{color:#fff}}
+@media (prefers-color-scheme:dark){.av{color:#151517}}
 .mcard .who .lbl{margin-left:auto;font-family:var(--mono);font-weight:400;font-size:11px;color:var(--muted)}
 .mcard .body{position:relative;margin-top:4px;font-size:14px;line-height:1.45;color:var(--ink)}
-.mcard .thinking{position:absolute;inset:0;color:var(--assistant);font-weight:500;animation:fadeout .2s calc(var(--end) + 1.9s) forwards}
-.mcard .said{opacity:0;animation:fade .25s calc(var(--end) + 2s) forwards}
-.dots i{display:inline-block;width:4px;height:4px;margin-left:3px;border-radius:50%;background:currentColor;animation:blink 1s infinite}
-.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
-@keyframes blink{0%,100%{opacity:.25}50%{opacity:1}}
-@keyframes slidein{to{opacity:1;transform:none}}
-@keyframes fadeout{to{opacity:0;visibility:hidden}}
-.replay{position:absolute;left:12px;bottom:12px;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:var(--r8);border:1px solid #e4e4e8;background:#fff;color:#5c5c65;font:500 12.5px var(--sans);cursor:pointer;opacity:0;animation:fade .3s calc(var(--end) + 2.6s) forwards}
+.replay{position:absolute;right:12px;bottom:12px;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:var(--r8);border:1px solid #e4e4e8;background:#fff;color:#5c5c65;font:500 12.5px var(--sans);cursor:pointer;opacity:0;animation:fade .3s calc(var(--end) + .4s) forwards}
 .replay[hidden]{display:none}
 .replay:hover{color:#27272a;border-color:#d3d3d9}
 .replay svg{width:14px;height:14px}
-.stage-cap{margin-top:14px;font-size:13px;color:var(--faint)}
+.underline{display:inline-block;position:relative;white-space:nowrap}
+.underline svg{position:absolute;left:-2%;bottom:-.1em;width:104%;height:.24em;overflow:visible}
+.underline path{fill:var(--accent)}
 
 /* ---------- sections ---------- */
 section.band{padding:clamp(64px,8vw,120px) 0;border-top:1px solid var(--line-2)}
@@ -215,36 +205,24 @@ h3{font-size:18px;line-height:1.3;letter-spacing:-.01em;font-weight:600}
 .feat p{font-size:15px;color:var(--muted);margin-top:4px;line-height:1.5}
 .mini-label{font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:10px}
 
-/* AI */
-.flow{display:grid;grid-template-columns:minmax(0,1fr) 40px minmax(0,1fr) 40px minmax(0,1fr);align-items:stretch;margin-top:clamp(40px,6vw,72px)}
-.flow .step{display:flex;flex-direction:column}
-.flow .step .card{flex:1;padding:20px;display:flex;flex-direction:column;justify-content:center;gap:12px}
-.flow .arrow-c{display:grid;place-items:center;color:var(--faint)}
-.flow .arrow-c svg{width:22px;height:22px}
-.step-h{display:flex;align-items:baseline;gap:10px;margin-bottom:12px}
-.step-h .n{font-family:var(--mono);font-size:12px;color:var(--faint)}
-.step-h h3{font-size:16px}
+/* AI, compact */
+.band.tight{padding:clamp(40px,5vw,72px) 0}
+.ai-card{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,360px);gap:clamp(24px,4vw,56px);align-items:center;padding:clamp(22px,3.5vw,40px)}
+.ai-card h2{font-size:clamp(28px,3.2vw,40px);margin-top:12px}
+.ai-card .lead{font-size:16.5px;color:var(--muted);margin-top:14px;max-width:34em}
+.rules{list-style:none;margin:22px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+.rules li{display:inline-flex;align-items:center;gap:8px;min-height:34px;padding:4px 12px 4px 6px;border-radius:999px;border:1px solid var(--line-2);background:var(--surface-2);font-size:14px;color:var(--ink-2)}
+.rules .ic{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;flex:none;background:var(--good-soft);color:var(--good)}
+.rules .no{font-weight:600;color:var(--ink)}
+.rules .no .ic{background:var(--bad-soft);color:var(--bad)}
+.rules .ic svg{width:12px;height:12px}
+.ai-demo{display:flex;flex-direction:column;gap:8px;padding:14px;border-radius:var(--r12);background:var(--canvas);border:1px solid var(--line-2)}
+@media (prefers-color-scheme:dark){.ai-demo{background:var(--surface-2)}}
 .crop{background:#fff;border-radius:4px;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
 .ai-head{font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:1.5;word-break:break-word}
 .ai-head b{color:var(--assistant);font-weight:500}
-.cap{font-size:13.5px;color:var(--muted);line-height:1.45}
-.tiny-page{background:#fff;border-radius:4px;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
-.mcard.static{position:static;opacity:1;transform:none;animation:none}
-.promise{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:20px;margin-top:20px}
-.promise .card{padding:clamp(20px,3vw,32px)}
-.can{list-style:none;margin:0;padding:0;display:grid;gap:0}
-.can li{display:flex;gap:14px;align-items:flex-start;padding:14px 0;border-top:1px solid var(--line-2);font-size:16px}
-.can li:first-child{border-top:0;padding-top:0}
-.can li:last-child{padding-bottom:0}
-.can .ic{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;flex:none;margin-top:0}
-.can .yes .ic{background:var(--good-soft);color:var(--good)}
-.can .no .ic{background:var(--bad-soft);color:var(--bad)}
-.can .ic svg{width:14px;height:14px}
-.can .no{font-weight:600}
-.tokens h3{margin-bottom:8px}
-.tokens p{color:var(--muted);font-size:15.5px}
-.tokens p+p{margin-top:12px}
-.tokens .mono{display:inline-block;margin-top:16px;padding:6px 10px;border-radius:6px;background:var(--surface-2);border:1px solid var(--line-2);color:var(--ink-2)}
+.ai-demo .down{display:grid;place-items:center;color:var(--faint);height:18px}
+.ai-demo .down svg{width:18px;height:18px}
 
 /* sync */
 .devices{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,4fr) minmax(0,3fr);gap:clamp(16px,3vw,40px);align-items:end;margin-top:clamp(40px,6vw,72px)}
@@ -269,9 +247,6 @@ h3{font-size:18px;line-height:1.3;letter-spacing:-.01em;font-weight:600}
 /* closing */
 .closing{text-align:center}
 .closing h2{font-size:clamp(44px,7vw,100px);letter-spacing:-.045em;line-height:.98;margin-top:0}
-.closing .underline{display:inline-block;position:relative}
-.closing .underline svg{position:absolute;left:-2%;right:-2%;bottom:-.12em;width:104%;height:.26em;overflow:visible}
-.closing .underline path{fill:var(--accent)}
 .closing p.sub{font-size:clamp(17px,1.5vw,20px);color:var(--muted);margin-top:24px}
 .platforms{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-top:clamp(40px,5vw,56px);text-align:left}
 .plat{display:flex;flex-direction:column;gap:14px;padding:18px;border-radius:var(--r12);border:1px solid var(--line);background:var(--surface);text-decoration:none;color:var(--ink);box-shadow:var(--shadow-1);transition:border-color .15s}
@@ -303,7 +278,7 @@ a.plat:hover{border-color:var(--ink-2)}
 @media (max-width:1100px){
   .platforms{grid-template-columns:repeat(3,minmax(0,1fr))}
   .platforms .plat:nth-child(-n+3){min-height:150px}
-  .hero h1{font-size:clamp(46px,6.2vw,72px)}
+  .hero h1{font-size:clamp(42px,5.4vw,62px)}
   .hero .wrap{grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:32px}
   .actions{gap:8px}
   .actions .btn{padding:0 14px}
@@ -312,12 +287,10 @@ a.plat:hover{border-color:var(--ink-2)}
   .hero .wrap{grid-template-columns:1fr;}
   .hero .copy{max-width:720px}
   .stage{max-width:760px}
-  .pen-grid,.nb-grid,.promise{grid-template-columns:1fr}
+  .pen-grid,.nb-grid,.ai-card{grid-template-columns:1fr}
   .intro{grid-template-columns:1fr;align-items:start}
 }
 @media (max-width:860px){
-  .flow{grid-template-columns:1fr}
-  .flow .arrow-c{height:36px;transform:rotate(90deg)}
   .feat{grid-template-columns:repeat(2,minmax(0,1fr))}
   .feat div:not(:nth-child(3n+1)){padding-left:0;border-left:0}
   .feat div:nth-child(even){padding-left:20px;border-left:1px solid var(--line-2)}
@@ -331,10 +304,9 @@ a.plat:hover{border-color:var(--ink-2)}
 @media (max-width:640px){
   body{font-size:16px}
   .actions .btn{flex:1 1 100%}
-  .appbar .title small{display:none}
-  .appbar .ask{display:none}
-  .stage{padding-bottom:64px}
-  .sheet .mcard{left:6%;right:6%;top:100%;margin-top:-26px}
+  .toolbar .opt{display:none}
+  .toolbar{margin-bottom:-20px}
+  .rules li{font-size:13.5px}
   .feat{grid-template-columns:1fr}
   .feat div,.feat div:nth-child(even){padding:20px 0;border-left:0}
   .papers{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -364,8 +336,7 @@ a.plat:hover{border-color:var(--ink-2)}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
   .write mask path{stroke-dashoffset:0}
-  .anchor,.pin,.mcard,.mcard .said{opacity:1;transform:none}
-  .mcard .thinking,.replay{display:none}
+  .replay{display:none}
 }
 </style>
 </head>
@@ -383,7 +354,7 @@ a.plat:hover{border-color:var(--ink-2)}
   <div class="wrap">
     <a class="lockup" href="/" aria-label="qalm by Apollo, home">{{MARK}}<span class="name"><b>qalm</b><small>by Apollo</small></span></a>
     <nav class="site-nav" aria-label="Sections">
-      <a href="#pen">Pen</a><a href="#notebooks">Notebooks</a><a href="#ai">AI</a><a href="#sync">Sync</a>
+      <a href="#pen">Pen</a><a href="#notebooks">Notebooks</a><a href="#sync">Sync</a><a href="#ai">AI</a>
     </nav>
     <a class="btn btn-sm" href="/app">Open qalm</a>
   </div>
@@ -395,8 +366,8 @@ a.plat:hover{border-color:var(--ink-2)}
     <div class="wrap">
       <div class="copy">
         <span class="beta"><i></i>Free while in beta</span>
-        <h1 id="hero-title">Notes in your own hand.</h1>
-        <p class="lede">qalm is a notebook for your pen. <strong>Smooth ink, palm rejection you can trust, PDFs you can write on,</strong> and every page synced across your devices. If you like, your own AI can read along and leave a comment.</p>
+        <h1 id="hero-title">Finally, a handwriting app that <span class="underline">doesn't suck.<svg viewBox="0 0 {{UL_W}} 24" preserveAspectRatio="none" aria-hidden="true">{{UNDERLINE}}</svg></span></h1>
+        <p class="lede"><strong>Ink that keeps up with your pen. Palm rejection that actually works. Pages that feel like paper.</strong> No lag, and no fighting the app.</p>
         <div class="actions">
           <a class="btn btn-primary" href="/app">Open qalm <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
           <a class="btn" href="#download-windows" aria-label="Download for Windows">{{I_DOWNLOAD}}Windows</a>
@@ -405,32 +376,16 @@ a.plat:hover{border-color:var(--ink-2)}
         <p class="soon-note"><b>iPad and Mac</b> coming soon. Open qalm runs right in your browser.</p>
       </div>
 
-      <figure class="stage" style="--end:{{END}}s" aria-label="A notebook page: handwritten integration by parts, with a comment from Claude pinned to the last line.">
-        <div class="appbar" aria-hidden="true">
-          <span class="title"><b>Calculus</b><small>Page 3 of 12</small></span>
-          <span class="presence"><i></i>Claude is following along</span>
-          <span class="ask">? Ask</span>
-        </div>
-        <div class="sheet">
+      <figure class="stage" style="--end:{{END}}s" aria-label="A notebook page in qalm with handwritten notes writing themselves in.">
+        <div class="toolbar" aria-hidden="true"><span class="tb on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1.2-4.4L16 4.8l3.2 3.2L8.4 18.8z"/><path d="M14 7l3 3"/></svg></span><span class="tb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 15-4.5 4.5H9l1.5-1.5"/><path d="m9 15 8.5-8.5 3 3L12 18z"/></svg></span><span class="tb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 20h12"/><path d="M4.5 15.5 13 7l5 5-7.5 7.5H8.5z"/></svg></span><span class="tb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17c-3-2-4-6-1-9s10-4 13-1 1 8-4 9c-3 1-6 0-7-1"/><path d="M7 17c0 2-1 3-3 4"/></svg></span><span class="tb opt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></span><span class="tb opt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="8" height="8" rx="1"/><circle cx="16.5" cy="7.5" r="4.5"/></svg></span><span class="sep"></span><span class="sw on" style="background:#27272a"></span><span class="sw" style="background:#4338ca"></span><span class="sw" style="background:#0f766e"></span><span class="sw opt" style="background:#b91c1c"></span><span class="sep opt"></span><span class="tb opt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></span><span class="tb opt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg></span></div>
         <div class="paper" id="hero-paper">
           <svg viewBox="0 0 600 440" role="img" aria-labelledby="hero-ink-desc">
-            <desc id="hero-ink-desc">Handwritten: integral of x ln x dx, with u = ln x and dv = x dx. Equals x squared over 2 ln x minus the integral of x over 2 dx, equals x squared over 2 ln x minus x squared over 4 plus C.</desc>
+            <desc id="hero-ink-desc">Handwritten notes headed Integration by parts. The integral of x ln x dx, with u = ln x and dv = x dx in the margin. Equals x squared over 2 ln x minus the integral of x over 2 dx, equals x squared over 2 ln x minus x squared over 4 plus C, highlighted. Below, a reminder: check: differentiate it!</desc>
             <rect width="600" height="440" fill="url(#dots)"/>
-            <text x="56" y="70" font-family="Figtree, sans-serif" font-size="21" font-weight="600" fill="#27272a" letter-spacing="-.2">Integration by parts</text>
-            <text x="56" y="92" font-family="Figtree, sans-serif" font-size="12.5" fill="#8b8b95">Tuesday, week 6</text>
-            <rect class="anchor" x="{{AX}}" y="{{AY}}" width="{{AW}}" height="{{AH}}" rx="8" fill="#ebf0fc"/>
+            <text x="544" y="84" text-anchor="end" font-family="Figtree, sans-serif" font-size="12.5" fill="#8b8b95">Calculus · week 6</text>
             <g class="write" id="hero-ink">{{HERO_INK}}</g>
-            <g class="pin"><circle cx="{{PX}}" cy="{{PY}}" r="9" fill="#1d4ed8"/><circle cx="{{PX}}" cy="{{PY}}" r="3.3" fill="#fff"/></g>
           </svg>
           <button class="replay" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>Write it again</button>
-        </div>
-        <div class="mcard" role="note" aria-label="Comment from Claude">
-          <div class="who"><span class="av" aria-hidden="true">C</span>Claude<span class="lbl">C1</span></div>
-          <div class="body">
-            <span class="thinking" aria-hidden="true">Reading<span class="dots"><i></i><i></i><i></i></span></span>
-            <span class="said">Looks right. To check, differentiate: x ln x + x/2 − x/2 = x ln x.</span>
-          </div>
-        </div>
         </div>
       </figure>
     </div>
@@ -444,7 +399,7 @@ a.plat:hover{border-color:var(--ink-2)}
           <p class="kicker"><span class="n">01</span>Pen and palm</p>
           <h2 id="pen-title">Rest your hand. Just write.</h2>
         </div>
-        <p>Ink is drawn natively, right under the pen tip, so it keeps up with you. qalm tells your pen, your fingers and your palm apart, and you decide how strict it is.</p>
+        <p>Ink appears right under the nib, drawn natively, so it never trails behind. qalm tells your pen, finger and palm apart, and you choose how strict it is.</p>
       </div>
 
       <div class="pen-grid">
@@ -506,7 +461,7 @@ a.plat:hover{border-color:var(--ink-2)}
       <div class="nibs">
         {{NIBS}}
       </div>
-      <p class="extras">Plus hover preview, tilt shading, and the pen button or a double-tap for the eraser, where your pen has them.</p>
+      <p class="extras">Also: hover preview, tilt shading, and the pen button or a double-tap for the eraser, if your pen has them.</p>
     </div>
   </section>
 
@@ -515,10 +470,10 @@ a.plat:hover{border-color:var(--ink-2)}
     <div class="wrap">
       <div class="intro">
         <div>
-          <p class="kicker"><span class="n">02</span>PDFs and notebooks</p>
-          <h2 id="nb-title">Notebooks that feel like notebooks.</h2>
+          <p class="kicker"><span class="n">02</span>Notebooks and PDFs</p>
+          <h2 id="nb-title">Pages that feel like paper.</h2>
         </div>
-        <p>Pages you turn, not an endless scroll. Bring in lecture slides, a paper or a worksheet and write straight on it. Export any notebook as a PDF when you're done.</p>
+        <p>Real pages you flip through, not one endless scroll. Import a PDF and write straight on it. Export to PDF when you're done.</p>
       </div>
 
       <div class="nb-grid">
@@ -564,92 +519,15 @@ a.plat:hover{border-color:var(--ink-2)}
     </div>
   </section>
 
-  <!-- ================= AI ================= -->
-  <section class="band" id="ai" aria-labelledby="ai-title">
-    <div class="wrap">
-      <div class="intro">
-        <div>
-          <p class="kicker"><span class="n">03</span>AI, if you want it</p>
-          <h2 id="ai-title">It reads along. It never touches your ink.</h2>
-        </div>
-        <p>Connect your own AI agent, like Claude, over MCP. While you write, it sees only what changed, reads your handwriting itself, and answers with comments pinned beside your ink.</p>
-      </div>
-
-      <div class="flow">
-        <div class="step">
-          <div class="step-h"><span class="n">1</span><h3>You write, then pause</h3></div>
-          <div class="card">
-            <div class="tiny-page">
-              <svg viewBox="0 0 {{CROP_W3}} 120" aria-hidden="true">
-                <use href="#crop-grey" fill="#27272a"/><use href="#crop-black" fill="#27272a"/>
-                <rect x="{{NEWX}}" y="8" width="{{NEWW}}" height="104" rx="6" fill="none" stroke="#1d4ed8" stroke-width="1.5" stroke-dasharray="5 4"/>
-              </svg>
-            </div>
-            <p class="cap">qalm waits for a pause in your writing, or for you to tap Ask.</p>
-          </div>
-        </div>
-        <div class="arrow-c" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
-        <div class="step">
-          <div class="step-h"><span class="n">2</span><h3>Your agent gets a small crop</h3></div>
-          <div class="card">
-            <p class="ai-head"><b>R7</b> [1] p3 @96,712 486x88 +9 -0</p>
-            <div class="crop">
-              <svg viewBox="0 0 {{CROP_W}} 120" role="img" aria-label="Region crop: the new ink in black, the ink around it in grey.">
-                <g fill="#a1a1aa"><g id="crop-grey">{{CROP_GREY}}</g></g><g fill="#18181b"><g id="crop-black">{{CROP_BLACK}}</g></g>
-              </svg>
-            </div>
-            <p class="cap">New ink in black, the ink around it in grey. Not the whole page.</p>
-          </div>
-        </div>
-        <div class="arrow-c" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
-        <div class="step">
-          <div class="step-h"><span class="n">3</span><h3>It comments beside your ink</h3></div>
-          <div class="card">
-            <div class="tiny-page">
-              <svg viewBox="0 0 {{CROP_W3}} 120" aria-hidden="true">
-                <rect x="6" y="10" width="{{ANCW}}" height="100" rx="8" fill="#ebf0fc"/>
-                <use href="#crop-grey" fill="#27272a"/><use href="#crop-black" fill="#27272a"/>
-                <circle cx="{{PIN2X}}" cy="60" r="9" fill="#1d4ed8"/><circle cx="{{PIN2X}}" cy="60" r="3.3" fill="#fff"/>
-              </svg>
-            </div>
-            <div class="mcard static">
-              <div class="who"><span class="av" aria-hidden="true">C</span>Claude<span class="lbl">C1</span></div>
-              <div class="body">Looks right. To check, differentiate: x ln x + x/2 − x/2 = x ln x.</div>
-            </div>
-            <p class="cap">Pinned to those strokes, it follows them if you move them. Reply, and it answers in the thread.</p>
-          </div>
-        </div>
-      </div>
-
-      <div class="promise">
-        <div class="card">
-          <h3 style="margin-bottom:18px">The ground rules</h3>
-          <ul class="can">
-            <li class="yes"><span class="ic">{{I_CHECK}}</span><span>It reads only the notebooks you share. AI access is off until you turn it on, one notebook at a time.</span></li>
-            <li class="yes"><span class="ic">{{I_CHECK}}</span><span>It connects only after you approve it, and you can pause or stop it any time.</span></li>
-            <li class="yes"><span class="ic">{{I_CHECK}}</span><span>It leaves comments pinned to your ink, and can save its reading of your handwriting if you allow it.</span></li>
-            <li class="no"><span class="ic">{{I_CROSS}}</span><span>It can never change, move or erase your ink.</span></li>
-          </ul>
-        </div>
-        <div class="card tokens">
-          <h3>Light on tokens</h3>
-          <p>Your agent gets a few small crops of what changed, never screenshots of whole pages. Once it has read something, it can save that reading as text and skip the picture next time.</p>
-          <p>There's no AI running on our side. It's your agent, on your own account, and it reads your handwriting with its own eyes.</p>
-          <span class="mono">wait · read · transcribe · comment</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <!-- ================= SYNC ================= -->
   <section class="band" id="sync" aria-labelledby="sync-title">
     <div class="wrap">
       <div class="intro">
         <div>
-          <p class="kicker"><span class="n">04</span>Sync</p>
-          <h2 id="sync-title">One notebook, on every screen.</h2>
+          <p class="kicker"><span class="n">03</span>Sync</p>
+          <h2 id="sync-title">Same notebook, every screen.</h2>
         </div>
-        <p>Write on your tablet in class and pick it up on your laptop at home. Notebooks sync through your qalm account, and you can keep writing offline.</p>
+        <p>Start on your tablet in class, finish on your laptop at home. It all syncs through your account, and you can keep writing offline.</p>
       </div>
 
       <div class="devices">
@@ -669,9 +547,41 @@ a.plat:hover{border-color:var(--ink-2)}
       </div>
 
       <div class="facts">
-        <div><h3>Sign in your way</h3><p>Apple, Google or a link by email. Or start writing without an account.</p></div>
-        <div><h3>Kept safe</h3><p>Notebooks are encrypted at rest on our servers.</p></div>
-        <div><h3>Yours to take</h3><p>Export a notebook as a PDF, or as a full .qalm backup you can restore.</p></div>
+        <div><h3>Sign in your way</h3><p>Apple, Google or an email link. Or skip it and just write.</p></div>
+        <div><h3>Kept safe</h3><p>Encrypted at rest on our servers.</p></div>
+        <div><h3>Yours to take</h3><p>Export as a PDF, or a full .qalm backup.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= AI (optional, compact) ================= -->
+  <section class="band tight" id="ai" aria-labelledby="ai-title">
+    <div class="wrap">
+      <div class="card ai-card">
+        <div>
+          <p class="kicker"><span class="n">04</span>Optional extra</p>
+          <h2 id="ai-title">Bring your own AI, if you want.</h2>
+          <p class="lead">Connect an agent you already use, like Claude, over MCP. It reads along as you write and leaves comments beside your ink. It only gets small crops of what changed, never whole pages.</p>
+          <ul class="rules">
+            <li><span class="ic">{{I_CHECK}}</span>Off until you turn it on, per notebook</li>
+            <li><span class="ic">{{I_CHECK}}</span>You approve each agent</li>
+            <li><span class="ic">{{I_CHECK}}</span>Reads and comments</li>
+            <li class="no"><span class="ic">{{I_CROSS}}</span>Never touches your ink</li>
+          </ul>
+        </div>
+        <div class="ai-demo">
+          <p class="ai-head"><b>R7</b> [1] p3 @96,712 486x88 +9 -0</p>
+          <div class="crop">
+            <svg viewBox="0 0 {{CROP_W}} 120" role="img" aria-label="What the agent sees: a small crop with the new ink in black and the ink around it in grey.">
+              <g fill="#a1a1aa">{{CROP_GREY}}</g><g fill="#18181b">{{CROP_BLACK}}</g>
+            </svg>
+          </div>
+          <div class="down" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></div>
+          <div class="mcard" role="note" aria-label="Comment from Claude">
+            <div class="who"><span class="av" aria-hidden="true">C</span>Claude<span class="lbl">C1</span></div>
+            <div class="body">Looks right. To check, differentiate: x ln x + x/2 − x/2 = x ln x.</div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -709,9 +619,8 @@ a.plat:hover{border-color:var(--ink-2)}
   btn.hidden = false;
   btn.addEventListener('click', function replay() {
     var paper = document.getElementById('hero-paper');
-    var card = stage.querySelector('.mcard');
-    var p2 = paper.cloneNode(true), c2 = card.cloneNode(true);
-    paper.replaceWith(p2); card.replaceWith(c2);
+    var p2 = paper.cloneNode(true);
+    paper.replaceWith(p2);
     var b = p2.querySelector('.replay'); b.hidden = false;
     b.addEventListener('click', replay);
     b.blur();
