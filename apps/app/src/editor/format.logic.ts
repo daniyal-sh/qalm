@@ -158,3 +158,52 @@ export function applyFormat(text: string, sel: Sel, kind: FormatKind): Formatted
       return wrap(text, s, WRAP[kind]!);
   }
 }
+
+/** Characters Markdown may read as syntax anywhere in a line (a backslash before any of them shows it as typed). */
+const INLINE_SPECIAL = new Set(['\\', '`', '*', '_', '~', '$', '[', ']', '<', '>', '&']);
+/** A line start Markdown reads as a heading, list item, rule or setext underline. */
+const LINE_START = /^( {0,3})(#|[-+](?= |$)|\d{1,9}(?=[.)](?: |$))|-+ *$|=+ *$)/;
+
+/**
+ * Escapes text written as plain (a text box from before Markdown) so it reads the same as Markdown: `price *5*` stays
+ * `price *5*`, `# x` isn't a heading. Returns the escaped text and where each old index lands in it.
+ */
+export function escapeMarkdown(text: string): { text: string; at(i: number): number } {
+  const out: string[] = [];
+  // map[i]: the index in the output of the input's index i (text.length maps to the end).
+  const map: number[] = [];
+  let n = 0;
+  const lines = text.split('\n');
+  lines.forEach((line, li) => {
+    // A heading, list or rule marker at the start of a line: escape its first character (for "1." the dot).
+    const m = LINE_START.exec(line);
+    const escAt = m ? m[1]!.length + (/^\d/.test(m[2]!) ? m[2]!.length : 0) : -1;
+    for (let i = 0; i < line.length; i++) {
+      map.push(n);
+      const ch = line[i]!;
+      if (i === escAt || INLINE_SPECIAL.has(ch)) {
+        out.push('\\');
+        n++;
+      }
+      out.push(ch);
+      n++;
+    }
+    if (li < lines.length - 1) {
+      map.push(n);
+      out.push('\n');
+      n++;
+    }
+  });
+  map.push(n);
+  return { text: out.join(''), at: (i) => map[Math.max(0, Math.min(map.length - 1, i))]! };
+}
+
+/**
+ * The format bar on a box that isn't Markdown yet (`legacy`): its text is escaped first, so the box keeps reading as
+ * typed and only the new formatting takes effect.
+ */
+export function applyFormatTo(text: string, sel: Sel, kind: FormatKind, legacy: boolean): Formatted {
+  if (!legacy) return applyFormat(text, sel, kind);
+  const e = escapeMarkdown(text);
+  return applyFormat(e.text, { start: e.at(sel.start), end: e.at(sel.end) }, kind);
+}

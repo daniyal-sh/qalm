@@ -10,7 +10,7 @@ import { useSession, useVersion } from '../state/session';
 import { smoothingLevel } from '../theme/ThemeProvider';
 import { font } from '../theme/tokens';
 import { useEditor } from './context';
-import { applyFormat, type Sel } from './format.logic';
+import { applyFormatTo, type Sel } from './format.logic';
 import { adjustLiveShape, commitSnapped, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, dropEmptyText, formatText, TEXT_LINE_HEIGHT, hitText, typeText, liveShape, makeStroke, pointsBBox, transformPatch } from './items';
 import { isAdditive } from './modifiers';
 import { PAPER_ACCENT, SelectionFrame, type LiveEdit } from './SelectionFrame';
@@ -460,7 +460,10 @@ function TextEditor({ page, itemId, draft, scale, night, onDone }: { page: Page;
   // The format bar: Markdown around the selection, as one step with the typing (the box becomes Markdown).
   React.useEffect(() => {
     ed.textFormatter.current = (kind) => {
-      const { text: v, sel } = applyFormat(latest.current, selection.current, kind);
+      // A box from before Markdown: its text is escaped first, so `price *5*` doesn't turn italic.
+      const cur = page.item(itemId);
+      const legacy = cur?.type === 'text' && cur.format !== 'md';
+      const { text: v, sel } = applyFormatTo(latest.current, selection.current, kind, legacy);
       latest.current = v;
       setText(v);
       const isNew = !page.item(itemId);
