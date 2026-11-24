@@ -232,20 +232,4 @@ export class TokenManager {
     const t = await this.refresh();
     return send(t.accessToken);
   }
-
-  /** Unauthenticated JSON POST (sign-in endpoints). Stores the returned tokens. */
-  async signIn(path: string, body: unknown): Promise<User> {
-    const res = await this.fetchFn(`${this.baseUrl}${path}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new AuthError(`sign-in failed (${res.status})`);
-    const t = (await res.json()) as Tokens;
-    if (!t.accessToken || !t.refreshToken) throw new AuthError('sign-in returned no tokens');
-    await this.setTokens(t);
-    const u = this.user();
-    if (!u) throw new AuthError('token has no subject');
-    return u;
-  }
 }

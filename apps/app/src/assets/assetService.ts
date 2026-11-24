@@ -1,5 +1,6 @@
 import type { Asset } from '@qalm/core';
 
+import { fits, getStorage, StorageFullError, type StorageUsage } from '../api/storage';
 import type { TokenManager } from '../auth/tokens';
 import { newId } from '../lib/id';
 import { kvGet, kvSet } from '../lib/kv';
@@ -20,7 +21,34 @@ export class AssetService {
 
   constructor(private readonly remote: () => TokenManager | null) {}
 
+  /** The account's storage, or null when signed out (local only: no cap). Throws when offline. */
+  async storage(): Promise<StorageUsage | null> {
+    const tm = this.remote();
+    return tm ? getStorage((p, i) => tm.fetch(p, i)) : null;
+  }
+
+  /**
+   * Refuses an import of `bytes` that won't fit in the account (StorageFullError). Signed out, or when the server
+   * can't be reached, the import goes ahead locally; the upload is retried later and the server has the last word.
+   */
+  async ensureRoom(bytes: number): Promise<void> {
+    let u: StorageUsage | null;
+    try {
+      u = await this.storage();
+    } catch {
+      return;
+    }
+    if (u && !fits(u, bytes)) throw new StorageFullError(u);
+  }
+
+  /** Adds a PDF or image: checks the account has room, keeps it locally and queues the upload. */
   async put(bytes: Uint8Array, mime: string, name: string, extra: Partial<Asset> = {}): Promise<Asset> {
+    await this.ensureRoom(bytes.length);
+    return this.putUnchecked(bytes, mime, name, extra);
+  }
+
+  /** `put` without the storage check (the caller already checked, e.g. for a whole .qalm restore). */
+  async putUnchecked(bytes: Uint8Array, mime: string, name: string, extra: Partial<Asset> = {}): Promise<Asset> {
     const sha = await sha256(bytes);
     await saveLocal(sha, mime, bytes);
     const pending = (await kvGet<Pending[]>('assets:pending')) ?? [];
@@ -87,6 +115,7 @@ export class AssetService {
               headers: { 'content-type': p.mime },
               body: bytes as unknown as BodyInit,
             });
+            // 413 (storage full): kept and retried later, once there's room again.
             if (!res.ok && res.status !== 409) left.push(p);
           } catch {
             left.push(p);

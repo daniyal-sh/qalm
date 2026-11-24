@@ -22,7 +22,8 @@ export const LOCAL_LIBRARY = 'lib:local';
 
 export interface Profile {
   email?: string;
-  provider?: 'apple' | 'google' | 'email';
+  /** Accounts sign in with email only (a link or a 6-digit code). */
+  provider?: 'email';
   name?: string;
 }
 
@@ -44,8 +45,6 @@ export interface Session {
    * signed-out notebooks are then only moved into the account when the user agrees (`localOffer`).
    */
   signInWithTokens(t: Tokens, profile: Profile, opts?: { verified?: boolean }): Promise<void>;
-  /** Apple / Google: POST the identity token to `path`. */
-  signInWith(path: string, body: unknown, profile: Profile): Promise<void>;
   signOut(): Promise<void>;
   /** Signed-out notebooks on this device waiting for the user's OK to move into this account (0: none). */
   localOffer: number;
@@ -175,21 +174,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [dm, tm],
   );
 
-  const signInWith = React.useCallback(
-    async (path: string, body: unknown, p: Profile) => {
-      if (!tm) throw new Error('No server configured');
-      if (tm.user()) {
-        await dm.flushAll();
-        await tm.revoke();
-      }
-      await kvSet('profile', p);
-      setProfile(p);
-      const u = await tm.signIn(path, body);
-      await kvSet(unverifiedKey(u.id), undefined);
-    },
-    [dm, tm],
-  );
-
   const signOut = React.useCallback(async () => {
     await dm.flushAll();
     const id = tm?.user()?.id;
@@ -201,8 +185,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [dm, tm]);
 
   const value = React.useMemo<Session>(
-    () => ({ serverUrl, tm, user, profile, ready, skipped, setSkipped, dm, assets, library, signInWithTokens, signInWith, signOut, localOffer, moveLocal, dismissLocalOffer }),
-    [serverUrl, tm, user, profile, ready, skipped, setSkipped, dm, assets, library, signInWithTokens, signInWith, signOut, localOffer, moveLocal, dismissLocalOffer],
+    () => ({ serverUrl, tm, user, profile, ready, skipped, setSkipped, dm, assets, library, signInWithTokens, signOut, localOffer, moveLocal, dismissLocalOffer }),
+    [serverUrl, tm, user, profile, ready, skipped, setSkipped, dm, assets, library, signInWithTokens, signOut, localOffer, moveLocal, dismissLocalOffer],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
