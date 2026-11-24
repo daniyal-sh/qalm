@@ -339,9 +339,14 @@ describe('review 2: uploads, imports, shared page assets', () => {
     const first = await put(new Uint8Array(200).fill(4));
     expect(first.status).toBe(201);
     expect(await refs(doc)).toEqual([first.sha]); // before the session doc even mentions it
+    expect(await (await call('/lectures/revtag/s1', { token: t.accessToken })).json()).toEqual({ deleted: false });
+    const other = await signIn('rev-tag-other@example.com');
+    expect((await call('/lectures/revtag/s1', { token: other.accessToken })).status).toBe(404);
     s.c.close();
     expect((await call('/lectures/revtag/s1', { method: 'DELETE', token: t.accessToken })).status).toBe(200);
     expect(await owns(t.userId, first.sha)).toBe(false);
+    // Its status says deleted (a device that crashed while recording it asks before touching it again).
+    expect(await (await call('/lectures/revtag/s1', { token: t.accessToken })).json()).toEqual({ deleted: true });
     // A queued upload that lands after the delete is refused: nothing to count against storage.
     const late = await put(new Uint8Array(200).fill(5));
     expect(late.status).toBe(410);

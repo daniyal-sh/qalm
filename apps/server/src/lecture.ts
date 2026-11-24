@@ -433,11 +433,20 @@ async function liveUser(req: Request, env: Env): Promise<string> {
 
 /**
  * POST /lectures/transcribe?lang=xx   body: one audio chunk → {segments, durationMs, usedMinutes, limitMinutes}
+ * GET /lectures/{notebookId}/{sessionId}   → {deleted}: whether the session was deleted (on any device).
  * DELETE /lectures/{notebookId}/{sessionId}   deletes a session: its room, audio and crops.
  */
 export async function handleLectures(req: Request, env: Env, path: string): Promise<Response | null> {
   if (path === '/lectures/transcribe' && req.method === 'POST') return transcribe(req, env);
   const m = /^\/lectures\/([^/]+)\/([^/]+)$/.exec(path);
+  // A device's word with the server before it touches a session again (e.g. stopping one a crash left live): was it
+  // deleted on another device meanwhile? Then it must stay deleted.
+  if (m && req.method === 'GET') {
+    const userId = await requireUser(req, env);
+    const ref = parseDocId(lecDocId(decodeURIComponent(m[1]!), decodeURIComponent(m[2]!)));
+    if (!ref || ref.kind !== 'lec' || !(await canAccess(env, userId, ref))) throw new HttpError(404, 'Not found');
+    return json({ deleted: await lectureDeleted(env, ref.id) });
+  }
   if (m && req.method === 'DELETE') {
     const userId = await requireUser(req, env);
     const docId = lecDocId(decodeURIComponent(m[1]!), decodeURIComponent(m[2]!));

@@ -167,6 +167,8 @@ lib:{userId}
   bytes keeps it too. Lecture audio uploads name their session (`X-Qalm-Lecture: lec:{nb}:{sid}`): the reference is
   recorded at once, and an upload that lands after the delete gets 410 and is not stored. The app removes the
   library entry, its local copies, its queued uploads and any queued transcription for it.
+- `GET /lectures/{notebookId}/{sessionId}` → `{deleted}`: a device asks before it touches a session again (e.g. stopping
+  one its crash left live), so a session deleted elsewhere stays deleted.
 - **Delete forever** of a notebook deletes each of its sessions the same way (their audio and crops stop counting
   against the cap). **Account deletion** purges every room in `doc_sizes` (which includes `lec:` rooms), every asset,
   and the `transcribe_usage`, `lecture_assets` and `deleted_lectures` rows. On the device, deleting the account or a
