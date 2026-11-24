@@ -5,6 +5,7 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
 
 import { TokenManager, type Tokens } from '../src/auth/tokens';
+import { AiLive } from '../src/editor/aiLive';
 import { DocManager } from '../src/sync/docs';
 import { MESSAGE_SYNC, PING, PONG, SyncProvider, type NetworkEvents, type SocketLike } from '../src/sync/provider';
 import { MemoryStorage, SnapshotPersistence } from '../src/sync/snapshot';
@@ -51,6 +52,8 @@ class FakeSocket implements SocketLike {
   /** The network under this socket is gone: nothing arrives, sends vanish, and no close event fires. */
   dead = false;
   pings = 0;
+  /** Text frames sent other than pings (Play / Pause AI). */
+  readonly texts: string[] = [];
   constructor(private server: FakeServer) {}
   open() {
     this.readyState = 1;
@@ -70,7 +73,7 @@ class FakeSocket implements SocketLike {
       if (data === PING) {
         this.pings++;
         this.onmessage?.({ data: PONG });
-      }
+      } else this.texts.push(data);
       return;
     }
     const dec = decoding.createDecoder(data);
@@ -411,5 +414,93 @@ describe('local persistence', () => {
     await again.provider()!.whenSynced();
     expect(server.doc.getMap('m').get('k')).toBe(1);
     await m.closeAll();
+  });
+});
+
+describe('Play / Pause AI (AiLive over SyncProvider)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  async function open() {
+    vi.useFakeTimers();
+    const server = new FakeServer();
+    // Long socket heartbeats so the fake clock only exercises AI heartbeats.
+    const p = new SyncProvider(new Y.Doc(), 'nb:1', { serverUrl: 'https://api.test', getTicket: async () => 't', createSocket: server.create, heartbeatMs: 600_000, heartbeatTimeoutMs: 600_000, minBackoffMs: 100 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(p.status).toBe('synced');
+    const live = new AiLive(p, { everyMs: 15_000, ttlMs: 40_000 });
+    const sock = () => server.sockets[server.sockets.length - 1]!;
+    return { server, p, live, sock };
+  }
+
+  it('starts paused; Play sends a heartbeat now and every 15 s; Pause stops and tells the server', async () => {
+    const { p, live, sock } = await open();
+    expect(live.playing).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sock().texts).toEqual([]);
+    let changes = 0;
+    live.onChange(() => changes++);
+    live.play();
+    expect(live.playing).toBe(true);
+    expect(sock().texts).toEqual(['ai:live']);
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(sock().texts).toEqual(['ai:live', 'ai:live', 'ai:live', 'ai:live']);
+    live.pause();
+    expect(live.playing).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sock().texts).toEqual(['ai:live', 'ai:live', 'ai:live', 'ai:live', 'ai:pause']);
+    expect(changes).toBe(2);
+    live.destroy();
+    p.destroy();
+  });
+
+  it('auto-pauses this device only (backgrounded, notebook closed); Pause on another device pauses here', async () => {
+    const { p, live, sock } = await open();
+    live.play();
+    live.stop();
+    expect(live.playing).toBe(false);
+    expect(sock().texts).toEqual(['ai:live', 'ai:stop']);
+    live.stop(); // already stopped: nothing more
+    live.play();
+    // Another device pressed Pause: the server says so on this socket.
+    sock().onmessage?.({ data: 'ai:paused' });
+    expect(live.playing).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sock().texts).toEqual(['ai:live', 'ai:stop', 'ai:live']);
+    // Closing the notebook while playing stops it.
+    live.play();
+    live.destroy();
+    expect(sock().texts.at(-1)).toBe('ai:stop');
+    p.destroy();
+  });
+
+  it('resumes on a reconnect within the expiry; stays paused after a longer outage', async () => {
+    const { server, p, live, sock } = await open();
+    live.play();
+    sock().drop(); // the server stopped counting this device when its socket closed
+    await vi.advanceTimersByTimeAsync(200);
+    expect(server.sockets.length).toBe(2);
+    expect(live.playing).toBe(true);
+    expect(sock().texts).toEqual(['ai:live']); // a fresh socket gets a heartbeat at once
+    // Offline longer than the expiry: paused, and nothing is sent when the network is back.
+    p.setNetwork(false);
+    await vi.advanceTimersByTimeAsync(41_000);
+    expect(live.playing).toBe(false);
+    p.setNetwork(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sock().texts).toEqual([]);
+    expect(server.sockets.length).toBe(3);
+    live.destroy();
+    p.destroy();
+  });
+
+  it('delivers server text frames to listeners but not pongs', async () => {
+    const { p, sock } = await open();
+    const got: string[] = [];
+    p.onText((m) => got.push(m));
+    sock().onmessage?.({ data: 'pong' });
+    sock().onmessage?.({ data: 'ai:paused' });
+    expect(got).toEqual(['ai:paused']);
+    p.destroy();
+    expect(p.sendText('ai:live')).toBe(false);
   });
 });

@@ -330,7 +330,7 @@ function AiSection() {
         <EmptyState
           icon="cpu"
           title="Sign in to connect an agent"
-          body="Agents connect over MCP to the notebooks you turn AI access on for. They can read and comment, but never change your ink."
+          body="Agents connect over MCP to the notebooks you turn AI access on for, only while you've pressed Play AI in one. They can read and comment, but never change your ink."
           action={s.serverUrl ? <Button label="Sign in" variant="primary" onPress={() => router.push('/sign-in')} /> : undefined}
         />
       </Panel>
@@ -342,6 +342,10 @@ function AiSection() {
       <Text tone="muted">
         Agents connect over MCP. Every agent you approve can read the notebooks you've turned AI access on for (in each notebook's
         menu) and leave comments. They can never change your ink.
+      </Text>
+      <Text tone="muted">
+        They only get a notebook while it's open in qalm and you've pressed Play AI in its header. Opening a notebook starts
+        paused; Pause, closing it or leaving the app stops sharing.
       </Text>
       {data?.pending.map((p) => (
         <View key={p.id} style={[styles.pending, { backgroundColor: c.warnSoft, borderColor: c.line }]}>
