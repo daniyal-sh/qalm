@@ -214,12 +214,16 @@ describe('lecture MCP output', () => {
     const s = sessionOf('revlines');
     const { c, lec } = await startLecture(t, 'revlines', 's1');
     await until(async () => textOf(await tool(token, 'wait')).includes('recording'));
+    // Play right before each wait: one heartbeat gap (> AI_LIVE_TTL_MS, 2.5 s in tests) while other tests' work runs in
+    // the same isolate pauses the notebook for good, and this test is about the line cap, not liveness.
+    n.nbc.play();
     let w = tool(token, 'wait', { s });
     await pause(100);
     lec.addTranscript(Array.from({ length: 35 }, (_, i) => ({ t0: 1000 * (i + 1), t1: 1000 * (i + 1) + 500, text: `line ${i + 1}`, src: 'cloud' as const })));
     const lines = textOf(await w).split('\n');
     expect(lines.filter((l) => l.startsWith('L1 '))).toHaveLength(30);
     expect(lines.at(-1)).toBe('more: read("L1@00:31")');
+    n.nbc.play();
     w = tool(token, 'wait', { s });
     await pause(100);
     lec.addTranscript([{ t0: 40_000, t1: 41_000, text: 'next', src: 'cloud' }]);

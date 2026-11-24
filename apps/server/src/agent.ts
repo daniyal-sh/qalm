@@ -153,19 +153,12 @@ export class AgentHub {
   /**
    * THE check for every Lecture-mode output to MCP (docs/lecture-mode.md §7): live transcript lines in `wait`,
    * `read("L2")`, the outline's lecture lines and `lecture L2 recording` in the session list. Nothing about a lecture
-   * reaches an agent unless this is true at the moment it goes out (re-checked after every await).
-   *
-   * Today: AI access on and sharing not paused. The Play / Pause AI work (a central `isLive()`: one of the student's
-   * devices is playing AI for this notebook) plugs in here by making the body `return this.isLive();`.
+   * reaches an agent unless this is true at the moment it goes out (re-checked after every await). It is exactly the
+   * Play / Pause AI gate, `isLive()`: AI access on and one of the student's devices playing AI for this notebook.
+   * Reads that must fail when it is false use `requireLive()`.
    */
   lectureLive(): boolean {
-    return this.aiAccess() && !this.paused();
-  }
-
-  /** Throws what the agent should see when `lectureLive()` is false. */
-  private requireLectureLive(): void {
-    if (!this.aiAccess()) throw new Error(AI_OFF);
-    if (!this.lectureLive()) throw new Error(PAUSED);
+    return this.isLive();
   }
 
   // ---- presence: who is following this notebook ----
@@ -326,12 +319,12 @@ export class AgentHub {
 
   /** `read("L2")` / `read("L2@10:00")`: transcript and crops interleaved by time. */
   private async readLecture(label: string, from: number): Promise<AgentResult> {
-    this.requireLectureLive();
+    this.requireLive();
     const sid = resolveLecture(this.lectureLabels(), label);
     if (!sid || !this.lectures()[sid]) throw new Error(`No lecture ${label}; read("outline") lists them`);
     const docId = lecDocId(this.notebookId, sid);
     const d = await room(this.env, docId).lectureData(docId);
-    this.requireLectureLive();
+    this.requireLive();
     // A session that went silent while live (crashed app, closed tab) reads as stopped.
     if (this.lectures()[sid]?.expired) d.meta = { ...d.meta, state: 'stopped' };
     const parts = encodeLectureRead(label, d.meta, d.transcript, d.crops as LectureCrop[], from);

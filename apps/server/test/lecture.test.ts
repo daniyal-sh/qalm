@@ -178,7 +178,7 @@ describe('lecture crops and MCP', () => {
     n.pgc.close();
   });
 
-  it('sends nothing about a lecture while sharing is paused (the lectureLive gate)', async () => {
+  it('sends nothing about a lecture while AI is paused (lectureLive() is the Play / Pause gate)', async () => {
     const email = 'lec-gate@example.com';
     const t = await signIn(email);
     const n = await notebook(t, 'lecgate', 'Gated');
@@ -190,23 +190,21 @@ describe('lecture crops and MCP', () => {
     const first = tool(token, 'wait', { s }); // the agent is following from here
     await pause(100);
 
-    n.nb.setMeta({ aiPaused: true });
-    await until(async () => new Notebook(await serverDoc('nb:lecgate')).meta().aiPaused === true);
+    // Pause AI in the editor: the pending wait ends as paused at once.
+    n.nbc.pause();
+    expect(textOf(await first)).toBe(`#q s=${s} paused`);
     lec.addTranscript([{ t0: 1000, t1: 2000, text: 'said while paused', src: 'cloud' }]);
     await until(async () => (await lecOnServer('lecgate', 'sess1')).transcriptCount() === 1);
-    expect(textOf(await first)).toBe(`#q s=${s} paused`);
-    // Not in the session list, no read, no outline lines.
-    const list = textOf(await tool(token, 'wait'));
-    expect(list).toContain(`s=${s} "Gated"`);
-    expect(list).not.toContain('lecture');
+    // In the session list only as `s=… paused`: no title, no lecture. No read either.
+    expect(textOf(await tool(token, 'wait'))).toBe(`#q sessions\ns=${s} paused`);
     const read = await tool(token, 'read', { ref: 'L1', s });
     expect(read.isError).toBe(true);
-    expect(textOf(read)).toContain('paused sharing');
+    expect(textOf(read)).toContain('press Play');
 
-    // Resumed: what was said meanwhile goes out with the next update, as ink written while paused does.
+    // Play: what was said meanwhile goes out with the next update, as ink written while paused does (decided).
     const resumed = tool(token, 'wait', { s });
     await pause(100);
-    n.nb.setMeta({ aiPaused: false });
+    n.nbc.play();
     expect(textOf(await resumed)).toBe([`#q s=${s} r=1`, 'L1 00:01 "said while paused"'].join('\n'));
     c.close();
     n.nbc.close();

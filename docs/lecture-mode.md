@@ -185,16 +185,19 @@ Still four tools (`wait`, `read`, `transcribe`, `comment`); lecture data is read
   region lines: `L2 03:12 "so the derivative of x squared"`. Transcript lines alone also wake a `wait` (with the
   20 s rate limit, not the pen-idle rule). A new agent starts from the current line (no replay). At most 30 lines per
   session go in one update: a longer catch-up ends with `more: read("L2@03:12")` from the first line left out.
-- `wait()` with no session lists `lecture L2 recording 12:40` under a session that's recording.
+- `wait()` with no session lists `lecture L2 recording 12:40` on a playing notebook's line
+  (`s=… "Calculus" live lecture L2 recording 12:40`); a paused notebook's line is only `s=… paused`, with no title and
+  no lecture.
 - **After:** `read("outline")` lists the notebook's sessions (`L2 2026-11-24 47:10 stopped`). `read("L2")` returns
   the transcript and crops **interleaved by time**: text lines `03:12 "…"` and crop lines `03:15 R40 p2 @120,300
   260x80 +5`, with the crops' images as image blocks in the same order. One read covers 10 minutes and at most 8
   images; it ends with `more: read("L2@10:00")` (exact to the ms when a window stops at a crop, e.g.
   `L2@03:15.250`, so a page of crops never repeats). Only images the notebook's owner holds are sent.
-- **Only while shared:** every lecture output to an agent (live lines, the session list's `lecture L2 …`, outline
+- **Only while playing:** every lecture output to an agent (live lines, the session list's `lecture L2 …`, outline
   lines, `read("L2")`) goes through one check, `AgentHub.lectureLive()` in `apps/server/src/agent.ts`, at the moment it
-  goes out (and again after each await). Today that is AI access on and sharing not paused; with Play / Pause AI it is
-  the central `isLive()`. **Decided:** lines spoken while not live are not dropped: like ink written meanwhile, they
+  goes out (and again after each await). It is the Play / Pause AI gate itself, `isLive()` (AI access on, a device
+  playing, the old `aiPaused` not set); reads that must fail use `requireLive()`. Lecture mode makes no agent writes
+  (crops are the server's own records in the session doc), so nothing goes through `applyAgentEdit`. **Decided:** lines spoken while not live are not dropped: like ink written meanwhile, they
   go out with the next update once the notebook is live again (capped as above), because while playing an agent can
   read the whole notebook and lecture anyway.
 
