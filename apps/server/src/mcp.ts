@@ -5,12 +5,13 @@ import { activeGrant, grantedNotebooks, sessionOf, userNotebooks, type GrantRow,
 import { svgToPng } from './png';
 import { b64, json, now } from './util';
 import type { AgentResult } from './agent';
+import { LEGACY_VERSIONS as PROTOCOL_VERSIONS, SERVER_INFO, isModern, serveModern } from './mcp-protocol';
 
 /**
  * MCP over Streamable HTTP (stateless, JSON responses). POST /mcp carries JSON-RPC; there is no server-initiated
- * stream, so GET answers 405 as the transport spec allows.
+ * stream, so GET answers 405 as the transport spec allows. Dual-era: 2026-07-28 requests (version in `_meta`) are
+ * validated and shaped in mcp-protocol.ts; `initialize` and everything else is served here as for 2025-11-25.
  */
-const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
 const INSTRUCTIONS =
   'qalm notebooks in Q-ink Live format. Call wait() to list sessions, then wait(s) in a loop to follow live writing. ' +
@@ -52,7 +53,7 @@ const TOOLS = [
     name: 'comment',
     description:
       `Starts a comment thread on ${REF} or a page "p3" (it follows the ink when moved), or replies in a thread (thread "C3", e.g. to answer a note, re or ask). ` +
-      'Set resolve only when the thread is trivially done (e.g. the student said thanks). Never changes ink.',
+      'text is Markdown with TeX maths ($…$, $$…$$). Set resolve only when the thread is trivially done (e.g. the student said thanks). Never changes ink.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -85,6 +86,7 @@ export const mcpHandler = {
     } catch {
       return json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }, 400);
     }
+    if (isModern(req, body)) return serveModern(req, body, INSTRUCTIONS, (m) => handle(m, env, ctx.props));
     const batch = Array.isArray(body);
     const msgs = (batch ? body : [body]) as RpcMsg[];
     const out = [];
@@ -110,7 +112,7 @@ async function handle(m: RpcMsg, env: Env, props: McpProps): Promise<object | nu
       return ok({
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'qalm', title: 'qalm by Apollo', version: '0.1.0' },
+        serverInfo: SERVER_INFO,
         instructions: INSTRUCTIONS,
       });
     }
