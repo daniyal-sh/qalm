@@ -515,7 +515,8 @@ from the region images with its own vision. That keeps the app about 20 MB light
     stay valid until they expire (1 h) after logout.
 - **MCP:** Streamable HTTP at `/mcp` with OAuth 2.1 and dynamic client registration (`@cloudflare/workers-oauth-provider`). The consent page is
   served by the worker (mockup screen 5). There are 4 tools: `wait`, `read`, `transcribe` and `comment`, as in `qink-live.md`. Images are returned as MCP image
-  content: a PNG made from `renderRegionsSvg` with `@resvg/resvg-wasm`.
+  content: a PNG made from `renderRegionsSvg` with `@resvg/resvg-wasm`. Both protocol eras are served on `/mcp`: the `initialize` handshake
+  (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05) and stateless 2026-07-28 requests (version in `_meta`, `server/discover`); see `qink-live.md` §4.
 - **What an agent sees:** a notebook is visible only if it is (a) a live library entry (not trashed, not deleted forever), (b) inside the grant
   (picked directly or in a granted folder), and (c) has AI access on. (c) is read live from the notebook's index doc in its `DocRoom` on every tool
   call and on every pass of the `wait` update stream, so switching it off takes effect at once (a pending `wait` ends with an error). A notebook

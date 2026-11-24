@@ -90,6 +90,9 @@ export interface Presence {
  */
 export class AgentHub {
   private waiters = new Set<() => void>();
+  /** Pending waits by id, and those whose client disconnected (a disconnect cancels the request, MCP 2026-07-28). */
+  private waitIds = new Set<string>();
+  private cancelled = new Set<string>();
   private changed: Record<string, number>;
 
   constructor(private readonly r: DocRoom, private readonly env: Env, private readonly notebookId: string) {
@@ -232,8 +235,10 @@ export class AgentHub {
    * Long-polls for the next update (qink-live.md §1): resolves when the pen has been idle for `idleMs`, something
    * changed since the last delivery and `minIntervalMs` passed since the last wake, or at once on a new ask.
    */
-  async wait(who: AgentWho, session: string, cfg: AgentConfig): Promise<AgentResult> {
+  async wait(who: AgentWho, session: string, cfg: AgentConfig, waitId?: string): Promise<AgentResult> {
     const { clientId } = who;
+    if (waitId) this.waitIds.add(waitId);
+    const gone = () => !!waitId && this.cancelled.has(waitId);
     const deadline = Date.now() + cfg.timeoutMs;
     if (!this.r.kvGet(agentKey(clientId))) this.r.kvPut(agentKey(clientId), this.state(clientId));
     this.touch(who);
@@ -246,7 +251,9 @@ export class AgentHub {
     const paused = { text: `#q s=${session} paused`, svg: null, changed: false };
     try {
       for (;;) {
-        const r = await this.tryDeliver(clientId, session, cfg);
+        // Cancelled: end without delivering, so the client's next wait gets the update.
+        if (gone()) return { text: `#q s=${session} cancelled`, svg: null, changed: false };
+        const r = await this.tryDeliver(clientId, session, cfg, gone);
         if ('text' in r) {
           delivered = r.changed;
           return r;
@@ -260,6 +267,10 @@ export class AgentHub {
         await this.sleep(Math.min(r.retryAt, deadline, until || Infinity) - t);
       }
     } finally {
+      if (waitId) {
+        this.waitIds.delete(waitId);
+        this.cancelled.delete(waitId);
+      }
       const n = (this.waiting.get(clientId) ?? 1) - 1;
       if (n > 0) this.waiting.set(clientId, n);
       else this.waiting.delete(clientId);
@@ -267,7 +278,14 @@ export class AgentHub {
     }
   }
 
-  private async tryDeliver(clientId: string, session: string, cfg: AgentConfig): Promise<AgentResult | { retryAt: number }> {
+  /** Cancels a pending wait whose client went away: it ends without delivering anything. */
+  cancel(waitId: string): void {
+    if (!this.waitIds.has(waitId)) return;
+    this.cancelled.add(waitId);
+    this.wakeAll();
+  }
+
+  private async tryDeliver(clientId: string, session: string, cfg: AgentConfig, gone = () => false): Promise<AgentResult | { retryAt: number }> {
     // Checked on every pass: turning AI access off ends a wait at once (meta changes wake waiters).
     // While paused nothing goes out (ink, asks, comments and replies wait); Play wakes the wait and the next update
     // catches up on everything since the last one.
@@ -299,7 +317,7 @@ export class AgentHub {
     if (!this.isLive()) return { retryAt: Infinity };
     // Re-read after the await: another call may have delivered meanwhile.
     const cur = this.state(clientId);
-    if (cur.rev !== st.rev || cur.askCount !== st.askCount) return { retryAt: 0 };
+    if (gone() || cur.rev !== st.rev || cur.askCount !== st.askCount) return { retryAt: 0 };
     const regions = this.regions();
     const threads = this.threads();
     const prev: Record<string, InkSeen | undefined> = {};
