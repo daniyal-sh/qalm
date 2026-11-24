@@ -4,7 +4,7 @@ import * as Y from 'yjs';
 
 import { extractCode, isEmail, lookupMagicLink, startMagicLink, verifyCode, verifyMagicLink } from '../src/auth/magicLink';
 import { beginEmailSignIn, clearPending, pendingNonce, PENDING_TTL_MS, type PendingDeps, type PendingMap } from '../src/auth/pending';
-import { TokenManager, type RefreshLock, type Tokens } from '../src/auth/tokens';
+import { TokenManager, tokenKey, type RefreshLock, type Tokens } from '../src/auth/tokens';
 import { entryFor } from '../src/library/actions';
 import { hasLocalLibrary, localToMove, moveLocalLibrary } from '../src/state/localLibrary';
 
@@ -202,5 +202,13 @@ describe('moving signed-out notebooks into the account', () => {
     expect(account.swatches('highlighter').slice(-2)).toEqual(['#00ff00', '#ff880080']);
     expect(account.hasCustomSwatches('pen')).toBe(false);
     expect(hasLocalLibrary(local)).toBe(false);
+  });
+});
+
+describe('tokenKey', () => {
+  it('keeps one sign-in per server', () => {
+    expect(tokenKey(undefined)).toBe('qalm:tokens');
+    expect(tokenKey('http://127.0.0.1:8787')).toBe('qalm:tokens@127.0.0.1:8787');
+    expect(tokenKey('https://qalm-api-staging.apollolearn.workers.dev')).toBe('qalm:tokens@qalm-api-staging.apollolearn.workers.dev');
   });
 });
