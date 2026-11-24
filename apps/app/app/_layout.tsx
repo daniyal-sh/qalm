@@ -4,13 +4,14 @@ import { useFonts } from 'expo-font';
 import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as React from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Platform, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { persistClip } from '../src/editor/clipboard';
 import { desktop } from '../src/lib/desktop';
 import { kvGet, kvSet } from '../src/lib/kv';
+import { quietNonPrimaryMouseUp } from '../src/lib/webMouse';
 import { SessionProvider, useSession } from '../src/state/session';
 import { ConfirmHost } from '../src/ui/ConfirmHost';
 import { Button } from '../src/ui/controls';
@@ -20,6 +21,7 @@ import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
 
 // Copy/Cut survive reloads and restarts (per device).
 void persistClip({ get: () => kvGet('clipboard'), set: (c) => kvSet('clipboard', c) });
+if (Platform.OS === 'web') quietNonPrimaryMouseUp();
 
 // Web / Electron: Ctrl/Cmd+A outside a text field would select every label in the window (the editor handles its own
 // Ctrl+A, selecting the page's items, and calls preventDefault first).

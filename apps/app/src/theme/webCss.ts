@@ -14,6 +14,8 @@ export function globalCss(c: Pick<Colors, 'accent' | 'accentLine' | 'accentSoft'
     `  outline: 2px solid ${c.accentLine}; outline-offset: 1px; box-shadow: inset 0 0 0 1px ${c.accent};`,
     `}`,
     `[tabindex]:focus:not(:focus-visible) { outline: none; }`,
+    // A control that turns disabled while focused (Redo after its last step) keeps no ring.
+    `[aria-disabled="true"]:focus, [aria-disabled="true"]:focus-visible { outline: none; box-shadow: none; }`,
     // Text fields draw their own focused border.
     `input:focus-visible, textarea:focus-visible { outline: none; box-shadow: none; }`,
     `@media (prefers-reduced-motion: reduce) {`,

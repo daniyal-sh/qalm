@@ -71,3 +71,20 @@ describe('text on solid fills', () => {
     });
   }
 });
+
+describe('right-click on web', () => {
+  it('stops non-primary mouseups before the responder sees them, and lets the primary one through', async () => {
+    const { quietNonPrimaryMouseUp } = await import('../src/lib/webMouse');
+    let handler: ((e: Event) => void) | null = null;
+    quietNonPrimaryMouseUp({ addEventListener: (_t: string, h: never) => (handler = h) } as never);
+    let stopped = 0;
+    const ev = (button: number) => ({ button, stopImmediatePropagation: () => stopped++ }) as unknown as Event;
+    handler!(ev(2));
+    handler!(ev(1));
+    handler!(ev(0));
+    expect(stopped).toBe(2);
+  });
+  it('keeps no focus ring on a control that turned disabled', () => {
+    expect(globalCss(light)).toContain('[aria-disabled="true"]:focus');
+  });
+});
