@@ -171,8 +171,7 @@ describe('recognizeShape: real hands, live hold', () => {
   for (const [name, { want, gen }] of Object.entries(REAL)) {
     it(`recognises a ${name} (≥ 90% of ${N_REAL}, never the wrong shape more than twice)`, () => {
       const got = tally(gen, name.length);
-      if ((globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.SHAPE_DEBUG) console.log(name, JSON.stringify(got));
-      expect(got[want] ?? 0).toBeGreaterThanOrEqual(Math.ceil(N_REAL * 0.9));
+      expect([name, (got[want] ?? 0) >= Math.ceil(N_REAL * 0.9) ? 'ok' : got]).toEqual([name, 'ok']);
       const wrong = Object.entries(got).filter(([k]) => k !== want && k !== 'none').reduce((n, [, v]) => n + v, 0);
       expect(wrong).toBeLessThanOrEqual(2);
     });

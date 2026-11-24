@@ -337,7 +337,7 @@ function ellipseCorners(f: EllipseFit): P[] {
 }
 
 /**
- * Corners of a closed loop (evenly resampled): points where the stroke turns by more than 35° (and well above its
+ * Corners of a closed loop (evenly resampled), as indices: points where the stroke turns by more than 35° (and well above its
  * typical turn) within a short window on each side (≈ 4% of the outline), keeping only the peak of each turn. A
  * hand-rounded corner still turns by its full angle over the window, while a circle turns evenly, ~30° everywhere.
  */
@@ -348,7 +348,7 @@ function cornerIndices(ring: P[]): number[] {
   // A circle turns evenly (its median turn is high); a polygon's edges barely turn at all.
   const median = [...th].sort((a, b) => a - b)[n >> 1]!;
   const min = Math.max(35 * DEG, 1.6 * median);
-  const out: P[] = [];
+  const out: number[] = [];
   for (let i = 0; i < n; i++) {
     if (th[i]! < min) continue;
     let peak = true;
