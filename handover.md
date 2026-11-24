@@ -98,7 +98,8 @@ apps/server        @qalm/server   Cloudflare Worker: auth, DocRoom Durable Objec
 - **Coordinates and zoom:** PDF points, with A4 at 595×842. Zoom runs 0.75–4× and re-lays out at the end of the
   gesture. PDF backgrounds render at width buckets 1/2/4×.
 - **Palm rejection:**
-  - **Thresholds** use the contact's full major axis in mm: relaxed 9, standard 7, strict 5.
+  - **Thresholds** use the contact's full major axis in mm: relaxed 30, standard 20, strict 14 (owner decision: the old 9 / 7 / 5
+    rejected most fingertips, which are 8–10 mm). The lockout, hand side and multi-touch rules catch smaller palm edges.
   - **Pen priority:** a 600 ms pen lockout, and the writing-hand side is considered for 3 s.
   - **Retractions:** an OS cancel retracts the stroke, as does a second finger or a contact that grows into a palm.
   - **Fingers:** with "pen only" they scroll; a rejected palm never scrolls.

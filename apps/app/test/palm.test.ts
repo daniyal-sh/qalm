@@ -16,37 +16,48 @@ describe('palm rejection (tech-spec §3)', () => {
       expect(palmVerdict(touch(limit - 0.5), NO_PEN, { hand: 'right', palm })).toBeNull();
       expect(palmVerdict(touch(limit + 0.5), NO_PEN, { hand: 'right', palm })).toBe('palm-size');
     }
-    expect(palmVerdict(touch(25), NO_PEN, right)).toBe('palm-size'); // a palm
-    expect(palmVerdict(touch(8), NO_PEN, { hand: 'right', palm: 'relaxed' })).toBeNull(); // a finger, relaxed
-    expect(palmVerdict(touch(8), NO_PEN, right)).toBe('palm-size'); // the same finger, standard
+    expect(PALM_MAJOR_MM).toEqual({ relaxed: 30, standard: 20, strict: 14 });
+  });
+
+  it('lets fingertips draw, rejects palms at standard and a flat finger or palm edge only at strict', () => {
+    const at = (mm: number, palm: 'relaxed' | 'standard' | 'strict') => palmVerdict(touch(mm), NO_PEN, { hand: 'right', palm });
+    for (const palm of ['relaxed', 'standard', 'strict'] as const) for (const mm of [7, 8, 10, 12]) expect(at(mm, palm)).toBeNull();
+    for (const mm of [22, 25, 30, 40]) expect(at(mm, 'standard')).toBe('palm-size');
+    for (const mm of [32, 40]) expect(at(mm, 'relaxed')).toBe('palm-size');
+    expect(at(25, 'relaxed')).toBeNull(); // relaxed lets a big contact through; the lockout and hand side still apply
+    for (const mm of [15, 16.5, 18]) {
+      expect(at(mm, 'strict')).toBe('palm-size');
+      expect(at(mm, 'standard')).toBeNull();
+      expect(at(mm, 'relaxed')).toBeNull();
+    }
   });
 
   it('uses the full major axis', () => {
-    // 6.5 mm across is a finger at standard (7 mm); its 3.25 mm radius must not be doubled again or halved.
-    expect(palmVerdict(touch(6.5), NO_PEN, right)).toBeNull();
-    expect(palmVerdict(touch(7.5), NO_PEN, right)).toBe('palm-size');
+    // 19 mm across is a finger at standard (20 mm); its 9.5 mm radius must not be doubled again or halved.
+    expect(palmVerdict(touch(19), NO_PEN, right)).toBeNull();
+    expect(palmVerdict(touch(21), NO_PEN, right)).toBe('palm-size');
   });
 
   it('locks touches out for 600 ms after the pen, anywhere on the page', () => {
     const pen: PenSeen = { x: 500, y: 500, t: 10_000 };
     const farLeftAbove = { x: 100, y: 100 };
-    expect(palmVerdict(touch(5, { ...farLeftAbove, t: 10_000 + PEN_LOCKOUT_MS - 1 }), pen, right)).toBe('pen-lockout');
-    expect(palmVerdict(touch(5, { ...farLeftAbove, t: 10_000 + PEN_LOCKOUT_MS + 1 }), pen, right)).toBeNull();
+    expect(palmVerdict(touch(9, { ...farLeftAbove, t: 10_000 + PEN_LOCKOUT_MS - 1 }), pen, right)).toBe('pen-lockout');
+    expect(palmVerdict(touch(9, { ...farLeftAbove, t: 10_000 + PEN_LOCKOUT_MS + 1 }), pen, right)).toBeNull();
   });
 
   it('rejects touches beside or below the pen on the writing hand side for 3 s', () => {
     const pen: PenSeen = { x: 500, y: 500, t: 10_000 };
     const t = 10_000 + 1000;
     // Right hand: right of the pen, or below it.
-    expect(palmVerdict(touch(5, { x: 600, y: 520, t }), pen, right)).toBe('hand-side');
-    expect(palmVerdict(touch(5, { x: 480, y: 700, t }), pen, right)).toBe('hand-side'); // within 10 mm left, below
-    expect(palmVerdict(touch(5, { x: 500 - px(11), y: 700, t }), pen, right)).toBeNull(); // further left
-    expect(palmVerdict(touch(5, { x: 600, y: 500 - px(11), t }), pen, right)).toBeNull(); // above the pen
+    expect(palmVerdict(touch(9, { x: 600, y: 520, t }), pen, right)).toBe('hand-side');
+    expect(palmVerdict(touch(9, { x: 480, y: 700, t }), pen, right)).toBe('hand-side'); // within 10 mm left, below
+    expect(palmVerdict(touch(9, { x: 500 - px(11), y: 700, t }), pen, right)).toBeNull(); // further left
+    expect(palmVerdict(touch(9, { x: 600, y: 500 - px(11), t }), pen, right)).toBeNull(); // above the pen
     // Left hand mirrors it.
-    expect(palmVerdict(touch(5, { x: 400, y: 520, t }), pen, { hand: 'left', palm: 'standard' })).toBe('hand-side');
-    expect(palmVerdict(touch(5, { x: 600, y: 520, t }), pen, { hand: 'left', palm: 'standard' })).toBeNull();
+    expect(palmVerdict(touch(9, { x: 400, y: 520, t }), pen, { hand: 'left', palm: 'standard' })).toBe('hand-side');
+    expect(palmVerdict(touch(9, { x: 600, y: 520, t }), pen, { hand: 'left', palm: 'standard' })).toBeNull();
     // After 3 s the side doesn't matter.
-    expect(palmVerdict(touch(5, { x: 600, y: 520, t: 10_000 + 3001 }), pen, right)).toBeNull();
+    expect(palmVerdict(touch(9, { x: 600, y: 520, t: 10_000 + 3001 }), pen, right)).toBeNull();
   });
 
   it('checks size first, so a palm says so even right after the pen', () => {

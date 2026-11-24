@@ -45,8 +45,8 @@ If `s.platforms` stays below 16.1, the code still compiles because `zOffset` and
 - **Palm rejection, in mm with 1 pt ≈ 0.19 mm:**
   1. Pencil always draws. With `drawWith: 'pen'`, the recognizer's `allowedTouchTypes` is pencil only, so fingers pass straight through
      to the page list's scroll and the RNGH pinch.
-  2. Contact axis = `2 × (majorRadius − majorRadiusTolerance) × 0.19` mm, compared against 9, 7 or 5 mm. I used the lower bound because iOS
-     quantizes `majorRadius` (a fingertip is about 20.8 pt, which is 7.9 mm without the tolerance, so a normal finger would fail "standard"). **Tune on device.**
+  2. Contact axis = `2 × majorRadius × 0.19` mm (the full major axis, as on Android and web), compared against 30, 20 or 14 mm
+     (relaxed, standard, strict). Fingertips (7–12 mm) draw at every level; palms (20–40 mm) are rejected from standard. **Tune on device.**
      This is checked on every move too, so a finger stroke that grows into a palm is retracted.
   3. A finger is rejected within 600 ms of pencil activity, which includes Pencil hover where `zOffset > 0`. It's also rejected if it lands below or
      beside (±10 mm) the last pen position on the `hand` side, but only within 3 s of the last pen activity.

@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useColorScheme } from 'react-native';
 
+import { loadInputPrefs } from '../lib/inputPrefs';
 import { kvGet, kvSet } from '../lib/kv';
 import { applyWebScrollbars } from './scrollbars';
 import { dark, light, type Colors } from './tokens';
@@ -27,6 +28,7 @@ export const smoothingLevel = (s: SmoothingPref): 1 | 2 | 3 => (s === 'low' ? 1 
 
 export const DEFAULT_INPUT: InputPrefs = { drawWith: 'any', hand: 'right', palm: 'standard', penGesture: 'eraser', smoothing: 'medium' };
 
+
 interface Prefs {
   appearance: Appearance;
   input: InputPrefs;
@@ -49,7 +51,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     void kvGet<Partial<Prefs>>('prefs').then((p) => {
-      if (p) setPrefs((cur) => ({ appearance: p.appearance ?? cur.appearance, input: { ...cur.input, ...p.input } }));
+      if (p) setPrefs((cur) => ({ appearance: p.appearance ?? cur.appearance, input: loadInputPrefs(p.input, cur.input) }));
     });
   }, []);
 

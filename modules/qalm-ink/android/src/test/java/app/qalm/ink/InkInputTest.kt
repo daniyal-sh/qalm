@@ -49,7 +49,7 @@ class InkInputTest {
   // ---- synthesized events ----
   private class P(val id: Int, val tool: Int, val x: Float, val y: Float, val major: Float = 0f)
 
-  private fun finger(id: Int, x: Float, y: Float, majorMm: Double = 4.0) = P(id, MotionEvent.TOOL_TYPE_FINGER, x, y, mm(majorMm))
+  private fun finger(id: Int, x: Float, y: Float, majorMm: Double = 9.0) = P(id, MotionEvent.TOOL_TYPE_FINGER, x, y, mm(majorMm))
   private fun pen(id: Int, x: Float, y: Float) = P(id, MotionEvent.TOOL_TYPE_STYLUS, x, y, mm(0.5))
 
   private fun event(t: Long, action: Int, ps: List<P>, actionIndex: Int = 0, flags: Int = 0, buttons: Int = 0): MotionEvent {
@@ -159,18 +159,24 @@ class InkInputTest {
 
   @Test
   fun palmThresholdsInMillimetres() {
-    assertTrue(drawsWith("relaxed", 8.9))
-    assertFalse(drawsWith("relaxed", 9.2))
-    assertTrue(drawsWith("standard", 6.9))
-    assertFalse(drawsWith("standard", 7.2))
-    assertTrue(drawsWith("strict", 4.9))
-    assertFalse(drawsWith("strict", 5.2))
-    // 8 mm: a fingertip pressed flat for relaxed, a palm for the others
-    assertTrue(drawsWith("relaxed", 8.0))
-    assertFalse(drawsWith("standard", 8.0))
-    assertFalse(drawsWith("strict", 8.0))
+    assertTrue(drawsWith("relaxed", 29.8))
+    assertFalse(drawsWith("relaxed", 30.3))
+    assertTrue(drawsWith("standard", 19.8))
+    assertFalse(drawsWith("standard", 20.3))
+    assertTrue(drawsWith("strict", 13.8))
+    assertFalse(drawsWith("strict", 14.3))
+    // fingertips (7–12 mm) draw at every level
+    for (level in listOf("relaxed", "standard", "strict")) for (mm in listOf(7.0, 8.0, 10.0, 12.0)) assertTrue("$level $mm", drawsWith(level, mm))
+    // palms (20–40 mm) are rejected at standard
+    for (mm in listOf(22.0, 25.0, 30.0, 40.0)) assertFalse("standard $mm", drawsWith("standard", mm))
+    // a flat finger or palm edge (15–18 mm) only at strict
+    for (mm in listOf(15.0, 16.5, 18.0)) {
+      assertFalse("strict $mm", drawsWith("strict", mm))
+      assertTrue("standard $mm", drawsWith("standard", mm))
+      assertTrue("relaxed $mm", drawsWith("relaxed", mm))
+    }
     // an unknown level falls back to standard
-    assertFalse(drawsWith("bogus", 7.2))
+    assertFalse(drawsWith("bogus", 21.0))
   }
 
   @Test
@@ -182,11 +188,11 @@ class InkInputTest {
 
   @Test
   fun aContactThatGrowsIntoAPalmIsRetracted() {
-    send(1000, MotionEvent.ACTION_DOWN, finger(0, 100f, 100f, 4.0))
-    send(1010, MotionEvent.ACTION_MOVE, finger(0, 110f, 100f, 5.0))
-    send(1020, MotionEvent.ACTION_MOVE, finger(0, 120f, 100f, 12.0))
-    send(1030, MotionEvent.ACTION_MOVE, finger(0, 130f, 100f, 12.0))
-    send(1040, MotionEvent.ACTION_UP, finger(0, 140f, 100f, 12.0))
+    send(1000, MotionEvent.ACTION_DOWN, finger(0, 100f, 100f, 9.0))
+    send(1010, MotionEvent.ACTION_MOVE, finger(0, 110f, 100f, 12.0))
+    send(1020, MotionEvent.ACTION_MOVE, finger(0, 120f, 100f, 28.0))
+    send(1030, MotionEvent.ACTION_MOVE, finger(0, 130f, 100f, 28.0))
+    send(1040, MotionEvent.ACTION_UP, finger(0, 140f, 100f, 28.0))
     assertEquals(listOf("start 0 touch", "hold true", "move 0", "hold false", "retract", "reject palm-size", "claim true"), log)
   }
 
@@ -194,9 +200,9 @@ class InkInputTest {
   fun aPalmLandingBesideAFingerStrokeDoesNotEndIt() {
     send(1000, MotionEvent.ACTION_DOWN, finger(0, 100f, 100f))
     send(1100, MotionEvent.ACTION_MOVE, finger(0, 120f, 100f))
-    send(1110, MotionEvent.ACTION_POINTER_DOWN, finger(0, 120f, 100f), finger(1, 500f, 500f, 20.0), actionIndex = 1)
-    send(1120, MotionEvent.ACTION_MOVE, finger(0, 140f, 100f), finger(1, 500f, 500f, 20.0))
-    send(1130, MotionEvent.ACTION_POINTER_UP, finger(0, 140f, 100f), finger(1, 500f, 500f, 20.0), actionIndex = 1)
+    send(1110, MotionEvent.ACTION_POINTER_DOWN, finger(0, 120f, 100f), finger(1, 500f, 500f, 30.0), actionIndex = 1)
+    send(1120, MotionEvent.ACTION_MOVE, finger(0, 140f, 100f), finger(1, 500f, 500f, 30.0))
+    send(1130, MotionEvent.ACTION_POINTER_UP, finger(0, 140f, 100f), finger(1, 500f, 500f, 30.0), actionIndex = 1)
     send(1140, MotionEvent.ACTION_UP, finger(0, 150f, 100f))
     assertEquals(
       listOf("start 0 touch", "hold true", "move 0", "claim true", "reject palm-size", "move 0", "hold false", "finish 0"),
@@ -269,10 +275,10 @@ class InkInputTest {
 
   @Test
   fun thePenTakesOverFromAPalmThatGotThereFirst() {
-    send(10_000, MotionEvent.ACTION_DOWN, finger(0, 600f, 600f, 6.0))
-    send(10_030, MotionEvent.ACTION_POINTER_DOWN, finger(0, 600f, 600f, 6.0), pen(1, 500f, 500f), actionIndex = 1)
-    send(10_040, MotionEvent.ACTION_MOVE, finger(0, 600f, 600f, 6.0), pen(1, 520f, 500f))
-    send(10_050, MotionEvent.ACTION_POINTER_UP, finger(0, 600f, 600f, 6.0), pen(1, 530f, 500f), actionIndex = 1)
+    send(10_000, MotionEvent.ACTION_DOWN, finger(0, 600f, 600f, 10.0))
+    send(10_030, MotionEvent.ACTION_POINTER_DOWN, finger(0, 600f, 600f, 10.0), pen(1, 500f, 500f), actionIndex = 1)
+    send(10_040, MotionEvent.ACTION_MOVE, finger(0, 600f, 600f, 10.0), pen(1, 520f, 500f))
+    send(10_050, MotionEvent.ACTION_POINTER_UP, finger(0, 600f, 600f, 10.0), pen(1, 530f, 500f), actionIndex = 1)
     assertEquals(
       listOf("start 0 touch", "hold true", "hold false", "retract", "reject pen-took-over", "start 1 pen", "claim true", "move 1", "finish 1"),
       log,
@@ -297,9 +303,9 @@ class InkInputTest {
   @Test
   fun flagCanceledOnPointerUpRetractsOnlyTheLiveStroke() {
     send(1000, MotionEvent.ACTION_DOWN, pen(0, 100f, 100f))
-    send(1010, MotionEvent.ACTION_POINTER_DOWN, pen(0, 100f, 100f), finger(1, 900f, 900f, 20.0), actionIndex = 1)
+    send(1010, MotionEvent.ACTION_POINTER_DOWN, pen(0, 100f, 100f), finger(1, 900f, 900f, 30.0), actionIndex = 1)
     // the OS cancels the palm (not the live pointer): the pen stroke goes on
-    send(1020, MotionEvent.ACTION_POINTER_UP, pen(0, 110f, 100f), finger(1, 900f, 900f, 20.0), actionIndex = 1, flags = InkInput.FLAG_CANCELED)
+    send(1020, MotionEvent.ACTION_POINTER_UP, pen(0, 110f, 100f), finger(1, 900f, 900f, 30.0), actionIndex = 1, flags = InkInput.FLAG_CANCELED)
     assertTrue(input.drawing)
     // now the pen itself is cancelled
     send(1030, MotionEvent.ACTION_POINTER_DOWN, pen(0, 110f, 100f), finger(1, 900f, 900f), actionIndex = 1)

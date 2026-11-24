@@ -207,7 +207,7 @@ internal class InkInput(private val host: Host) {
   }
 
   companion object {
-    val PALM_MAJOR_MM = mapOf("relaxed" to 9.0, "standard" to 7.0, "strict" to 5.0)
+    val PALM_MAJOR_MM = mapOf("relaxed" to 30.0, "standard" to 20.0, "strict" to 14.0)
     const val PEN_LOCKOUT_MS = 600L
     const val HAND_SIDE_WINDOW_MS = 3000L // same as iOS
     const val HAND_SIDE_MARGIN_MM = 10.0
