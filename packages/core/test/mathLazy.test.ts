@@ -26,13 +26,14 @@ type Fresh = typeof Core & {
   renderRegionsSvg: typeof import('../src/render/regions').renderRegionsSvg;
   MATH_LOADER: typeof import('../src/markdown/math').MATH_LOADER;
   MATH_RETRY: typeof import('../src/markdown/math').MATH_RETRY;
+  MATH_CACHE: typeof import('../src/markdown/math').MATH_CACHE;
 };
 
 async function fresh(): Promise<Fresh> {
   vi.resetModules();
   probe.loads = 0;
   const math = await import('../src/markdown/math');
-  return { ...(await import('../src')), ...(await import('../src/render/regions')), MATH_LOADER: math.MATH_LOADER, MATH_RETRY: math.MATH_RETRY };
+  return { ...(await import('../src')), ...(await import('../src/render/regions')), MATH_LOADER: math.MATH_LOADER, MATH_RETRY: math.MATH_RETRY, MATH_CACHE: math.MATH_CACHE };
 }
 
 declare function setTimeout(cb: () => void, ms: number): unknown;
@@ -446,5 +447,100 @@ describe('the lazy load and the app’s time slice (setMathTimeSlice)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('filling in settles when the visible maths outgrows the formula cache', () => {
+  const task = () => new Promise<void>((r) => setTimeout(r, 0));
+  /** 30 small, distinct formulas: one comment or box at the per-box cap. */
+  const formulas = (k: number) => Array.from({ length: 30 }, (_, i) => `$q_{${k}}^{${i}}$`).join(' ');
+
+  /**
+   * Renders like the app: everything once, then again each time `onMathDeferred` fires (a fill-in), until it stops.
+   * Returns how many passes it took, or throws if it never settles.
+   */
+  async function settle(core: Fresh, pass: () => boolean, max: number): Promise<number> {
+    let passes = 0;
+    for (;;) {
+      const epoch = core.mathDeferredEpoch();
+      const done = pass();
+      passes++;
+      await task();
+      await settleLoad(core);
+      if (done && core.mathDeferredEpoch() === epoch) return passes;
+      if (passes > max) throw new Error(`still filling in after ${passes} passes`);
+    }
+  }
+  /** Lets a started MathJax load finish (it fires a fill-in when it does). */
+  const settleLoad = async (core: Fresh) => {
+    if (!core.mathReady()) await core.loadMath();
+  };
+  /** A few more tasks with renders: nothing is deferred, so no fill-in is asked for. */
+  async function expectIdle(core: Fresh, pass: () => boolean): Promise<void> {
+    const epoch = core.mathDeferredEpoch();
+    for (let i = 0; i < 5; i++) {
+      expect(pass()).toBe(true);
+      await task();
+    }
+    expect(core.mathDeferredEpoch()).toBe(epoch);
+  }
+
+  it('a thread of 40 comments × 30 formulas, from before MathJax loads: bounded passes, then idle', async () => {
+    const core = await fresh();
+    const saved = { ...core.MATH_CACHE };
+    core.MATH_CACHE.count = 100; // far less than the thread's 1200 formulas
+    core.setMathTimeSlice(2);
+    try {
+      const comments = Array.from({ length: 40 }, (_, k) => ({ blocks: core.parseMarkdown(formulas(k)), memo: new Map() as Core.MathMemo }));
+      // A pass is every comment's render: done once all its formulas have outlines.
+      const pass = () => comments.map((c) => [...core.allowedMath(c.blocks, c.memo).values()].every(Boolean)).every(Boolean);
+      expect(pass()).toBe(false); // placeholders: MathJax is loading
+      const passes = await settle(core, pass, 1200 + 10);
+      for (const c of comments) {
+        const all = core.allowedMath(c.blocks, c.memo);
+        expect(all.size).toBe(30);
+        expect([...all.values()].every((b) => b && b.path.length > 0)).toBe(true);
+      }
+      expect(passes).toBeLessThanOrEqual(1200 + 10);
+      await expectIdle(core, pass);
+    } finally {
+      Object.assign(core.MATH_CACHE, saved);
+    }
+  }, 60_000);
+
+  it('a page of 40 boxes × 30 formulas the same way (each box keeps what it resolved)', async () => {
+    const core = await fresh();
+    const saved = { ...core.MATH_CACHE };
+    core.MATH_CACHE.count = 100;
+    core.setMathTimeSlice(2);
+    try {
+      const texts = Array.from({ length: 40 }, (_, k) => formulas(k + 100));
+      const pass = () => texts.map((t) => core.layoutMarkdown(t, 4000, 16)).every((l) => !l.pending && !l.partial);
+      expect(pass()).toBe(false);
+      const passes = await settle(core, pass, 1200 + 10);
+      expect(passes).toBeLessThanOrEqual(1200 + 10);
+      for (const t of texts) expect(core.layoutMarkdown(t, 4000, 16).ops.filter((o) => o.k === 'path')).toHaveLength(30);
+      await expectIdle(core, pass);
+    } finally {
+      Object.assign(core.MATH_CACHE, saved);
+    }
+  }, 60_000);
+
+  it('a pass that resolves nothing new asks for no other (no fill-in loop)', async () => {
+    const core = await fresh();
+    await core.loadMath();
+    core.setMathTimeSlice(0);
+    const fills = vi.fn();
+    core.onMathDeferred(fills);
+    // Complete boxes and comments: rendering them again renders no formula, so nothing is deferred or rescheduled.
+    const text = formulas(7);
+    core.setMathTimeSlice(null);
+    core.layoutMarkdown(text, 4000, 16);
+    core.setMathTimeSlice(0);
+    for (let i = 0; i < 5; i++) {
+      core.layoutMarkdown(text, 4000, 16);
+      await task();
+    }
+    expect(fills).not.toHaveBeenCalled();
   });
 });

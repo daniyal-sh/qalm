@@ -47,16 +47,43 @@ function resetTex(tex: TeX<unknown, unknown, unknown>): void {
 
 const r = (v: number) => Math.round(v * 10) / 10;
 
-/** Applies a scale-and-translate transform to an SVG path's data, writing absolute commands. */
-export function transformPath(d: string, [sx, sy, tx, ty]: Affine): string {
+/** The extent of everything a path draws (end and control points: a curve stays inside its control hull). */
+export interface PathBounds {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export const emptyBounds = (): PathBounds => ({ x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity });
+
+/**
+ * Applies a scale-and-translate transform to an SVG path's data, writing absolute commands. `bounds`, if given, grows
+ * to cover every point written.
+ */
+export function transformPath(d: string, [sx, sy, tx, ty]: Affine, bounds?: PathBounds): string {
   const out: string[] = [];
   const re = /([MmLlHhVvCcSsQqTtZz])([^MmLlHhVvCcSsQqTtZz]*)/g;
   let cx = 0, cy = 0, startX = 0, startY = 0;
   // The previous curve's last control point (for S/T reflections), in source coordinates.
   let lastC: [number, number] | null = null;
   let lastQ: [number, number] | null = null;
-  const X = (x: number) => r(x * sx + tx);
-  const Y = (y: number) => r(y * sy + ty);
+  const X = (x: number) => {
+    const v = r(x * sx + tx);
+    if (bounds) {
+      if (v < bounds.x0) bounds.x0 = v;
+      if (v > bounds.x1) bounds.x1 = v;
+    }
+    return v;
+  };
+  const Y = (y: number) => {
+    const v = r(y * sy + ty);
+    if (bounds) {
+      if (v < bounds.y0) bounds.y0 = v;
+      if (v > bounds.y1) bounds.y1 = v;
+    }
+    return v;
+  };
   for (const m of d.matchAll(re)) {
     const cmd = m[1]!;
     const nums = (m[2]!.match(/-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi) ?? []).map(Number);
@@ -155,7 +182,7 @@ function parseTransform(t: string | null): Affine {
 }
 
 /** Walks MathJax's SVG, collecting every path, rect and line as path data in the outer coordinate system. */
-function collect(adaptor: LiteAdaptor, node: LiteElement, m: Affine, out: string[]): void {
+function collect(adaptor: LiteAdaptor, node: LiteElement, m: Affine, out: string[], bounds: PathBounds): void {
   const kind = adaptor.kind(node);
   const attr = (k: string) => adaptor.getAttribute(node, k) as string | null;
   const num = (k: string) => Number(attr(k) ?? 0) || 0;
@@ -163,25 +190,25 @@ function collect(adaptor: LiteAdaptor, node: LiteElement, m: Affine, out: string
   if (kind === 'svg') here = compose(here, [1, 1, num('x'), num('y')]);
   if (kind === 'path') {
     const d = attr('d');
-    if (d) out.push(transformPath(d, here));
+    if (d) out.push(transformPath(d, here, bounds));
   } else if (kind === 'rect') {
     const [x, y, w, h] = [num('x'), num('y'), num('width'), num('height')];
-    if (w > 0 && h > 0) out.push(transformPath(`M${x} ${y}H${x + w}V${y + h}H${x}Z`, here));
+    if (w > 0 && h > 0) out.push(transformPath(`M${x} ${y}H${x + w}V${y + h}H${x}Z`, here, bounds));
   } else if (kind === 'line') {
     const [x1, y1, x2, y2] = [num('x1'), num('y1'), num('x2'), num('y2')];
     const sw = (Number(attr('stroke-width')) || 40) / 2;
     const len = Math.hypot(x2 - x1, y2 - y1) || 1;
     const [nx, ny] = [((y1 - y2) / len) * sw, ((x2 - x1) / len) * sw];
-    out.push(transformPath(`M${x1 + nx} ${y1 + ny}L${x2 + nx} ${y2 + ny}L${x2 - nx} ${y2 - ny}L${x1 - nx} ${y1 - ny}Z`, here));
+    out.push(transformPath(`M${x1 + nx} ${y1 + ny}L${x2 + nx} ${y2 + ny}L${x2 - nx} ${y2 - ny}L${x1 - nx} ${y1 - ny}Z`, here, bounds));
   }
   for (const child of adaptor.childNodes(node)) {
-    if (adaptor.kind(child as LiteElement) !== '#text') collect(adaptor, child as LiteElement, here, out);
+    if (adaptor.kind(child as LiteElement) !== '#text') collect(adaptor, child as LiteElement, here, out, bounds);
   }
 }
 
 /**
- * Lays out TeX with MathJax: null when it can't be rendered (a TeX error, or outlines past `MATH_LIMITS.pathChars` or
- * `maxEm`).
+ * Lays out TeX with MathJax: null when it can't be rendered (a TeX error, or outlines past `MATH_LIMITS.pathChars`, or
+ * a box or painted extent past `maxEm`).
  * `display` is display style (`$$…$$`). Throws if MathJax can't start here (the caller shows the source, uncached).
  * Every formula starts from a clean state: what one defines (`\DeclareMathOperator`, `\label`) is forgotten after it.
  */
@@ -194,10 +221,14 @@ export function renderTex(tex: string, display: boolean): MathBox | null {
     if (!svg || adaptor.kind(svg) !== 'svg' || adaptor.outerHTML(container).includes('data-mjx-error')) return null;
     const [minX = 0, minY = 0, vw = 0, vh = 0] = String(adaptor.getAttribute(svg, 'viewBox') ?? '').split(/\s+/).map(Number);
     const paths: string[] = [];
-    for (const child of adaptor.childNodes(svg)) collect(adaptor, child as LiteElement, [1, 1, -minX, 0], paths);
+    const bounds = emptyBounds();
+    for (const child of adaptor.childNodes(svg)) collect(adaptor, child as LiteElement, [1, 1, -minX, 0], paths, bounds);
     const path = paths.join('');
     const size = { w: vw / 1000, a: -minY / 1000, d: (vh + minY) / 1000 };
-    const fits = size.w <= MATH_LIMITS.maxEm && size.a + size.d <= MATH_LIMITS.maxEm;
+    // What it paints, not just its box: \smash, \rlap and negative space give a tiny box a path reaching 1000 em away.
+    const reach = (lo: number, hi: number, b0: number, b1: number) => (Math.max(hi, b1) - Math.min(lo, b0)) / 1000;
+    const painted = bounds.x0 > bounds.x1 ? { w: size.w, h: size.a + size.d } : { w: reach(0, vw, bounds.x0, bounds.x1), h: reach(minY, vh + minY, bounds.y0, bounds.y1) };
+    const fits = size.w <= MATH_LIMITS.maxEm && size.a + size.d <= MATH_LIMITS.maxEm && painted.w <= MATH_LIMITS.maxEm && painted.h <= MATH_LIMITS.maxEm;
     return path.length <= MATH_LIMITS.pathChars && fits ? { ...size, path } : null;
   } catch {
     return null;

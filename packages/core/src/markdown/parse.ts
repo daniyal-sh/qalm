@@ -1,4 +1,5 @@
 import MarkdownItCtor, { type MarkdownIt, type StateBlock, type StateInline, type Token } from 'markdown-it';
+import { MATH_LIMITS } from './limits';
 
 /**
  * The Markdown qalm renders in text boxes (with `format: 'md'`) and comments: bold, italic, strikethrough, headings,
@@ -303,64 +304,107 @@ const TEX_SYMBOLS: Record<string, string> = {
 const SUPERSCRIPT: Record<string, string> = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', n: 'ⁿ', i: 'ⁱ' };
 const SUBSCRIPT: Record<string, string> = { '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉', '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎' };
 
+/** A TeX command: a name of letters, or one other character. Sticky, so it reads in place (no slicing). */
+const TEX_COMMAND = /\\([A-Za-z]+|.)/y;
+const TEXT_COMMANDS = /^(text|mathrm|mathbf|mathit|mathsf|mathtt|mathcal|mathbb|operatorname|boldsymbol|textbf|textit|mbox)$/;
+const SIZE_COMMANDS = /^(left|right|big|Big|bigg|Bigg)$/;
+const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
+const wrapFrac = (s: string) => (s.length > 1 && /[^\w.]/.test(s) ? `(${s})` : s);
+const script = (map: Record<string, string>, mark: string, a: string) =>
+  [...a].every((ch) => map[ch]) ? [...a].map((ch) => map[ch]).join('') : `${mark}${a.length > 1 ? `(${a})` : a}`;
+
+/** An open `{…}` argument (collecting text; `depth` counts bare braces inside it) or a command waiting for arguments. */
+type Frame = { group: true; out: string; depth: number } | { group: false; need: number; args: string[]; done: (args: string[]) => string };
+
 /**
  * A readable plain form of TeX for previews (comment cards, accessibility labels): `\int_0^1 x^2\,dx` → `∫₀¹ x² dx`,
- * `\frac{a}{b}` → `a/b`. Approximate by design; unknown commands lose their backslash.
+ * `\frac{a}{b}` → `a/b`. Approximate by design; unknown commands lose their backslash. One pass with an explicit stack
+ * (linear, whatever the nesting: comments come from other users, uncapped); past `MATH_LIMITS.texChars`, which no
+ * formula renders at, the TeX is returned as it is.
  */
 export function texToPlain(tex: string): string {
-  let i = 0;
-  /** The next argument: a {group} or one character / command. */
-  const arg = (): string => {
-    while (tex[i] === ' ') i++;
-    if (tex[i] === '{') {
-      let depth = 0;
-      const start = ++i;
-      for (; i < tex.length; i++) {
-        if (tex[i] === '\\') i++;
-        else if (tex[i] === '{') depth++;
-        else if (tex[i] === '}' && depth-- === 0) break;
+  if (tex.length > MATH_LIMITS.texChars) return tex;
+  const stack: Frame[] = [{ group: true, out: '', depth: 0 }];
+  /** Hands a finished piece to the innermost frame, completing commands whose last argument it is. */
+  const give = (v: string): void => {
+    for (;;) {
+      const top = stack[stack.length - 1]!;
+      if (top.group) {
+        top.out += v;
+        return;
       }
-      const inner = tex.slice(start, i);
-      i++;
-      return texToPlain(inner);
+      top.args.push(v);
+      if (top.args.length < top.need) return;
+      stack.pop();
+      v = top.done(top.args);
     }
-    return item();
   };
-  const script = (map: Record<string, string>, mark: string) => {
-    const a = arg();
-    const all = [...a].every((ch) => map[ch]);
-    return all ? [...a].map((ch) => map[ch]).join('') : `${mark}${a.length > 1 ? `(${a})` : a}`;
-  };
-  const item = (): string => {
-    const ch = tex[i];
-    if (ch === undefined) return '';
+  const command = (need: number, done: (args: string[]) => string) => stack.push({ group: false, need, args: [], done });
+  let i = 0;
+  while (i < tex.length) {
+    const top = stack[stack.length - 1]!;
+    const ch = tex[i]!;
+    if (!top.group) {
+      // A command's argument: a {group}, or the next character or command.
+      if (ch === ' ') {
+        i++;
+        continue;
+      }
+      if (ch === '{') {
+        i++;
+        stack.push({ group: true, out: '', depth: 0 });
+        continue;
+      }
+      if (ch === '}') {
+        let g = stack.length - 1;
+        while (!stack[g]!.group) g--;
+        const group = stack[g] as { depth: number };
+        if (g > 0 && group.depth === 0) {
+          // The enclosing argument ends here: its unfinished commands get empty arguments (then it closes).
+          while (stack.length - 1 > g) give('');
+          continue;
+        }
+        // Otherwise it's an empty argument, closing a bare brace of the group if one is open.
+        if (group.depth > 0) group.depth--;
+        i++;
+        give('');
+        continue;
+      }
+    } else if (ch === '}' && top.depth === 0 && stack.length > 1) {
+      // The end of an argument group.
+      i++;
+      stack.pop();
+      give(squash(top.out));
+      continue;
+    } else if (ch === '{' || ch === '}') {
+      // Bare braces group nothing in a preview: dropped (kept count of, so the argument ends at its own brace).
+      i++;
+      top.depth += ch === '{' ? 1 : -1;
+      if (top.depth < 0) top.depth = 0;
+      continue;
+    }
     if (ch === '\\') {
-      const m = /^\\([A-Za-z]+|.)/.exec(tex.slice(i));
-      const name = m?.[1] ?? '';
+      TEX_COMMAND.lastIndex = i;
+      const name = TEX_COMMAND.exec(tex)?.[1] ?? '';
       i += 1 + name.length;
-      if (name === 'frac' || name === 'dfrac' || name === 'tfrac') {
-        const a = arg();
-        const b = arg();
-        const wrap = (s: string) => (s.length > 1 && /[^\w.]/.test(s) ? `(${s})` : s);
-        return `${wrap(a)}/${wrap(b)}`;
-      }
-      if (name === 'sqrt') {
-        const a = arg();
-        return `√${a.length > 1 ? `(${a})` : a}`;
-      }
-      if (/^(text|mathrm|mathbf|mathit|mathsf|mathtt|mathcal|mathbb|operatorname|boldsymbol|textbf|textit|mbox)$/.test(name)) return arg();
-      if (name === 'left' || name === 'right' || name === 'big' || name === 'Big' || name === 'bigg' || name === 'Bigg') return '';
-      if (name in TEX_SYMBOLS) return TEX_SYMBOLS[name]!;
-      return name;
+      if (name === 'frac' || name === 'dfrac' || name === 'tfrac') command(2, ([a, b]) => `${wrapFrac(a!)}/${wrapFrac(b!)}`);
+      else if (name === 'sqrt') command(1, ([a]) => `√${a!.length > 1 ? `(${a})` : a}`);
+      else if (TEXT_COMMANDS.test(name)) command(1, ([a]) => a!);
+      else give(SIZE_COMMANDS.test(name) ? '' : (TEX_SYMBOLS[name] ?? name));
+      continue;
     }
     i++;
-    if (ch === '^') return script(SUPERSCRIPT, '^');
-    if (ch === '_') return script(SUBSCRIPT, '_');
-    if (ch === '{' || ch === '}') return '';
-    if (ch === '~') return ' ';
-    return ch;
-  };
-  let out = '';
-  while (i < tex.length) out += item();
-  return out.replace(/\s+/g, ' ').trim();
+    if (ch === '^') command(1, ([a]) => script(SUPERSCRIPT, '^', a!));
+    else if (ch === '_') command(1, ([a]) => script(SUBSCRIPT, '_', a!));
+    else give(ch === '~' ? ' ' : ch === '{' || ch === '}' ? '' : ch);
+  }
+  // Unclosed groups end with the text; commands short of arguments get empty ones.
+  while (stack.length > 1) {
+    const top = stack[stack.length - 1]!;
+    if (top.group) {
+      stack.pop();
+      give(squash(top.out));
+    } else give('');
+  }
+  return squash((stack[0] as { out: string }).out);
 }

@@ -38,7 +38,19 @@ export interface MdLayout {
   height: number;
   /** Has maths drawn as placeholders because MathJax hasn't loaded yet (see `onMathDeferred`). */
   pending?: true;
+  /**
+   * Cut short: some maths shows its source for now (deferred by the time slice, or past a budget). Not cached; a later
+   * call fills it in (`onMathDeferred`). Views redraw only boxes that were incomplete.
+   */
+  partial?: true;
 }
+
+/**
+ * Formulas one text box or comment has resolved, by TeX (`D`/`I` + TeX): their outlines, or null for a final "show the
+ * source" (a TeX error, a cap). Kept across fill-in passes, so a box's progress never goes backwards when the shared
+ * formula cache evicts what it needs (a long thread or a page of heavy boxes can need more than it holds).
+ */
+export type MathMemo = Map<string, MathBox | null>;
 
 /** Heading sizes, as multiples of the box's font size (h1 … h6). */
 const HEADING = [1.5, 1.3, 1.15, 1, 1, 1];
@@ -87,10 +99,18 @@ const TAB = '    ';
  * A formula within the box's allowance (count, TeX and path size), else null: its source is shown. `undefined` while
  * MathJax loads (a placeholder): it counts against the allowance now, and its path once it's rendered.
  */
-function allowedFormula(allow: MathAllowance, tex: string, display: boolean): MathBox | null | undefined {
+function allowedFormula(allow: MathAllowance, tex: string, display: boolean, memo?: MathMemo): MathBox | null | undefined {
   if (!allow(tex)) return null;
-  const box = texToPath(tex, display);
-  if (box === undefined) return undefined;
+  const key = `${display ? 'D' : 'I'}${tex}`;
+  let box: MathBox | null | undefined;
+  if (memo?.has(key)) box = memo.get(key)!;
+  else {
+    const skippedBefore = mathSkipped();
+    box = texToPath(tex, display);
+    if (box === undefined) return undefined;
+    // Resolved for good (an outline, or a final null), not just deferred for now (the slice, a budget).
+    if (memo && mathSkipped() === skippedBefore) memo.set(key, box);
+  }
   return box && allow.fits(box) ? box : null;
 }
 
@@ -124,7 +144,7 @@ function pieces(ctx: Ctx, c: readonly MdInline[], size: number, bold: boolean): 
   for (const x of c) {
     if (x.t === 'br') out.push(null);
     else if (x.t === 'math') {
-      const box = allowedFormula(ctx.allow, x.tex, false);
+      const box = allowedFormula(ctx.allow, x.tex, false, ctx.memo);
       if (box) {
         const z = size * MATH_SCALE;
         out.push({ kind: 'math', m: x.m, w: box.w * z, a: Math.max(size, box.a * z + 0.15 * size), d: Math.max(size * (TEXT_LINE_HEIGHT - 1), box.d * z + 0.1 * size), math: { d: box.path, s: z / 1000 } });
@@ -137,12 +157,17 @@ function pieces(ctx: Ctx, c: readonly MdInline[], size: number, bold: boolean): 
         if (!part) continue;
         if (part.startsWith(' ') && !x.m.code) out.push({ kind: 'space', m: x.m, w: textWidth(part, font, z), a: 0, d: 0, text: part, font, size: z });
         else if (x.m.code || !IDEOGRAPH.test(part)) out.push(wordPiece(part, x.m, font, z));
-        else
-          part.split(IDEOGRAPH).forEach((seg, k, all) => {
+        else {
+          // A break after each segment but the last non-empty one (found once: linear in the part).
+          const segs = part.split(IDEOGRAPH);
+          let last = segs.length - 1;
+          while (last >= 0 && !segs[last]) last--;
+          segs.forEach((seg, k) => {
             if (!seg) return;
             out.push(wordPiece(seg, x.m, font, z));
-            if (all.slice(k + 1).some(Boolean)) out.push({ ...BREAK, m: x.m, font, size: z });
+            if (k < last) out.push({ ...BREAK, m: x.m, font, size: z });
           });
+        }
       }
     }
   }
@@ -254,6 +279,8 @@ interface Ctx {
   allow: MathAllowance;
   /** Some maths is a placeholder (MathJax not loaded yet). */
   pending?: boolean;
+  /** The box's resolved formulas, kept while its layout is incomplete (`partials`). */
+  memo: MathMemo;
 }
 
 /** Text at (x, baseline y) as ops, split by font (the maths font, fallback runs); returns the width. */
@@ -365,7 +392,7 @@ function layBlock(ctx: Ctx, b: MdBlock, x: number, y: number, width: number, S: 
       return h;
     }
     case 'math': {
-      const box = allowedFormula(ctx.allow, b.tex, true);
+      const box = allowedFormula(ctx.allow, b.tex, true, ctx.memo);
       if (box === undefined) {
         const pad = S * 0.25;
         return flowPieces(ctx, pendingPieces(ctx, `$$${b.tex}$$`, {}, S), x, y + pad, width, S, true) + 2 * pad;
@@ -424,13 +451,17 @@ export function layoutMarkdown(text: string, width: number, fontSize: number): M
     return hit.layout;
   }
   const skippedBefore = mathSkipped();
-  const ctx: Ctx = { ops: [], allow: mathAllowance() };
+  const memo = partials.take(key);
+  const ctx: Ctx = { ops: [], allow: mathAllowance(), memo };
   const w = Math.max(1, width);
   const height = Math.max(fontSize * TEXT_LINE_HEIGHT, layBlocks(ctx, parseMarkdown(text), 0, 0, w, fontSize, 0));
   const out: MdLayout = ctx.pending ? { ops: ctx.ops, height, pending: true } : { ops: ctx.ops, height };
-  // Cut short (a budget, the time slice, no placeholders): not kept, so a later call fills it in. A cached placeholder
-  // layout stays until a complete one replaces it.
-  if (mathSkipped() !== skippedBefore) return out;
+  // Cut short (a budget, the time slice, no placeholders): not kept, so a later call fills it in, keeping the formulas
+  // this one resolved (`partials`). A cached placeholder layout stays until a complete one replaces it.
+  if (mathSkipped() !== skippedBefore) {
+    partials.keep(key, memo);
+    return { ...out, partial: true };
+  }
   const size = layoutSize(out);
   if (hit) {
     cache.delete(key);
@@ -445,6 +476,40 @@ export function layoutMarkdown(text: string, width: number, fontSize: number): M
   }
   return out;
 }
+
+/**
+ * Incomplete layouts' resolved formulas (`MathMemo`), by layout key, most recently used last: bounded like the layout
+ * cache (a memo holds at most a box's 1 MB of path). Dropped once the layout completes and is cached.
+ */
+const partials = (() => {
+  const memos = new Map<string, { memo: MathMemo; size: number }>();
+  let chars = 0;
+  const sizeOf = (m: MathMemo) => {
+    let n = 0;
+    for (const [k, b] of m) n += k.length + (b?.path.length ?? 0);
+    return n;
+  };
+  return {
+    /** The memo for `key` (a new one if none), removed until `keep`. */
+    take(key: string): MathMemo {
+      const e = memos.get(key);
+      if (!e) return new Map();
+      memos.delete(key);
+      chars -= e.size;
+      return e.memo;
+    },
+    keep(key: string, memo: MathMemo): void {
+      const size = sizeOf(memo);
+      memos.set(key, { memo, size });
+      chars += size;
+      while (memos.size > LAYOUT_CACHE.count || chars > LAYOUT_CACHE.chars) {
+        const [k, old] = memos.entries().next().value!;
+        memos.delete(k);
+        chars -= old.size;
+      }
+    },
+  };
+})();
 
 const timers = globalThis as unknown as { setTimeout(fn: () => void, ms: number): unknown };
 
@@ -474,12 +539,18 @@ export async function layoutMarkdownSettled(text: string, width: number, fontSiz
 }
 
 /**
- * The formulas of a parsed comment that may be rendered (`MATH_LIMITS` per comment, in reading order; this renders them,
- * so under a time slice some may come later); the rest show their source. The comment renderer's equivalent of a box
- * layout's maths allowance. Formulas waiting on MathJax are included (the renderer shows their placeholder); the set is
- * recomputed when `onMathDeferred` fires, which it does once MathJax has loaded.
+ * The formulas of a parsed comment that may be rendered, with their outlines (`MATH_LIMITS` per comment, in reading
+ * order; this renders them, so under a time slice some may come later); the rest show their source. The comment
+ * renderer's equivalent of a box layout's maths allowance, drawn from these boxes (not looked up again). Formulas
+ * waiting on MathJax map to `undefined` (the renderer shows their placeholder). `memo`: the comment's resolved formulas,
+ * kept across renders so filling in always progresses; recompute when `onMathDeferred` fires.
  */
-export function allowedMath(blocks: readonly MdBlock[]): Set<MdMath> {
+export function allowedMath(blocks: readonly MdBlock[], memo?: MathMemo): Map<MdMath, MathBox | undefined> {
   const allow = mathAllowance();
-  return new Set(mathInOrder(blocks).filter((x) => allowedFormula(allow, x.tex, x.t === 'math' && !('m' in x)) !== null));
+  const out = new Map<MdMath, MathBox | undefined>();
+  for (const x of mathInOrder(blocks)) {
+    const box = allowedFormula(allow, x.tex, !('m' in x), memo);
+    if (box !== null) out.set(x, box);
+  }
+  return out;
 }

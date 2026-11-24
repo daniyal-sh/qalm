@@ -1,4 +1,5 @@
 import { hasRtl } from './fonts';
+import { MATH_LIMITS } from './limits';
 import { parseMarkdown, type MdBlock, type MdInline } from './parse';
 import type { Item } from '../types';
 
@@ -21,27 +22,7 @@ export interface MathBox {
   path: string;
 }
 
-/**
- * Limits on maths, so one box or comment (synced, or written by an agent) can't stall the app, PDF export or the
- * Worker: MathJax is synchronous, so the only defence is what it's given. Past a limit the TeX source is shown instead.
- */
-export const MATH_LIMITS = {
-  /** TeX characters in one formula. */
-  texChars: 1000,
-  /** Path data of one formula (~200 KB); `x+x+…` at 1000 characters makes ~500 KB. */
-  pathChars: 200_000,
-  /** Formulas rendered per text box or comment (`mathAllowance`). */
-  perDoc: 30,
-  /** TeX characters rendered per text box or comment, in total (~0.3 s of MathJax at worst, on a desktop). */
-  docChars: 5000,
-  /** Path data per text box or comment, in total (~1 MB; 30 formulas at the per-formula cap would be ~6 MB). */
-  docPathChars: 1_000_000,
-  /** Largest width or height of one formula, in em (`\rule{1pt}{100000em}` would make a box too tall to select). */
-  maxEm: 50,
-  /** MathJax's own limits: macro expansions per formula, and the size its input may grow to while expanding. */
-  maxMacros: 500,
-  maxBuffer: 4 * 1024,
-} as const;
+export { MATH_LIMITS } from './limits';
 
 type Renderer = (tex: string, display: boolean) => MathBox | null;
 /** A formula in parsed Markdown: inline (`$…$`) or a block (`$$…$$`). */
@@ -218,6 +199,8 @@ let sliceMs: number | null = null;
 let sliceUntil = 0;
 let sliceOpen = false;
 let sliceDeferred = false;
+/** Formulas rendered (new) in the current task: a task that deferred maths but rendered none made no progress. */
+let renderedInTask = 0;
 let deferredEpoch = 0;
 const deferredListeners = new Set<() => void>();
 const timers = globalThis as unknown as { setTimeout(fn: () => void, ms: number): unknown };
@@ -246,9 +229,12 @@ function notifyDeferred(): void {
 
 function endSlice(): void {
   sliceOpen = false;
+  const progressed = renderedInTask > 0;
+  renderedInTask = 0;
   if (!sliceDeferred) return;
   sliceDeferred = false;
-  notifyDeferred();
+  // Another pass only helps if this one resolved something (renderers keep what they resolved: `MathMemo`).
+  if (progressed) notifyDeferred();
 }
 
 /** True when the current task's slice is spent (and notes that maths was deferred). */
@@ -257,6 +243,7 @@ function sliceSpent(): boolean {
   if (!sliceOpen) {
     // The first new formula of a task always runs (each is capped), so filling in always makes progress.
     sliceOpen = true;
+    renderedInTask = 0;
     sliceUntil = now() + sliceMs;
     timers.setTimeout(endSlice, 0);
     return false;
@@ -305,6 +292,7 @@ export function texToPath(tex: string, display: boolean): MathBox | null | undef
   let box: MathBox | null;
   try {
     box = render(tex, display);
+    renderedInTask++;
   } catch {
     // MathJax couldn't start here: show sources (not cached, so a later call may try again).
     return null;

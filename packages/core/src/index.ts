@@ -98,7 +98,7 @@ export {
 } from './qink';
 export { threadBox, anchorInkRemoved } from './anchor';
 export { parseMarkdown, markdownToPlain, safeHref, texToPlain, type MdBlock, type MdInline, type Marks } from './markdown/parse';
-export { allowedMath, layoutMarkdown, layoutMarkdownSettled, rendersMarkdown, LAYOUT_VERSION, LAYOUT_CACHE, type MdLayout, type MdOp } from './markdown/layout';
+export { allowedMath, layoutMarkdown, layoutMarkdownSettled, rendersMarkdown, LAYOUT_VERSION, LAYOUT_CACHE, type MathMemo, type MdLayout, type MdOp } from './markdown/layout';
 export {
   texToPath,
   withMathBudget,

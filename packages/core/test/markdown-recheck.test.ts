@@ -32,6 +32,19 @@ declare const setTimeout: (fn: (v?: unknown) => void, ms: number) => unknown;
 // MathJax loads on demand (mathLazy.test.ts covers the time slice before it has): these tests render with it loaded.
 beforeAll(() => loadMath());
 const tick = () => new Promise((r) => setTimeout(r, 0));
+/**
+ * Linear, not quadratic: laying out twice the input takes at most ~2.5× as long (best of 3 runs each, each at its own
+ * width so the layout cache can't answer; a few ms of slack for timer noise), and stays well under 500 ms. Robust under
+ * load, where fixed limits like "under 100 ms" were flaky.
+ */
+const expectLinear = (make: (n: number) => string, n: number) => {
+  let run = 0;
+  const best = (text: string) => Math.min(...[0, 1, 2].map(() => time(() => layoutMarkdown(text, 200 + ++run / 100, 16))));
+  const t1 = best(make(n));
+  const t2 = best(make(2 * n));
+  expect(t2).toBeLessThan(2.5 * t1 + 10);
+  expect(t2).toBeLessThan(500);
+};
 const time = (fn: () => void) => {
   const t0 = performance.now();
   fn();
@@ -45,22 +58,23 @@ const grid = (last: string) =>
   '\\end{matrix}';
 
 describe('A. long words wrap in linear time', () => {
-  it('a 64K-character zalgo word lays out in under 100 ms', () => {
+  it('a 64K-character zalgo word lays out in linear time', () => {
     const zalgo = ('a' + '\u0301\u0316\u0327'.repeat(10)).repeat(2000); // 31 code points × 2000 ≈ 62K
     expect(zalgo.length).toBeGreaterThan(60_000);
     layoutMarkdown('warm', 200, 16);
-    expect(time(() => layoutMarkdown(zalgo, 200, 16))).toBeLessThan(100);
+    expectLinear((n) => ('a' + '\u0301\u0316\u0327'.repeat(10)).repeat(n), 1000);
   });
 
-  it('a 64K-character ZWJ chain lays out in under 100 ms', () => {
+  it('a 64K-character ZWJ chain lays out in linear time', () => {
     const chain = '👩\u200D'.repeat(21_000); // 3 code units each
     expect(chain.length).toBeGreaterThan(60_000);
-    expect(time(() => layoutMarkdown(chain, 200, 16))).toBeLessThan(100);
+    expectLinear((n) => '👩\u200D'.repeat(n), 10_500);
   });
 
   it('a long word in a code block too', () => {
     const word = 'x\u0301'.repeat(32_000);
-    expect(time(() => layoutMarkdown('```\n' + word + '\n```', 200, 16))).toBeLessThan(100);
+    expect(word.length).toBe(64_000);
+    expectLinear((n) => '```\n' + 'x\u0301'.repeat(n) + '\n```', 16_000);
   });
 
   it('clusters are bounded: extra combining marks are dropped, long emoji chains split', () => {

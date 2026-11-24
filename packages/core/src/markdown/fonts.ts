@@ -41,21 +41,43 @@ export function fontHas(font: MdFont, cp: number): boolean {
 const ATTACHES = /^[\p{M}\u200D\uFE00-\uFE0F\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}]$/u;
 const MARK = /^\p{M}$/u;
 const ZWJ = 0x200d;
+/** Regional indicators: a pair of them is one flag (🇫🇷). */
+const isRegional = (cp: number) => cp >= 0x1f1e6 && cp <= 0x1f1ff;
 /** Combining marks kept per character: "zalgo" text stacks hundreds, which would all land on one spot anyway. */
 export const MAX_MARKS = 8;
 /** Code points per cluster: a longer emoji (ZWJ) sequence starts a new cluster rather than growing one forever. */
 export const MAX_CLUSTER = 32;
 
 /**
- * Splits text into rough grapheme clusters (never between a character and its marks, or inside an emoji sequence),
- * dropping combining marks past `MAX_MARKS` on one character. Linear in the text: each cluster is bounded.
+ * Splits text into rough grapheme clusters (never between a character and its marks, inside an emoji sequence, or
+ * between the two halves of a flag), dropping combining marks past `MAX_MARKS` on one character. Linear in the text:
+ * each cluster is bounded.
  */
 export function clusters(text: string): string[] {
   const out: string[] = [];
   let prevZwj = false;
   let size = 0;
   let marks = 0;
+  /** The last cluster is one regional indicator, waiting for its pair. */
+  let halfFlag = false;
   for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    if (isRegional(cp)) {
+      if (halfFlag) {
+        out[out.length - 1] += ch;
+        size++;
+        halfFlag = false;
+        prevZwj = false;
+        continue;
+      }
+      out.push(ch);
+      size = 1;
+      marks = 0;
+      prevZwj = false;
+      halfFlag = true;
+      continue;
+    }
+    halfFlag = false;
     const mark = MARK.test(ch);
     if (out.length && (prevZwj || mark || ATTACHES.test(ch))) {
       if (mark && marks >= MAX_MARKS) continue;
