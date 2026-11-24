@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { PDFDocument } from 'pdf-lib';
 import {
@@ -14,6 +14,7 @@ import {
   onMathDeferred,
   setFallbackTextMeasure,
   setMathTimeSlice,
+  loadMath,
   texToPath,
   texToPlain,
   textMetricsEpoch,
@@ -27,6 +28,9 @@ import { newNotebook } from './helpers';
 
 declare const performance: { now(): number };
 declare const setTimeout: (fn: (v?: unknown) => void, ms: number) => unknown;
+
+// MathJax loads on demand (mathLazy.test.ts covers the time slice before it has): these tests render with it loaded.
+beforeAll(() => loadMath());
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const time = (fn: () => void) => {
   const t0 = performance.now();

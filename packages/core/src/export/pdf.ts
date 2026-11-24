@@ -11,6 +11,7 @@ import type { Page } from '../model/page';
 import { FIGTREE_REGULAR_B64 } from './figtreeFont';
 import { FONT_B_B64, FONT_BI_B64, FONT_I_B64, FONT_M_B64, FONT_X_B64 } from '../markdown/fontData';
 import { layoutMarkdownSettled, rendersMarkdown } from '../markdown/layout';
+import { loadMathFor } from '../markdown/math';
 import { clusters, isZeroWidth, type MdFont } from '../markdown/fonts';
 import type { TextItem } from '../types';
 
@@ -67,9 +68,13 @@ const MD_FONT_B64: Record<Exclude<MdFont, 'r'>, string> = { b: FONT_B_B64, i: FO
 
 /**
  * Draws a Markdown text box (`format: 'md'`) from its layout, the same ops the page draws: text runs in their fonts,
- * tints and rules as rectangles, maths as paths. `font` embeds each font on first use.
+ * tints and rules as rectangles, maths as paths. `font` embeds each font on first use. A box with maths loads MathJax
+ * first (on demand: `math.ts`), so the export never has maths' placeholder. If it can't load (offline web, a chunk gone
+ * after a deploy), maths is drawn as its TeX source, as a TeX error is, and the export still succeeds; `math.failed`
+ * keeps the rest of the export from trying again for every box.
  */
-async function drawMarkdown(out: PDFPage, H: number, item: TextItem, font: (f: MdFont) => Promise<PDFFont>): Promise<void> {
+async function drawMarkdown(out: PDFPage, H: number, item: TextItem, font: (f: MdFont) => Promise<PDFFont>, math: { failed: boolean }): Promise<void> {
+  if (!math.failed) await loadMathFor([item]).catch(() => void (math.failed = true));
   const color = parseColor(item.color);
   const rot = item.rot ?? 0;
   const [cos, sin] = [Math.cos(rot), Math.sin(rot)];
@@ -77,12 +82,12 @@ async function drawMarkdown(out: PDFPage, H: number, item: TextItem, font: (f: M
   const at = (u: number, v: number) => ({ x: item.x + u * cos - v * sin, y: H - (item.y + u * sin + v * cos) });
   const rotate = rot ? { rotate: degrees((-rot * 180) / Math.PI) } : {};
   // Every formula, even if the app's time slice defers some (it yields between slices instead of freezing).
-  const { ops } = await layoutMarkdownSettled(item.text, item.w, item.fontSize);
+  const { ops } = await layoutMarkdownSettled(item.text, item.w, item.fontSize, { mathFailed: math.failed });
   for (const op of ops) {
     if (op.k === 'text') {
       // Text no bundled font has draws as `?` (one per character), as plain boxes do; zero-width characters as nothing.
       const text = op.fallback ? clusters(op.text).filter((c) => !isZeroWidth(c)).map(() => '?').join('') : op.text;
-      if (text) out.drawText(text, { ...at(op.x, op.y), size: op.size, font: await font(op.font), color, ...rotate });
+      if (text) out.drawText(text, { ...at(op.x, op.y), size: op.size, font: await font(op.font), color, ...(op.alpha !== undefined ? { opacity: op.alpha } : {}), ...rotate });
     }
     else if (op.k === 'rect') out.drawRectangle({ ...at(op.x, op.y + op.h), width: op.w, height: op.h, color, ...(op.alpha < 1 ? { opacity: op.alpha } : {}), ...rotate });
     else out.drawSvgPath(op.d, { ...at(op.x, op.y), scale: op.s, color, borderWidth: 0, ...rotate });
@@ -131,6 +136,7 @@ export async function exportPdf(
   };
   // Markdown boxes' fonts, each embedded (subset) on first use.
   const mdFonts = new Map<MdFont, Promise<PDFFont>>();
+  const mdMath = { failed: false };
   const mdFont = (f: MdFont) => {
     let p = mdFonts.get(f);
     if (!p) mdFonts.set(f, (p = pdf.embedFont(f === 'r' ? figtreeBytes() : fromBase64(MD_FONT_B64[f]), { subset: true, features: NO_LIGATURES })));
@@ -208,7 +214,7 @@ export async function exportPdf(
         }
         case 'text': {
           if (rendersMarkdown(item)) {
-            await drawMarkdown(out, H, item, mdFont);
+            await drawMarkdown(out, H, item, mdFont, mdMath);
             break;
           }
           const fs = await textFonts();

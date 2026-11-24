@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { PDFDict, PDFDocument, PDFName } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
-import { Page, exportPdf, itemBBox, layoutMarkdown, markdownToPlain, parseMarkdown, renderPageSvg, safeHref, texToPath, textHeight, textWidth, fontRuns, type TextItem } from '../src';
+import { Page, exportPdf, itemBBox, layoutMarkdown, loadMath, markdownToPlain, parseMarkdown, renderPageSvg, safeHref, texToPath, textHeight, textWidth, fontRuns, type TextItem } from '../src';
 import { renderRegionsSvg } from '../src/render/regions';
-import { transformPath } from '../src/markdown/math';
+import { transformPath } from '../src/markdown/mathjax';
 import { FONT_ADVANCES } from '../src/markdown/fontMetrics';
 import { FONT_B_B64, FONT_BI_B64, FONT_I_B64, FONT_M_B64, FONT_X_B64 } from '../src/markdown/fontData';
 import { newNotebook } from './helpers';
@@ -13,6 +13,9 @@ declare const process: { getBuiltinModule(m: 'node:fs'): { readFileSync(path: st
 declare const Buffer: { from(s: string, enc: 'base64'): Uint8Array };
 
 const box = (text: string, extra: Partial<TextItem> = {}): TextItem => ({ id: 't', type: 'text', x: 40, y: 60, w: 240, text, fontSize: 16, color: '#27272a', format: 'md', ...extra });
+
+// MathJax loads on demand (mathLazy.test.ts covers before it has): these tests lay maths out with it loaded.
+beforeAll(() => loadMath());
 
 describe('parseMarkdown', () => {
   it('reads the supported syntax', () => {

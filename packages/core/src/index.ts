@@ -99,6 +99,24 @@ export {
 export { threadBox, anchorInkRemoved } from './anchor';
 export { parseMarkdown, markdownToPlain, safeHref, texToPlain, type MdBlock, type MdInline, type Marks } from './markdown/parse';
 export { allowedMath, layoutMarkdown, layoutMarkdownSettled, rendersMarkdown, LAYOUT_VERSION, LAYOUT_CACHE, type MdLayout, type MdOp } from './markdown/layout';
-export { texToPath, withMathBudget, mathAllowance, setMathTimeSlice, onMathDeferred, mathDeferredEpoch, MATH_LIMITS, type MathAllowance, type MathBox } from './markdown/math';
+export {
+  texToPath,
+  withMathBudget,
+  withoutMathPlaceholders,
+  mathAllowance,
+  setMathTimeSlice,
+  onMathDeferred,
+  mathDeferredEpoch,
+  loadMath,
+  loadMathFor,
+  requestMath,
+  mathReady,
+  onMathReady,
+  markdownNeedsMath,
+  MATH_LIMITS,
+  type MathAllowance,
+  type MathBox,
+  type MdMath,
+} from './markdown/math';
 export { MD_FONTS, clusters, fontRuns, hasRtl, isZeroWidth, setFallbackTextMeasure, textMetricsEpoch, textWidth, type FallbackMeasure, type FontRun, type MdFont } from './markdown/fonts';
 export { markdownSvg } from './render/svg';

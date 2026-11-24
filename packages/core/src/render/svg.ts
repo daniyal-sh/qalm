@@ -32,11 +32,15 @@ const SVG_FONT: Record<MdFont, string> = {
   x: 'font-family="Noto Sans Math"',
 };
 
-/** A Markdown text box (`format: 'md'`) as SVG: its layout's ops, in `color`. */
+/**
+ * A Markdown text box (`format: 'md'`) as SVG: its layout's ops, in `color`. Synchronous: maths MathJax hasn't loaded
+ * for yet draws as its placeholder (raw TeX, muted), so callers that need the real maths `await loadMathFor([item])`
+ * first (MathJax loads on demand: `markdown/math.ts`).
+ */
 export function markdownSvg(item: Pick<TextItem, 'x' | 'y' | 'w' | 'text' | 'fontSize' | 'rot'>, color: string): string {
   const fill = escapeXml(color);
   const parts = layoutMarkdown(item.text, item.w, item.fontSize).ops.map((op) => {
-    if (op.k === 'text') return `<text x="${n(op.x)}" y="${n(op.y)}" ${SVG_FONT[op.font]} font-size="${n(op.size)}" xml:space="preserve">${escapeXml(op.text)}</text>`;
+    if (op.k === 'text') return `<text x="${n(op.x)}" y="${n(op.y)}" ${SVG_FONT[op.font]} font-size="${n(op.size)}"${op.alpha !== undefined ? ` fill-opacity="${n(op.alpha)}"` : ''} xml:space="preserve">${escapeXml(op.text)}</text>`;
     if (op.k === 'rect') return `<rect x="${n(op.x)}" y="${n(op.y)}" width="${n(op.w)}" height="${n(op.h)}"${op.alpha < 1 ? ` fill-opacity="${n(op.alpha)}"` : ''}/>`;
     return `<path transform="translate(${n(op.x)} ${n(op.y)}) scale(${op.s.toFixed(5)})" d="${op.d}"/>`;
   });
@@ -78,6 +82,8 @@ export function itemSvg(item: Item, opts: { assetUrl?: (id: string) => string; i
 /**
  * Renders a page as SVG in page units. Draws the paper (unless `paper: false`) and items in z-order.
  * PDF backgrounds are not drawn (rasterising PDFs is platform work); such pages get a plain white background.
+ * Markdown boxes' maths needs MathJax, loaded on demand: `await loadMathFor(page.items())` first, or it draws as its
+ * placeholder.
  */
 export function renderPageSvg(info: PageInfo, page: Page, opts: { paper?: boolean; assetUrl?: (id: string) => string } = {}): string {
   const { w, h } = info.size;

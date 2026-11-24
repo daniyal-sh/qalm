@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { PDFDocument } from 'pdf-lib';
 import {
@@ -18,6 +18,7 @@ import {
   textMetricsEpoch,
   textWidth,
   withMathBudget,
+  loadMath,
   MATH_LIMITS,
   type TextItem,
 } from '../src';
@@ -25,6 +26,9 @@ import { MATH_CACHE } from '../src/markdown/math';
 import { newNotebook } from './helpers';
 
 declare const performance: { now(): number };
+
+// MathJax loads on demand (mathLazy.test.ts covers the limits before it has): these tests render with it loaded.
+beforeAll(() => loadMath());
 
 const box = (text: string, extra: Partial<TextItem> = {}): TextItem => ({ id: 't', type: 'text', x: 40, y: 60, w: 240, text, fontSize: 16, color: '#27272a', format: 'md', ...extra });
 const paths = (text: string, w = 400) => layoutMarkdown(text, w, 16).ops.filter((o) => o.k === 'path').length;

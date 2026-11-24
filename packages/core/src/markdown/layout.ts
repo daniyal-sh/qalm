@@ -1,6 +1,6 @@
 import { TEXT_LINE_HEIGHT } from '../geometry/textConstants';
 import { clusters, fontRuns, hasRtl, textMetricsEpoch, textWidth, type MdFont } from './fonts';
-import { mathAllowance, mathSkipped, texToPath, type MathAllowance, type MathBox } from './math';
+import { loadMath, mathAllowance, mathInOrder, mathPlaceholdersOn, mathReady, mathSkipped, requestMath, texToPath, withoutMathPlaceholders, type MathAllowance, type MathBox, type MdMath } from './math';
 import { parseMarkdown, type Marks, type MdBlock, type MdInline } from './parse';
 import type { TextItem } from '../types';
 
@@ -16,13 +16,18 @@ export function rendersMarkdown(item: Pick<TextItem, 'text' | 'format'>): boolea
  * Lays out a Markdown text box into draw ops in box-local units (x right, y down from the top-left corner), measured
  * with the real fonts' advances (`fonts.ts`). Skia (the page), pdf-lib (PDF export) and SVG (agents' crops) only draw
  * these ops, so the three look and wrap the same. Every op is in the box's colour; `alpha` makes tints.
+ *
+ * Maths needs MathJax, which loads on demand (`math.ts`): until it has, a formula is laid out as its raw TeX in muted
+ * monospace (`pending`), and the cached layout is replaced once MathJax is ready. PDF export and agents' crops load
+ * MathJax first, so they never draw the placeholder.
  */
 export type MdOp =
   /**
    * A run of text in one font; `y` is its baseline. `fallback`: no bundled font has it (`fonts.ts`), so it's drawn in
-   * `font`'s style by a fallback (the page: a Skia Paragraph; PDF: `?`, as plain boxes).
+   * `font`'s style by a fallback (the page: a Skia Paragraph; PDF: `?`, as plain boxes). `alpha` (missing = 1) mutes
+   * maths' placeholder.
    */
-  | { k: 'text'; x: number; y: number; text: string; font: MdFont; size: number; fallback?: true }
+  | { k: 'text'; x: number; y: number; text: string; font: MdFont; size: number; fallback?: true; alpha?: number }
   /** A filled rectangle: code backgrounds, quote bars, rules, underlines and strike-throughs. */
   | { k: 'rect'; x: number; y: number; w: number; h: number; alpha: number }
   /** Maths outlines: `d` (`MathBox.path`, 1/1000 em, y down) scaled by `s` and placed with its baseline at (x, y). */
@@ -31,6 +36,8 @@ export type MdOp =
 export interface MdLayout {
   ops: MdOp[];
   height: number;
+  /** Has maths drawn as placeholders because MathJax hasn't loaded yet (see `onMathDeferred`). */
+  pending?: true;
 }
 
 /** Heading sizes, as multiples of the box's font size (h1 … h6). */
@@ -41,6 +48,8 @@ const CODE_SCALE = 0.9;
 const TINT = 0.1;
 /** TeX's Computer Modern is smaller than Figtree at the same size: maths is drawn this much larger to match. */
 const MATH_SCALE = 1.15;
+/** Opacity of the raw TeX shown until MathJax has loaded. */
+const PENDING_ALPHA = 0.55;
 
 const markFont = (m: Marks, bold: boolean): MdFont => {
   if (m.code) return 'm';
@@ -61,6 +70,8 @@ interface Piece {
   size?: number;
   /** Code spans' padding on each side. */
   pad?: number;
+  /** Text opacity (maths' placeholder); missing = 1. */
+  alpha?: number;
   math?: { d: string; s: number };
 }
 
@@ -72,11 +83,34 @@ function wordPiece(text: string, m: Marks, font: MdFont, size: number): Piece {
 /** A tab is laid out as four spaces (no font has a glyph for it). */
 const TAB = '    ';
 
-/** A formula within the box's allowance (count, TeX and path size), else null: its source is shown. */
-function allowedFormula(allow: MathAllowance, tex: string, display: boolean): MathBox | null {
+/**
+ * A formula within the box's allowance (count, TeX and path size), else null: its source is shown. `undefined` while
+ * MathJax loads (a placeholder): it counts against the allowance now, and its path once it's rendered.
+ */
+function allowedFormula(allow: MathAllowance, tex: string, display: boolean): MathBox | null | undefined {
   if (!allow(tex)) return null;
   const box = texToPath(tex, display);
+  if (box === undefined) return undefined;
   return box && allow.fits(box) ? box : null;
+}
+
+/**
+ * Maths' placeholder until MathJax has loaded: its source in muted monospace, breaking at spaces and keeping its line
+ * breaks (`null`).
+ */
+function pendingPieces(ctx: Ctx, src: string, m: Marks, size: number): (Piece | null)[] {
+  ctx.pending = true;
+  const z = size * CODE_SCALE;
+  const out: (Piece | null)[] = [];
+  src.split('\n').forEach((row, k) => {
+    if (k > 0) out.push(null);
+    for (const part of row.split(/( +)/)) {
+      if (!part) continue;
+      const p: Piece = part.startsWith(' ') ? { kind: 'space', m, w: textWidth(part, 'm', z), a: 0, d: 0, text: part, font: 'm', size: z } : wordPiece(part, m, 'm', z);
+      out.push({ ...p, alpha: PENDING_ALPHA });
+    }
+  });
+  return out;
 }
 
 /** CJK ideographs and kana: a line may break between any two of them (there are no spaces). */
@@ -94,7 +128,8 @@ function pieces(ctx: Ctx, c: readonly MdInline[], size: number, bold: boolean): 
       if (box) {
         const z = size * MATH_SCALE;
         out.push({ kind: 'math', m: x.m, w: box.w * z, a: Math.max(size, box.a * z + 0.15 * size), d: Math.max(size * (TEXT_LINE_HEIGHT - 1), box.d * z + 0.1 * size), math: { d: box.path, s: z / 1000 } });
-      } else out.push(wordPiece(`$${x.tex}$`, { ...x.m, code: true }, 'm', size * CODE_SCALE));
+      } else if (box === undefined) out.push(...pendingPieces(ctx, `$${x.tex}$`, x.m, size));
+      else out.push(wordPiece(`$${x.tex}$`, { ...x.m, code: true }, 'm', size * CODE_SCALE));
     } else {
       const font = markFont(x.m, bold);
       const z = x.m.code ? size * CODE_SCALE : size;
@@ -116,7 +151,8 @@ function pieces(ctx: Ctx, c: readonly MdInline[], size: number, bold: boolean): 
 
 /** Breaks a word too wide for a whole line into pieces that fit. */
 function splitWord(p: Piece, max: number): Piece[] {
-  return splitByWidth(p.text!, p.font!, p.size!, max - 2 * (p.pad ?? 0)).map((t) => wordPiece(t, p.m, p.font!, p.size!));
+  const alpha = p.alpha !== undefined ? { alpha: p.alpha } : {};
+  return splitByWidth(p.text!, p.font!, p.size!, max - 2 * (p.pad ?? 0)).map((t) => ({ ...wordPiece(t, p.m, p.font!, p.size!), ...alpha }));
 }
 
 /**
@@ -216,31 +252,39 @@ interface Ctx {
   ops: MdOp[];
   /** The box's maths allowance (`mathAllowance`): past it, formulas show their source. */
   allow: MathAllowance;
+  /** Some maths is a placeholder (MathJax not loaded yet). */
+  pending?: boolean;
 }
 
 /** Text at (x, baseline y) as ops, split by font (the maths font, fallback runs); returns the width. */
-function textOps(ctx: Ctx, x: number, y: number, text: string, font: MdFont, size: number): number {
+function textOps(ctx: Ctx, x: number, y: number, text: string, font: MdFont, size: number, alpha?: number): number {
   let rx = x;
+  const muted = alpha !== undefined ? { alpha } : {};
   for (const r of fontRuns(text, font)) {
-    ctx.ops.push(r.fallback ? { k: 'text', x: rx, y, text: r.text, font: r.font, size, fallback: true } : { k: 'text', x: rx, y, text: r.text, font: r.font, size });
+    ctx.ops.push(r.fallback ? { k: 'text', x: rx, y, text: r.text, font: r.font, size, fallback: true, ...muted } : { k: 'text', x: rx, y, text: r.text, font: r.font, size, ...muted });
     rx += textWidth(r.text, r.font, size);
   }
   return rx - x;
 }
 
 /** Lays out inline content at (x, y) in `width`; returns the height used. */
-function flow(ctx: Ctx, c: readonly MdInline[], x: number, y: number, width: number, size: number, bold: boolean, center = false): number {
+function flow(ctx: Ctx, c: readonly MdInline[], x: number, y: number, width: number, size: number, bold: boolean): number {
+  return flowPieces(ctx, pieces(ctx, c, size, bold), x, y, width, size);
+}
+
+/** Lays out pieces at (x, y) in `width`, broken into lines; returns the height used. */
+function flowPieces(ctx: Ctx, ps: readonly (Piece | null)[], x: number, y: number, width: number, size: number, center = false): number {
   let top = y;
-  for (const line of lines(pieces(ctx, c, size, bold), width)) {
+  for (const line of lines(ps, width)) {
     const a = Math.max(size, ...line.map((p) => p.a));
     const d = Math.max(size * (TEXT_LINE_HEIGHT - 1), ...line.map((p) => p.d));
     const base = top + a;
     const lineW = line.reduce((s, p) => s + p.w, 0);
     let px = center ? x + Math.max(0, (width - lineW) / 2) : x;
     // Consecutive words and spaces in one font and size are one text op.
-    let run: { x: number; text: string; font: MdFont; size: number } | null = null;
+    let run: { x: number; text: string; font: MdFont; size: number; alpha?: number } | null = null;
     const flush = () => {
-      if (run?.text.trim()) textOps(ctx, run.x, base, run.text, run.font, run.size);
+      if (run?.text.trim()) textOps(ctx, run.x, base, run.text, run.font, run.size, run.alpha);
       run = null;
     };
     line.forEach((p, i) => {
@@ -252,10 +296,10 @@ function flow(ctx: Ctx, c: readonly MdInline[], x: number, y: number, width: num
         const z = p.size!;
         ctx.ops.push({ k: 'rect', x: px, y: base - z * 0.95, w: p.w, h: z * 1.25, alpha: TINT });
         textOps(ctx, px + p.pad, base, p.text!, p.font!, z);
-      } else if (run && run.font === p.font && run.size === p.size) run.text += p.text!;
+      } else if (run && run.font === p.font && run.size === p.size && run.alpha === p.alpha) run.text += p.text!;
       else {
         flush();
-        run = { x: px, text: p.text!, font: p.font!, size: p.size! };
+        run = { x: px, text: p.text!, font: p.font!, size: p.size!, ...(p.alpha !== undefined ? { alpha: p.alpha } : {}) };
       }
       // Strike-through and link underline, across the spaces between struck or linked words too.
       const z = p.size ?? size;
@@ -322,6 +366,10 @@ function layBlock(ctx: Ctx, b: MdBlock, x: number, y: number, width: number, S: 
     }
     case 'math': {
       const box = allowedFormula(ctx.allow, b.tex, true);
+      if (box === undefined) {
+        const pad = S * 0.25;
+        return flowPieces(ctx, pendingPieces(ctx, `$$${b.tex}$$`, {}, S), x, y + pad, width, S, true) + 2 * pad;
+      }
       if (!box) return layBlock(ctx, { t: 'code', text: `$$${b.tex}$$` }, x, y, width, S, depth);
       // Too wide: shrink to fit the box.
       const z = Math.min(S * MATH_SCALE, box.w > 0 ? width / box.w : S);
@@ -337,8 +385,9 @@ function layBlock(ctx: Ctx, b: MdBlock, x: number, y: number, width: number, S: 
 }
 
 /**
- * The layout code's version: part of the cache key, so a change in how boxes are laid out or drawn (a renderer that
- * loads later, say) can invalidate every cached layout by bumping it.
+ * The layout code's version: part of the cache key, so a change in how boxes are laid out or drawn can invalidate every
+ * cached layout by bumping it. MathJax arriving later doesn't bump it: only the layouts it changes, those with maths'
+ * placeholders (`pending`), are redone once it's ready; the rest stay cached.
  */
 export const LAYOUT_VERSION = 1;
 
@@ -364,7 +413,11 @@ function layoutSize(l: MdLayout): number {
 export function layoutMarkdown(text: string, width: number, fontSize: number): MdLayout {
   const key = `${LAYOUT_VERSION}|${textMetricsEpoch()}|${fontSize}|${Math.round(width * 100)}|${text}`;
   const hit = cache.get(key);
-  if (hit) {
+  // A layout with maths' placeholders is redone once MathJax has loaded (or where placeholders are off); until then
+  // each use asks for it again (a page opened offline gets its maths once a load works; `requestMath` backs off). If it
+  // was evicted meanwhile, laying it out again asks too.
+  if (hit?.layout.pending && !mathReady() && mathPlaceholdersOn()) requestMath();
+  if (hit && !(hit.layout.pending && (mathReady() || !mathPlaceholdersOn()))) {
     // Most recently used last.
     cache.delete(key);
     cache.set(key, hit);
@@ -374,9 +427,15 @@ export function layoutMarkdown(text: string, width: number, fontSize: number): M
   const ctx: Ctx = { ops: [], allow: mathAllowance() };
   const w = Math.max(1, width);
   const height = Math.max(fontSize * TEXT_LINE_HEIGHT, layBlocks(ctx, parseMarkdown(text), 0, 0, w, fontSize, 0));
-  const out = { ops: ctx.ops, height };
+  const out: MdLayout = ctx.pending ? { ops: ctx.ops, height, pending: true } : { ops: ctx.ops, height };
+  // Cut short (a budget, the time slice, no placeholders): not kept, so a later call fills it in. A cached placeholder
+  // layout stays until a complete one replaces it.
   if (mathSkipped() !== skippedBefore) return out;
   const size = layoutSize(out);
+  if (hit) {
+    cache.delete(key);
+    cachedChars -= hit.size;
+  }
   cache.set(key, { layout: out, size });
   cachedChars += size;
   while (cache.size > LAYOUT_CACHE.count || cachedChars > LAYOUT_CACHE.chars) {
@@ -390,13 +449,25 @@ export function layoutMarkdown(text: string, width: number, fontSize: number): M
 const timers = globalThis as unknown as { setTimeout(fn: () => void, ms: number): unknown };
 
 /**
- * `layoutMarkdown`, complete: while maths is deferred to later tasks (the app's time slice, `setMathTimeSlice`), it
- * yields and lays out again, so the UI keeps running between slices. For PDF export, which must show every formula.
+ * `layoutMarkdown`, complete: it loads MathJax if the box has maths, and while maths is deferred to later tasks (the
+ * app's time slice, `setMathTimeSlice`) it yields and lays out again, so the UI keeps running between slices. For PDF
+ * export, which must show every formula. If MathJax can't load (offline web, a chunk gone after a deploy), the maths is
+ * laid out as its TeX source (`withoutMathPlaceholders`), once: never as a placeholder, and never waiting.
  */
-export async function layoutMarkdownSettled(text: string, width: number, fontSize: number): Promise<MdLayout> {
+export async function layoutMarkdownSettled(text: string, width: number, fontSize: number, opts: { mathFailed?: boolean } = {}): Promise<MdLayout> {
+  const sourced = () => withoutMathPlaceholders(() => layoutMarkdown(text, width, fontSize));
+  if (opts.mathFailed && !mathReady()) return sourced();
   for (let i = 0; ; i++) {
     const before = mathSkipped();
     const l = layoutMarkdown(text, width, fontSize);
+    if (l.pending) {
+      try {
+        await loadMath();
+      } catch {
+        return sourced();
+      }
+      continue;
+    }
     if (mathSkipped() === before || i >= 10_000) return l;
     await new Promise<void>((done) => timers.setTimeout(done, 0));
   }
@@ -404,19 +475,11 @@ export async function layoutMarkdownSettled(text: string, width: number, fontSiz
 
 /**
  * The formulas of a parsed comment that may be rendered (`MATH_LIMITS` per comment, in reading order; this renders them,
- * so under a time slice some may come later); the rest show their source. The comment renderer's equivalent of a box layout's maths allowance.
+ * so under a time slice some may come later); the rest show their source. The comment renderer's equivalent of a box
+ * layout's maths allowance. Formulas waiting on MathJax are included (the renderer shows their placeholder); the set is
+ * recomputed when `onMathDeferred` fires, which it does once MathJax has loaded.
  */
-export function allowedMath(blocks: readonly MdBlock[]): Set<object> {
+export function allowedMath(blocks: readonly MdBlock[]): Set<MdMath> {
   const allow = mathAllowance();
-  const out = new Set<object>();
-  const walk = (bs: readonly MdBlock[]) => {
-    for (const b of bs) {
-      if (b.t === 'p' || b.t === 'h') for (const x of b.c) if (x.t === 'math' && allowedFormula(allow, x.tex, false)) out.add(x);
-      if (b.t === 'math' && allowedFormula(allow, b.tex, true)) out.add(b);
-      if (b.t === 'quote') walk(b.c);
-      if (b.t === 'list') b.items.forEach(walk);
-    }
-  };
-  walk(blocks);
-  return out;
+  return new Set(mathInOrder(blocks).filter((x) => allowedFormula(allow, x.tex, x.t === 'math' && !('m' in x)) !== null));
 }
