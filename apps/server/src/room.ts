@@ -3,7 +3,7 @@ import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import { AI_LIVE, AI_LIVE_TTL_MS, AI_PAUSE, AI_PAUSED, AI_STOP, Notebook, Page, inkInBox, migratePage, summarizeThreads, type ThreadSummary } from '@qalm/core';
+import { AI_LIVE, AI_LIVE_TTL_MS, AI_PAUSE, AI_PAUSED, AI_PLAY, AI_PLAYING, AI_RESUME, AI_STOP, Notebook, Page, inkInBox, migratePage, summarizeThreads, type ThreadSummary } from '@qalm/core';
 import { num, type Env } from './env';
 import { parseDocId, nbDocId, pgDocId, room, type DocRef } from './docs';
 import { AgentHub, type AgentConfig, type AgentResult, type AgentEdit, type AgentWho, type PageEdit, type Presence } from './agent';
@@ -322,17 +322,41 @@ export class DocRoom extends DurableObject<Env> {
   }
 
   private onText(ws: WebSocket, message: string): void {
-    if (this.ref?.kind !== 'nb' || (message !== AI_LIVE && message !== AI_PAUSE && message !== AI_STOP)) return;
+    if (this.ref?.kind !== 'nb' || !message.startsWith('ai:')) return;
     const was = this.liveUntil() > 0;
-    if (message !== AI_PAUSE) {
-      // A heartbeat, or this device alone stopping (backgrounded, notebook closing): other devices keep playing.
-      const att = ws.deserializeAttachment() as Attachment;
-      ws.serializeAttachment({ ...att, liveUntil: message === AI_LIVE ? Date.now() + num(this.env.AI_LIVE_TTL_MS, AI_LIVE_TTL_MS) : 0 });
-    } else {
+    const att = ws.deserializeAttachment() as Attachment;
+    const live = (on: boolean) => ws.serializeAttachment({ ...att, liveUntil: on ? Date.now() + num(this.env.AI_LIVE_TTL_MS, AI_LIVE_TTL_MS) : 0 });
+    const reply = (m: string) => {
+      try {
+        ws.send(m);
+      } catch {
+        /* closing */
+      }
+    };
+    // Every Pause bumps the epoch (stored: Pause is rare, and a restarted room must still refuse a stale resume).
+    const epoch = this.kvGet<number>('aiPauseEpoch') ?? 0;
+    if (message === AI_PLAY) {
+      live(true);
+      reply(`${AI_PLAYING}${epoch}`);
+    } else if (message === AI_LIVE) {
+      // Only keeps a live socket live: a heartbeat that crossed a Pause, or one after the socket expired, does nothing.
+      if ((att.liveUntil ?? 0) > Date.now()) live(true);
+      else reply(AI_PAUSED);
+    } else if (message.startsWith(AI_RESUME)) {
+      // A reconnect: live again only if nobody pressed Pause since this device's Play.
+      if (Number(message.slice(AI_RESUME.length)) === epoch) {
+        live(true);
+        reply(`${AI_PLAYING}${epoch}`);
+      } else reply(AI_PAUSED);
+    } else if (message === AI_STOP) {
+      // This device alone (backgrounded, notebook closing): other devices keep playing.
+      live(false);
+    } else if (message === AI_PAUSE) {
       // Pause on one device pauses them all, and the others' editors switch to paused.
+      this.kvPut('aiPauseEpoch', epoch + 1);
       for (const s of this.ctx.getWebSockets()) {
-        const att = s.deserializeAttachment() as Attachment | null;
-        if (att?.liveUntil) s.serializeAttachment({ ...att, liveUntil: 0 });
+        const a = s.deserializeAttachment() as Attachment | null;
+        if (a?.liveUntil) s.serializeAttachment({ ...a, liveUntil: 0 });
         if (s !== ws) {
           try {
             s.send(AI_PAUSED);
@@ -468,6 +492,17 @@ export class DocRoom extends DurableObject<Env> {
     return this.agents().lastClientUpdateAt();
   }
 
+  /** Null while agents may use this notebook, else the message they should get (AI access off, or paused). */
+  agentLiveError(docId: string): string | null {
+    this.setDocId(docId);
+    try {
+      this.agents().requireLive();
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  }
+
   /** For the session list: the live AI access switch (unknown → off), whether it is playing, and the last client update. */
   agentInfo(docId: string): { aiAccess: boolean; live: boolean; at: number } {
     this.setDocId(docId);
@@ -509,8 +544,14 @@ export class DocRoom extends DurableObject<Env> {
   }
 
   /** Notebook room → page room: an agent's transcription, comment or reply. Agents never touch ink. */
-  applyAgentEdit(docId: string, edit: PageEdit): { ok: boolean; text: string; id?: string; threads?: ThreadSummary[] } {
+  /**
+   * `gate` (the notebook room's doc id): its `requireLive()` is asked right before the write. Nothing awaits between that
+   * answer and the (synchronous) write, so a comment or reading never lands after the student paused.
+   */
+  async applyAgentEdit(docId: string, edit: PageEdit, gate?: string): Promise<{ ok: boolean; text: string; id?: string; threads?: ThreadSummary[] }> {
     try {
+      const closed = gate ? await room(this.env, gate).agentLiveError(gate) : null;
+      if (closed) return { ok: false, text: closed };
       return { ok: true, ...this.applyAgentEditOrThrow(docId, edit) };
     } catch (e) {
       return { ok: false, text: e instanceof Error ? e.message : String(e) };

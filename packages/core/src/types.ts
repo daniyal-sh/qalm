@@ -105,6 +105,11 @@ export interface NotebookMeta {
   size: Size;
   orientation: Orientation;
   aiAccess: boolean;
+  /**
+   * @deprecated "Pause sharing" from apps before Play / Pause AI (core aiLive.ts). Still honoured while those apps are
+   * installed: true keeps the notebook paused for agents. The current app only clears it (on Play).
+   */
+  aiPaused?: boolean;
   /** Every page's comment threads are in the notebook's thread index (set once, by the first full pass). */
   threadsIndexed?: boolean;
   createdAt: number;

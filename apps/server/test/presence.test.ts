@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { call, signIn, stroke, until, YClient } from './helpers';
 import { connectAgent, notebook, textOf, tool } from './mcp-helpers';
@@ -156,5 +157,129 @@ describe('Play / Pause AI (server-verified liveness)', () => {
     expect(got).toContain('can you check this?');
     n.nbc.close();
     n.pgc.close();
+  });
+});
+
+describe('Play / Pause AI: review fixes', () => {
+  it('a device that missed a Pause while offline cannot bring sharing back by reconnecting', async () => {
+    const t = await signIn('missed@example.com');
+    const n = await notebook(t, 'msnb', 'Missed', { live: false });
+    const token = await connectAgent('missed@example.com', { comment: true, transcribe: true }, 'Claude');
+    const s = sessionOf('msnb');
+    const live = async () => !(await tool(token, 'read', { ref: 'outline', s })).isError;
+    // The tablet plays; its Wi-Fi drops (socket gone).
+    const tablet = await YClient.connect(t.accessToken, 'nb:msnb');
+    tablet.play();
+    await until(() => tablet.epoch() !== null);
+    const epoch = tablet.epoch()!;
+    tablet.close();
+    // Meanwhile the laptop plays and the user presses Pause there.
+    n.nbc.play();
+    await until(live);
+    n.nbc.pause();
+    await until(async () => !(await live()));
+    // The tablet reconnects and tries to resume: refused, told it's paused, and its heartbeats do nothing.
+    const back = await YClient.connect(t.accessToken, 'nb:msnb');
+    back.resume(epoch);
+    await until(() => back.texts.includes('ai:paused'));
+    await pause(1000);
+    expect(await live()).toBe(false);
+    // Without a Pause in between, a reconnect resumes at once.
+    back.play();
+    await until(() => back.epoch() !== null);
+    const e2 = back.epoch()!;
+    back.close();
+    const again = await YClient.connect(t.accessToken, 'nb:msnb');
+    again.resume(e2);
+    await until(live);
+    expect(again.texts).toContain(`ai:playing:${e2}`);
+    again.close();
+    n.nbc.close();
+    n.pgc.close();
+  });
+
+  it('a heartbeat that crosses a Pause, or arrives on a socket that never played, is ignored', async () => {
+    const t = await signIn('crossed@example.com');
+    const n = await notebook(t, 'crnb', 'Crossed', { live: false });
+    const token = await connectAgent('crossed@example.com', { comment: true, transcribe: true }, 'Claude');
+    const s = sessionOf('crnb');
+    const live = async () => !(await tool(token, 'read', { ref: 'outline', s })).isError;
+    const laptop = await YClient.connect(t.accessToken, 'nb:crnb');
+    // Never played: a bare heartbeat doesn't make it live.
+    laptop.send('ai:live');
+    await until(() => laptop.texts.includes('ai:paused'));
+    expect(await live()).toBe(false);
+    // Playing, then Pause on another device, then this device's heartbeat that was already on its way.
+    laptop.play();
+    await until(live);
+    laptop.stopBeat();
+    n.nbc.pause();
+    await until(() => laptop.texts.filter((x) => x === 'ai:paused').length === 2);
+    laptop.send('ai:live');
+    await until(() => laptop.texts.filter((x) => x === 'ai:paused').length === 3);
+    expect(await live()).toBe(false);
+    laptop.close();
+    n.nbc.close();
+    n.pgc.close();
+  });
+
+  it('honours "Pause sharing" from apps before Play / Pause (meta.aiPaused) while a new device plays', async () => {
+    const t = await signIn('oldapp@example.com');
+    const n = await notebook(t, 'olnb', 'Old app');
+    const token = await connectAgent('oldapp@example.com', { comment: true, transcribe: true }, 'Claude');
+    const s = sessionOf('olnb');
+    expect((await tool(token, 'read', { ref: 'outline', s })).isError).toBeFalsy();
+    const waiting = tool(token, 'wait', { s });
+    await pause(100);
+    // The old iPad presses "Pause sharing": the pending wait ends as paused and tools are refused.
+    n.nb.setMeta({ aiPaused: true });
+    expect(textOf(await waiting)).toBe(`#q s=${s} paused`);
+    expect(textOf(await tool(token, 'read', { ref: 'outline', s }))).toContain(PAUSED);
+    expect(textOf(await tool(token, 'wait'))).toBe(`#q sessions
+s=${s} paused`);
+    // The new app clears it on Play.
+    n.nb.setMeta({ aiPaused: false });
+    n.nbc.play();
+    await until(async () => !(await tool(token, 'read', { ref: 'outline', s })).isError);
+    n.nbc.close();
+    n.pgc.close();
+  });
+
+  it('the page room re-checks right before an agent write, so nothing lands once paused', async () => {
+    const t = await signIn('gate@example.com');
+    const n = await notebook(t, 'gtnb', 'Gate', { live: false });
+    n.page.addItem(stroke('a', 50, 100, 200, 120));
+    await pause(300);
+    const pg = `pg:gtnb:${n.pageId}`;
+    const stub = env.DOC_ROOM.get(env.DOC_ROOM.idFromName(pg));
+    const edit = { op: 'comment' as const, ref: 'p1', text: 'too late', agentName: 'Claude' };
+    const r = await stub.applyAgentEdit(pg, edit, 'nb:gtnb');
+    expect(r).toMatchObject({ ok: false });
+    expect(r.text).toContain(PAUSED);
+    await pause(300);
+    expect(n.page.comments()).toEqual([]);
+    // Live: the same call writes.
+    n.nbc.play();
+    await until(async () => (await env.DOC_ROOM.get(env.DOC_ROOM.idFromName('nb:gtnb')).agentLiveError('nb:gtnb')) === null);
+    expect(await stub.applyAgentEdit(pg, edit, 'nb:gtnb')).toMatchObject({ ok: true });
+    await until(() => n.page.comments().length === 1);
+    n.nbc.close();
+    n.pgc.close();
+  });
+
+  it('lists paused sessions by session id, not by when they were last edited', async () => {
+    const t = await signIn('order@example.com');
+    const zz = await notebook(t, 'zzpaused', 'Zed', { live: false });
+    const aa = await notebook(t, 'aapaused', 'Ay', { live: false });
+    const mm = await notebook(t, 'mmlive', 'Live one');
+    const token = await connectAgent('order@example.com', { comment: true, transcribe: true }, 'Claude');
+    // Edit zz last: before, it would have been listed first.
+    zz.page.addItem(stroke('z', 50, 100, 200, 120));
+    await pause(500);
+    expect(textOf(await tool(token, 'wait'))).toBe(['#q sessions', 's=mmlive "Live one" live', 's=aapaused paused', 's=zzpaused paused'].join(String.fromCharCode(10)));
+    for (const x of [zz, aa, mm]) {
+      x.nbc.close();
+      x.pgc.close();
+    }
   });
 });

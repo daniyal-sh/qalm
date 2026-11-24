@@ -174,7 +174,9 @@ async function callTool(env: Env, props: McpProps, name: string, args: Record<st
     // Playing notebooks with their titles, newest edit first; paused ones only as `s=… paused` (no title: nothing of a
     // paused notebook goes out, but the agent can park a wait(s) on it until the student presses Play).
     const rows = await grantedNotebooks(env, g);
-    rows.sort((a, b) => Number(b.live) - Number(a.live) || b.at - a.at);
+    // Live ones by last edit; paused ones by session id, so their order says nothing about when they were edited.
+    const sid = (n: (typeof rows)[number]) => sessionOf(n.id);
+    rows.sort((a, b) => Number(b.live) - Number(a.live) || (a.live ? b.at - a.at : sid(a) < sid(b) ? -1 : sid(a) > sid(b) ? 1 : 0));
     const lines = ['#q sessions', ...rows.map((n) => (n.live ? `s=${sessionOf(n.id)} ${JSON.stringify(n.title)} live` : `s=${sessionOf(n.id)} paused`))];
     const text = lines.join('\n');
     await log(env, g, 'wait', 'sessions', text, null);

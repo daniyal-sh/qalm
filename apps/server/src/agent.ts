@@ -22,7 +22,7 @@ import {
   type QinkThreads,
 } from '@qalm/core';
 import type { Env } from './env';
-import { pgDocId, room } from './docs';
+import { nbDocId, pgDocId, room } from './docs';
 import type { DocRoom } from './room';
 
 export interface AgentConfig { idleMs: number; minIntervalMs: number; timeoutMs: number }
@@ -109,9 +109,11 @@ export class AgentHub {
    * THE gate for every MCP path (wait, read, transcribe, comment, and anything new such as Lecture mode's live
    * transcript): AI access is on and one of the owner's devices is playing AI sharing right now (a live heartbeat
    * on the notebook's sync socket; DocRoom.liveUntil). Paused or not open in qalm: agents get nothing.
+   * The synced `aiPaused` flag that apps from before Play / Pause still write ("Pause sharing") pauses it too, so
+   * Pause on an old device isn't ignored while a new one plays.
    */
   isLive(): boolean {
-    return this.aiAccess() && this.r.liveUntil() > 0;
+    return this.aiAccess() && this.nb().meta().aiPaused !== true && this.r.liveUntil() > 0;
   }
 
   /** Throws the message an agent should see when `isLive()` is false. */
@@ -355,7 +357,8 @@ export class AgentHub {
   /** Runs an edit in the page's room. A new thread gets its label here (only this room assigns labels). */
   private async applyOn(pageId: string, edit: PageEdit): Promise<string> {
     const docId = pgDocId(this.notebookId, pageId);
-    const r = await room(this.env, docId).applyAgentEdit(docId, edit);
+    // The page room asks this room again right before it writes, so nothing lands once the student paused.
+    const r = await room(this.env, docId).applyAgentEdit(docId, edit, nbDocId(this.notebookId));
     if (!r.ok) throw new Error(r.text);
     // The app's notebook-wide comments list and unread badge read the thread index, not every page.
     if (r.threads?.length) this.r.putThreads(r.threads);

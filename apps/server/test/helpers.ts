@@ -144,10 +144,32 @@ export class YClient {
   readonly texts: string[] = [];
   private beat: ReturnType<typeof setInterval> | null = null;
 
-  /** Play AI on this socket: an `ai:live` heartbeat now and every `everyMs` (the editor sends one every 15 s). */
+  /** The pause epoch from the room's last `ai:playing:<n>` answer (for a resume after a reconnect). */
+  epoch(): number | null {
+    const m = [...this.texts].reverse().find((t) => t.startsWith('ai:playing:'));
+    return m ? Number(m.slice('ai:playing:'.length)) : null;
+  }
+
+  /** Play AI on this socket: `ai:play` now, then an `ai:live` heartbeat every `everyMs` (the editor: every 15 s). */
   play(everyMs = 400) {
     this.stopBeat();
-    this.ws.send('ai:live');
+    this.ws.send('ai:play');
+    this.heartbeat(everyMs);
+  }
+
+  /** A reconnected socket asks to be live again (refused if anyone paused since `epoch`), then keeps beating. */
+  resume(epoch: number, everyMs = 400) {
+    this.stopBeat();
+    this.ws.send(`ai:resume:${epoch}`);
+    this.heartbeat(everyMs);
+  }
+
+  /** Sends one raw text frame (e.g. a lone `ai:live`). */
+  send(text: string) {
+    this.ws.send(text);
+  }
+
+  private heartbeat(everyMs: number) {
     this.beat = setInterval(() => {
       try {
         this.ws.send('ai:live');
