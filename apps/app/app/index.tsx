@@ -2,20 +2,23 @@ import type { Folder, LibraryEntry } from '@qalm/core';
 import { Redirect, router } from 'expo-router';
 import * as React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { folderCounts, visibleEntries, type LibraryFilter } from '../src/library/actions';
+import { DEFAULT_TITLE, folderCounts, visibleEntries, type LibraryFilter } from '../src/library/actions';
 import { CoverSheet, DEFAULT_FORM, FolderTile, MoveSheet, NameSheet, NewNotebookSheet, NotebookCard } from '../src/library/components';
 import { createNotebook, deleteForever, exportNotebook, importPdf, importQalm, updateNotebookMeta, type Ctx } from '../src/library/ops';
 import { pickFile } from '../src/lib/files';
 import { isPdf, isQalm } from '../src/lib/mime';
 import { useLibraryData, useSession } from '../src/state/session';
+import { Appear, hoverTransition } from '../src/theme/motion';
 import { useTheme } from '../src/theme/ThemeProvider';
+import { shadow2, space } from '../src/theme/tokens';
 import { Lockup } from '../src/ui/brand';
 import { confirm } from '../src/ui/confirm';
 import { Avatar, Button, Chip, IconButton, TextField } from '../src/ui/controls';
 import { Icon, type IconName } from '../src/ui/Icon';
-import { EmptyState, Menu, useToast, type MenuItem } from '../src/ui/layout';
+import { EmptyState, Menu, SectionLabel, useToast, type MenuItem } from '../src/ui/layout';
+import { ScrollRow } from '../src/ui/ScrollRow';
 import { Text } from '../src/ui/Text';
 
 type MenuState = { items: MenuItem[]; anchor: { x: number; y: number; align?: 'left' | 'right' } } | null;
@@ -44,7 +47,8 @@ function NavItem({ icon, label, count, selected, onPress }: { icon: IconName; la
       onPress={onPress}
       style={(s) => [
         styles.nav,
-        { backgroundColor: selected ? c.accentSoft : (s as { hovered?: boolean }).hovered || s.pressed ? c.soft : 'transparent' },
+        hoverTransition,
+        { backgroundColor: selected ? c.accentSoft : s.pressed ? c.soft : (s as { hovered?: boolean }).hovered ? c.surface2 : 'transparent' },
       ]}
     >
       <Icon name={icon} size={17} color={selected ? c.accentInk : c.muted} />
@@ -52,7 +56,7 @@ function NavItem({ icon, label, count, selected, onPress }: { icon: IconName; la
         {label}
       </Text>
       {count !== undefined ? (
-        <Text variant="meta" tone="faint">
+        <Text variant="meta" style={{ color: selected ? c.accentInk : c.faint, fontVariant: ['tabular-nums'] }}>
           {count}
         </Text>
       ) : null}
@@ -65,6 +69,7 @@ export default function LibraryScreen() {
   const s = useSession();
   const { library, entries, folders } = useLibraryData();
   const win = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const wide = win.width >= 900;
   const [filter, setFilter] = React.useState<LibraryFilter>({ kind: 'all' });
   const [query, setQuery] = React.useState('');
@@ -136,7 +141,14 @@ export default function LibraryScreen() {
             label: 'Delete forever',
             icon: 'trash-2',
             tone: 'bad',
-            onPress: () => confirm('Delete forever?', `"${e.title}" will be removed from this device and your account. This can't be undone.`, 'Delete', () => void run('Deleting…', () => deleteForever(ctx, e.id))),
+            onPress: () =>
+              confirm(
+                'Delete forever?',
+                // Signed out, a notebook only lives on this device.
+                `"${e.title || DEFAULT_TITLE}" will be removed from this device${s.user ? ' and your account' : ''}. This can't be undone.`,
+                'Delete',
+                () => void run('Deleting…', () => deleteForever(ctx, e.id)),
+              ),
           },
         ]
       : [
@@ -186,16 +198,17 @@ export default function LibraryScreen() {
   const accountLabel = s.user ? (s.profile?.email ?? s.profile?.name ?? 'Signed in') : s.serverUrl ? 'Not signed in' : 'On this device';
 
   const sidebar = (
-    <View style={[styles.sidebar, { backgroundColor: c.surface, borderRightColor: c.line }]}>
-      <View style={{ paddingHorizontal: 8, paddingVertical: 12 }}>
+    // The sidebar's surface runs under the status bar and a landscape display cutout; its content stays in the safe area.
+    <View style={[styles.sidebar, { backgroundColor: c.surface, borderRightColor: c.line, width: 260 + insets.left, paddingLeft: 10 + insets.left, paddingTop: 8 + insets.top, paddingBottom: insets.bottom }]}>
+      <View style={{ paddingHorizontal: space.sm, paddingTop: space.md, paddingBottom: space.lg }}>
         <Lockup size={18} />
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 2, paddingBottom: 12 }}>
         {navs.map((n) => (
           <NavItem key={n.label} icon={n.icon} label={n.label} count={n.count} selected={same(filter, n.f)} onPress={() => setFilter(n.f)} />
         ))}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 10, paddingTop: 18, paddingBottom: 4 }}>
-          <Text variant="meta" style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 10, paddingTop: space.xl, paddingBottom: space.xxs }}>
+          <Text variant="meta" tone="muted" style={{ flex: 1 }}>
             Folders
           </Text>
           <IconButton icon="plus" label="New folder" size={32} onPress={() => setNewFolder(true)} />
@@ -204,7 +217,7 @@ export default function LibraryScreen() {
           <NavItem key={f.id} icon="folder" label={f.name} count={counts.get(f.id) ?? 0} selected={same(filter, { kind: 'folder', id: f.id })} onPress={() => setFilter({ kind: 'folder', id: f.id })} />
         ))}
         {!folders.length ? (
-          <Text variant="meta" tone="faint" style={{ paddingHorizontal: 10 }}>
+          <Text variant="meta" tone="faint" style={{ paddingHorizontal: 10, paddingVertical: space.xs }}>
             No folders yet
           </Text>
         ) : null}
@@ -213,9 +226,15 @@ export default function LibraryScreen() {
         accessibilityRole="button"
         accessibilityLabel="Settings"
         onPress={() => router.push('/settings')}
-        style={(st) => [styles.account, { borderTopColor: c.line2, backgroundColor: (st as { hovered?: boolean }).hovered || st.pressed ? c.soft : 'transparent' }]}
+        style={(st) => [styles.account, hoverTransition, { borderTopColor: c.line2, backgroundColor: st.pressed ? c.soft : (st as { hovered?: boolean }).hovered ? c.surface2 : 'transparent' }]}
       >
-        <Avatar name={s.profile?.email ?? s.profile?.name ?? 'Q'} />
+        {s.user ? (
+          <Avatar name={s.profile?.email ?? s.profile?.name ?? 'Q'} />
+        ) : (
+          <View style={[styles.anon, { backgroundColor: c.soft, borderColor: c.line }]}>
+            <Icon name="user" size={15} color={c.muted} />
+          </View>
+        )}
         <View style={{ flex: 1 }}>
           <Text variant="label" numberOfLines={1}>
             {accountLabel}
@@ -230,13 +249,13 @@ export default function LibraryScreen() {
   );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top', 'left', 'right']}>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ flex: 1, flexDirection: 'row' }}>
         {wide ? sidebar : null}
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, paddingTop: insets.top, paddingRight: insets.right, paddingLeft: wide ? 0 : insets.left }}>
           <View style={[styles.header, !wide && { paddingTop: 8 }]}>
             {!wide ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginRight: -space.sm }}>
                 <Lockup size={17} />
                 <IconButton icon="settings" label="Settings" onPress={() => router.push('/settings')} />
               </View>
@@ -252,14 +271,14 @@ export default function LibraryScreen() {
             </View>
             <TextField value={query} onChangeText={setQuery} placeholder="Search titles" icon="search" containerStyle={{ maxWidth: 520 }} accessibilityLabel="Search" />
             {!wide ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              <ScrollRow style={{ marginHorizontal: -BODY_PAD, paddingHorizontal: BODY_PAD }}>
                 {navs.map((n) => (
                   <Chip key={n.label} label={n.label} icon={n.icon} selected={same(filter, n.f)} onPress={() => setFilter(n.f)} />
                 ))}
                 {folders.map((f) => (
                   <Chip key={f.id} label={f.name} icon="folder" selected={same(filter, { kind: 'folder', id: f.id })} onPress={() => setFilter({ kind: 'folder', id: f.id })} />
                 ))}
-              </ScrollView>
+              </ScrollRow>
             ) : null}
           </View>
 
@@ -269,6 +288,7 @@ export default function LibraryScreen() {
             </View>
           ) : (
             <ScrollView contentContainerStyle={styles.body} onLayout={(e) => setGridW(e.nativeEvent.layout.width - 2 * BODY_PAD)}>
+              {showFolders ? <SectionLabel style={styles.sectionLabel}>Folders</SectionLabel> : null}
               {showFolders ? (
                 <View style={styles.grid}>
                   {folders.map((f) => (
@@ -298,8 +318,9 @@ export default function LibraryScreen() {
                   />
                 </View>
               ) : null}
+              {showFolders && shown.length ? <SectionLabel style={styles.sectionLabel}>Notebooks</SectionLabel> : null}
               {shown.length ? (
-                <View style={[styles.grid, { rowGap: 28 }]}>
+                <View style={[styles.grid, { rowGap: space.x3 }]}>
                   {shown.map((e) => (
                     <NotebookCard key={e.id} entry={e} width={cardW} onOpen={() => open(e.id)} onMenu={(a) => entryMenu(e, a)} />
                   ))}
@@ -331,10 +352,10 @@ export default function LibraryScreen() {
       </View>
 
       {busy ? (
-        <View style={[styles.busy, { backgroundColor: c.surface, borderColor: c.line }]} pointerEvents="none">
+        <Appear from="top" pointerEvents="none" style={[styles.busy, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
           <ActivityIndicator color={c.accent} size="small" />
           <Text variant="label">{busy}</Text>
-        </View>
+        </Appear>
       ) : null}
       {toast}
 
@@ -399,7 +420,7 @@ export default function LibraryScreen() {
           setMove(null);
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -408,8 +429,10 @@ const BODY_PAD = 24;
 const styles = StyleSheet.create({
   sidebar: { width: 260, borderRightWidth: StyleSheet.hairlineWidth, paddingHorizontal: 10, paddingTop: 8 },
   nav: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 40, paddingHorizontal: 10, borderRadius: 8 },
+  anon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
+  sectionLabel: { paddingTop: 0, paddingBottom: 0, marginBottom: -space.md },
   account: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, marginHorizontal: -10, paddingHorizontal: 18, minHeight: 60, borderTopWidth: StyleSheet.hairlineWidth },
-  header: { paddingHorizontal: BODY_PAD, paddingTop: 24, paddingBottom: 12, gap: 14 },
+  header: { paddingHorizontal: BODY_PAD, paddingTop: space.xxl, paddingBottom: space.md, gap: space.lg },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   body: { padding: BODY_PAD, paddingTop: 8, gap: 24, flexGrow: 1 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 20 },
@@ -422,7 +445,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 8,
+    borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
   },
 });
