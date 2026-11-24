@@ -7,13 +7,20 @@
     "orientation": "default",
     "userInterfaceStyle": "automatic",
     "backgroundColor": "#f3f3f5",
+    "icon": "./assets/icons/icon.png",
     "ios": {
+      "icon": "./assets/icons/icon.png",
       "bundleIdentifier": "com.apollo.qalm",
       "supportsTablet": true,
       "requireFullScreen": false
     },
     "android": {
       "package": "com.apollo.qalm",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icons/adaptive-icon.png",
+        "monochromeImage": "./assets/icons/monochrome-icon.png",
+        "backgroundColor": "#1c1c1f"
+      },
       "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
@@ -22,11 +29,22 @@
       "name": "qalm",
       "shortName": "qalm",
       "themeColor": "#f3f3f5",
-      "backgroundColor": "#f3f3f5"
+      "backgroundColor": "#f3f3f5",
+      "favicon": "./assets/icons/favicon.png"
     },
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/icons/splash.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "backgroundColor": "#f3f3f5",
+          "dark": { "image": "./assets/icons/splash-dark.png", "backgroundColor": "#151517" }
+        }
+      ],
       [
         "expo-image-picker",
         { "photosPermission": "qalm uses your photos when you insert an image on a page." }

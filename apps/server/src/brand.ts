@@ -48,7 +48,19 @@ export const D = {
   badSoft: '#351f20',
 } as const;
 
+/** The graphite app-icon tile. The app icon is always this tile with the dark mark (docs/brand.md, "Mark"). */
+export const TILE = '#1c1c1f';
+
+/**
+ * The app icon as a PNG, for emails: Gmail and most clients show neither SVG nor data: images, so emails load it from
+ * the site (apps/site/public/brand/qalm-icon-96.png, made by apps/site/landing/og.mjs), shown at 48 px.
+ */
+export const EMAIL_ICON_URL = 'https://qalm.apollolearn.app/brand/qalm-icon-96.png';
+
 export const BRAND_FONT_STACK = `Figtree, system-ui, -apple-system, 'Segoe UI', sans-serif`;
 
-/** The qalm mark (assets/brand/qalm-mark.svg), inlined. */
-export const MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100" fill="none" stroke-linecap="round" stroke-linejoin="round"> <defs><mask id="qalm-ring"><rect width="120" height="100" fill="#fff"/><path d="M60 94 C52 78 38 64 37 48 C36 34 46 22 60 11 C74 22 84 34 83 48 C82 64 68 78 60 94Z" fill="#000"/></mask></defs> <path d="M7.5 57.3L8.0 55.7L8.8 53.9L9.8 52.2L11.2 50.4L12.9 48.5L14.8 46.6L17.0 44.7L19.4 42.8L22.1 40.9L25.1 39.0L28.2 37.2L31.5 35.4L35.0 33.6L38.6 31.9L42.3 30.3L46.2 28.7L50.1 27.3L54.1 25.9L58.2 24.7L62.2 23.5L66.2 22.5L70.2 21.6L74.2 20.9L78.0 20.3L81.7 19.8L85.4 19.4L88.8 19.2L92.1 19.2L95.2 19.3L98.1 19.5L100.8 19.9L103.2 20.5L105.4 21.1L107.3 21.9L108.9 22.9L110.3 23.9" stroke="#4338CA" stroke-width="6" mask="url(#qalm-ring)"/> <path d="M60 86 C54 73 45 61 44 48 C43 37 50 28 60 19 C70 28 77 37 76 48 C75 61 66 73 60 86Z" stroke="#27272A" stroke-width="7"/> <path d="M60 80 L60 57" stroke="#27272A" stroke-width="5"/> <circle cx="60" cy="50" r="4.5" fill="#27272A"/> <path d="M111.2 24.9L112.0 26.3L112.5 27.9L112.6 29.6L112.3 31.4L111.6 33.3L110.5 35.3L109.0 37.4L107.1 39.5L104.9 41.6L102.4 43.8L99.5 46.0L96.3 48.1L92.8 50.2L89.1 52.3L85.2 54.3L81.1 56.2L76.8 58.1L72.4 59.8L67.9 61.4L63.3 62.9L58.7 64.2L54.1 65.4L49.6 66.4L45.1 67.2L40.8 67.9L36.6 68.4L32.6 68.7L28.8 68.8L25.2 68.7L21.9 68.5L18.9 68.0L16.2 67.4L13.8 66.6L11.8 65.6L10.1 64.4L8.8 63.1" stroke="#4338CA" stroke-width="6"/> <circle cx="107.3" cy="39.3" r="7.5" fill="#1D4ED8"/> </svg>`;
+/**
+ * The qalm mark for dark surfaces (assets/brand/qalm-mark-dark.svg), inlined. The consent pages show it on the graphite
+ * app-icon tile (`TILE`). Generated: `node assets/brand/build.mjs` rewrites this line.
+ */
+export const MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="4.4 10.5 91.19 83" fill="none"><defs><mask id="qalm-mark-back" maskUnits="userSpaceOnUse" x="-0.6" y="5.5" width="101.19" height="93"><rect x="-0.6" y="5.5" width="101.19" height="93" fill="#fff"/><path d="M50 90 C44 76 33 65 33 51 C33 39 40 28 50 14 C60 28 67 39 67 51 C67 65 56 76 50 90Z" fill="#000"/><circle cx="87.61" cy="47.45" r="7.8" fill="#000"/></mask><mask id="qalm-mark-halo" maskUnits="userSpaceOnUse" x="-0.6" y="5.5" width="101.19" height="93"><rect x="-0.6" y="5.5" width="101.19" height="93" fill="#fff"/><circle cx="87.61" cy="47.45" r="7.8" fill="#000"/></mask></defs><path d="M92.29 36.61A45 15 -20 0 0 7.71 67.39" stroke="#7b72ff" stroke-width="5" stroke-linecap="round" mask="url(#qalm-mark-back)"/><path d="M50 90 C44 76 33 65 33 51 C33 39 40 28 50 14 C60 28 67 39 67 51 C67 65 56 76 50 90Z" stroke="#f4f4f5" stroke-width="6" stroke-linejoin="round"/><path d="M50 82V58" stroke="#f4f4f5" stroke-width="4.5" stroke-linecap="round"/><circle cx="50" cy="51" r="4.2" fill="#f4f4f5"/><path d="M7.71 67.39A45 15 -20 0 0 92.29 36.61" stroke="#7b72ff" stroke-width="5" stroke-linecap="round" mask="url(#qalm-mark-halo)"/><circle cx="87.61" cy="47.45" r="6.2" fill="#60a5fa"/></svg>`;

@@ -19,6 +19,12 @@ describe('sign-in email', () => {
     expect(m.text).toContain('Or enter this code in qalm: 042917');
   });
 
+  it('shows the app icon as a hosted PNG (Gmail shows neither SVG nor data: images)', () => {
+    const m = magicLinkEmail('ada@example.com', link, '042917');
+    expect(m.html).toContain('<img src="https://qalm.apollolearn.app/brand/qalm-icon-96.png" width="40" height="40" alt=""');
+    expect(m.html).not.toMatch(/<svg|data:image/);
+  });
+
   it('has only the link for the MCP consent page', () => {
     const m = magicLinkEmail('ada@example.com', link);
     expect(m.subject).toBe('Your qalm sign-in link');

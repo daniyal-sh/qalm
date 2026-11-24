@@ -1,6 +1,7 @@
 // Writes the standalone brand SVGs from mark.mjs:  node assets/brand/build.mjs
 // Each file is self-contained (no <use>, no CSS, no currentColor), so any consumer can inline it.
-import { writeFileSync } from 'node:fs';
+// It also refreshes MARK_SVG in apps/server/src/brand.ts (the worker can't read files, so the mark is inlined there).
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,3 +27,11 @@ for (const [name, [svg, note]] of Object.entries(files)) {
   writeFileSync(join(here, name), pretty(svg, note));
   console.log(`brand: assets/brand/${name}`);
 }
+
+// The server's consent pages show the mark on the graphite app-icon tile: the dark mark.
+const brandTs = join(here, '..', '..', 'apps', 'server', 'src', 'brand.ts');
+const ts = readFileSync(brandTs, 'utf8');
+const next = ts.replace(/export const MARK_SVG = `[^`]*`;/, `export const MARK_SVG = \`${markSvg({ colors: COLORS.dark, id: 'qalm-mark' })}\`;`);
+if (next === ts && !ts.includes('export const MARK_SVG')) throw new Error('MARK_SVG not found in apps/server/src/brand.ts');
+writeFileSync(brandTs, next);
+console.log('brand: apps/server/src/brand.ts MARK_SVG');

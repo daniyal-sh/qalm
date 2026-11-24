@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { escapeHtml } from './util';
-import { BRAND_FONT_STACK, D, T } from './brand';
+import { BRAND_FONT_STACK, D, EMAIL_ICON_URL, T } from './brand';
 
 export interface EmailMessage { to: string; subject: string; text: string; html: string }
 
@@ -52,8 +52,12 @@ function shell(title: string, preview: string, rows: string): string {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="q-bg" style="background:${T.bg}"><tr><td align="center" style="padding:32px 16px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="q-card" style="max-width:460px;background:${T.surface};border:1px solid ${T.line};border-radius:12px">
 <tr><td style="padding:28px 28px 0">
+<table role="presentation" cellpadding="0" cellspacing="0"><tr>
+<td valign="middle" style="padding:0 12px 0 0"><img src="${EMAIL_ICON_URL}" width="40" height="40" alt="" style="display:block;width:40px;height:40px;border:0;border-radius:9px"></td>
+<td valign="middle">
 <div class="q-ink" style="font-size:20px;line-height:22px;font-weight:600;letter-spacing:-0.02em;color:${T.ink}">qalm</div>
 <div class="q-muted" style="font-size:12px;line-height:16px;font-weight:500;color:${T.muted}">by Apollo</div>
+</td></tr></table>
 </td></tr>
 <tr><td style="padding:24px 28px 0">
 <h1 class="q-ink" style="margin:0 0 8px;font-size:24px;line-height:30px;font-weight:600;letter-spacing:-0.02em;color:${T.ink}">${escapeHtml(title)}</h1>

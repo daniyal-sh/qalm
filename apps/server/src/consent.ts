@@ -3,7 +3,7 @@ import type { Env, McpProps } from './env';
 import { startMagicLink, TooManyRequests, webUser } from './auth';
 import { GRANT_TTL_MS, userNotebooks, type NotebookChoice } from './grants';
 import type { Folder } from '@qalm/core';
-import { BRAND_FONT_STACK, D, MARK_SVG, T } from './brand';
+import { BRAND_FONT_STACK, D, MARK_SVG, T, TILE } from './brand';
 import { escapeHtml as e, HttpError, now } from './util';
 
 const css = `
@@ -17,8 +17,8 @@ body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:15px/1
 .brand b{font-weight:600;color:var(--muted);letter-spacing:-.02em}
 .logos{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:16px}
 .av{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:#fff;font-weight:600;font-size:16px;background:var(--assistant)}
-.mark{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--line)}
-.mark svg{width:34px;height:28px}
+.mark{width:44px;height:44px;border-radius:10px;display:grid;place-items:center;background:${TILE}}
+.mark svg{width:32px;height:29px}
 .sep{color:var(--faint)}
 h1{margin:0 0 4px;font-size:20px;font-weight:600;letter-spacing:-.02em;text-align:center}
 .sub{margin:0 0 16px;text-align:center;color:var(--muted);font-size:14px}
