@@ -161,7 +161,6 @@ function tally(gen: (r: () => number) => Real, salt: number): Record<string, num
   const got: Record<string, number> = {};
   for (let i = 0; i < N_REAL; i++) {
     const { pl, size, wobble, step } = gen(rng(7000 + i * 13 + salt));
-    (globalThis as any).DBG = salt === 17 || salt === 14; if ((globalThis as any).DBG) console.log('#', i);
     const k = recognizeShape(quick(pl, size, i + 900 + salt, { wobble, step }))?.kind ?? 'none';
     got[k] = (got[k] ?? 0) + 1;
   }

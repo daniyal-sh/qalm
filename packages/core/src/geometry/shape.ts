@@ -532,9 +532,9 @@ function recogniseClosed(loop: P[], diag: number): ShapeItem | null {
   const turns = idx.map((i) => ringPts[i]!);
   const k = idx.length;
   const ell = fitEllipse(ringPts);
-  // Polygons use the corners where their fitted sides meet; the star its sharp tips as they are.
-  const cs = k >= 3 && k <= 6 ? refineCorners(ringPts, idx, size) : turns;
-  if ((globalThis as any).DBG) console.log('k', k, 'ellErr', ell.err.toFixed(3), 'ang', interiorAngles(cs).map((a) => a.toFixed(0)).join(','));
+  // Triangles and quadrilaterals use the corners where their fitted sides meet. Pentagons, hexagons and the star use
+  // the turning points (refining a hexagon with a missed corner would make a good pentagon of it).
+  const cs = k === 3 || k === 4 ? refineCorners(ringPts, idx, size) : turns;
 
   // A pentagram drawn in one go: 5 sharp tips, visited every other one (turns of ~144°).
   if (k === 5) {
@@ -556,14 +556,15 @@ function recogniseClosed(loop: P[], diag: number): ShapeItem | null {
       kind = 'triangle';
       poly = cs;
     } else if (k === 4) {
-      const ang = interiorAngles(cs);
+      // Rectangle or diamond: told apart on the turning points as drawn; the fitted corners give the geometry.
+      const ang = interiorAngles(turns);
       // Diamond: corners at the top, right, bottom and left (its diagonals near upright, its edges not).
       const axisOff = (a: P, b: P) => {
         const t = Math.atan2(b[1] - a[1], b[0] - a[0]);
         return Math.abs(t - snapAxis(t, 90)) / DEG;
       };
-      const diagonalsUpright = axisOff(cs[0]!, cs[2]!) <= 12 && axisOff(cs[1]!, cs[3]!) <= 12;
-      const edgesUpright = [0, 1, 2, 3].some((i) => axisOff(cs[i]!, cs[(i + 1) % 4]!) <= 15);
+      const diagonalsUpright = axisOff(turns[0]!, turns[2]!) <= 12 && axisOff(turns[1]!, turns[3]!) <= 12;
+      const edgesUpright = [0, 1, 2, 3].some((i) => axisOff(turns[i]!, turns[(i + 1) % 4]!) <= 15);
       if (ang.every((a) => Math.abs(a - 90) <= 18) && !(diagonalsUpright && !edgesUpright)) {
         kind = 'rect';
         poly = rectFrom(cs);
@@ -587,7 +588,6 @@ function recogniseClosed(loop: P[], diag: number): ShapeItem | null {
     }
     if (poly && kind) {
       const err = meanDistToPolygon(pts, poly) / size;
-      if ((globalThis as any).DBG) console.log(' poly', kind, err.toFixed(3));
       if (err < 0.06) return make(kind, poly);
     }
   }
@@ -606,7 +606,6 @@ function recogniseClosed(loop: P[], diag: number): ShapeItem | null {
     const box = fitBox(ringPts);
     const boxErr = meanDistToPolygon(pts, box) / size;
     const ellErr = meanDistToPolygon(pts, ellipseOutline(ellipseCorners(ell))) / size;
-    if ((globalThis as any).DBG) console.log(' box', boxErr.toFixed(3), 'ell', ellErr.toFixed(3));
     if (boxErr < 0.04 && boxErr < 0.7 * ellErr) return make('rect', rectFrom(box));
   }
   // Round: an ellipse (or circle). With corners found but no polygon fitting, only a close fit.
