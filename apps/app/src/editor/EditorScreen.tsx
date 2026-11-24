@@ -44,6 +44,8 @@ import { ReadingSheet } from './ReadingSheet';
 import { SwatchStrip } from './Swatches';
 import { Toolbar } from './Toolbar';
 import { FocusPill, usePillPlace } from './FocusPill';
+import { FormatBar } from './FormatBar';
+import type { FormatKind } from './format.logic';
 import { PresentBar } from './PresentBar';
 import { clampPresent, f5Action, presentKey } from './present.logic';
 import { Ruler } from './Ruler';
@@ -175,6 +177,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   // ---- selection, text, comments ----
   const [selection, setSelection] = React.useState<Selection | null>(null);
   const [editingText, setEditingText] = React.useState<EditingText | null>(null);
+  const textFormatter = React.useRef<((kind: FormatKind) => void) | null>(null);
   const [activeCommentId, setActiveComment] = React.useState<string | null>(null);
   const [pageData, setPageData] = React.useState(() => new Map<string, PageData>());
   const reportPage = React.useCallback((pageId: string, data: PageData | null) => {
@@ -1103,6 +1106,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             setSelection,
             editingText,
             setEditingText,
+            textFormatter,
             activeCommentId,
             // Presenting shows the pages only: no comment pins.
             showComments: ui.comments && !presenting,
@@ -1386,6 +1390,14 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             </View>
             )}
 
+            {/* While typing in a text box: the format bar, under the toolbar (above the keyboard on tablets). Never while
+                presenting (typing ends when presenting starts; the presentation bar is at the bottom). */}
+            {editingText && !presenting ? (
+              <View style={[styles.formatWrap, { top: focus ? 12 + insets.top : 72 }]} pointerEvents="box-none">
+                <FormatBar compact={phone} onFormat={(k) => textFormatter.current?.(k)} />
+              </View>
+            ) : null}
+
             {selection && selectionPage && !presenting ? (
               <View style={[styles.selWrap, { bottom: selBottom }]} pointerEvents="box-none">
                 <Appear style={[styles.selBar, shadow2, { backgroundColor: c.surface, borderColor: c.line }]}>
@@ -1645,6 +1657,7 @@ const styles = StyleSheet.create({
   pageFoot: { position: 'absolute', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 32 },
   toolbarWrap: { position: 'absolute', top: 12, left: 12, right: 12, alignItems: 'center' },
   selWrap: { position: 'absolute', bottom: 20, left: 12, right: 12, alignItems: 'center' },
+  formatWrap: { position: 'absolute', left: 12, right: 12, alignItems: 'center' },
   selBar: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 4, maxWidth: '100%', borderRadius: radius.panel, borderWidth: StyleSheet.hairlineWidth },
   selCount: { paddingHorizontal: 8, minWidth: 28, textAlign: 'center', fontVariant: ['tabular-nums'] },
   selSep: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginVertical: 8, marginHorizontal: 2 },

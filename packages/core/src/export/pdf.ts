@@ -1,5 +1,5 @@
 import fontkit from '@pdf-lib/fontkit';
-import { BlendMode, LineCapStyle, PDFDocument, StandardFonts, degrees, rgb, type PDFEmbeddedPage, type PDFFont, type PDFImage, type RGB } from 'pdf-lib';
+import { BlendMode, LineCapStyle, PDFDocument, StandardFonts, degrees, rgb, type PDFEmbeddedPage, type PDFFont, type PDFImage, type PDFPage, type RGB } from 'pdf-lib';
 import { strokeSvgPath } from '../geometry/stroke';
 import { inkPaint } from '../geometry/color';
 import { itemsOnPaper, paperPattern, DOT_RADIUS, RULE_WIDTH } from '../geometry/paper';
@@ -9,6 +9,11 @@ import { wrapText } from '../render/text';
 import type { Notebook } from '../model/notebook';
 import type { Page } from '../model/page';
 import { FIGTREE_REGULAR_B64 } from './figtreeFont';
+import { FONT_B_B64, FONT_BI_B64, FONT_I_B64, FONT_M_B64, FONT_X_B64 } from '../markdown/fontData';
+import { layoutMarkdownSettled, rendersMarkdown } from '../markdown/layout';
+import { loadMathFor } from '../markdown/math';
+import { clusters, isZeroWidth, type MdFont } from '../markdown/fonts';
+import type { TextItem } from '../types';
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 function fromBase64(s: string): Uint8Array {
@@ -56,6 +61,49 @@ function textRuns(fonts: { font: PDFFont; has: Set<number> }[], s: string): Run[
   return runs;
 }
 
+/** The layout places glyphs by their plain advances: no ligatures (fi, fl, ->) in Markdown boxes' text. */
+const NO_LIGATURES = { liga: false, clig: false, dlig: false, calt: false };
+
+const MD_FONT_B64: Record<Exclude<MdFont, 'r'>, string> = { b: FONT_B_B64, i: FONT_I_B64, bi: FONT_BI_B64, m: FONT_M_B64, x: FONT_X_B64 };
+
+/**
+ * Draws a Markdown text box (`format: 'md'`) from its layout, the same ops the page draws: text runs in their fonts,
+ * tints and rules as rectangles, maths as paths. `font` embeds each font on first use. A box with maths loads MathJax
+ * first (on demand: `math.ts`), so the export never has maths' placeholder. If it can't load (offline web, a chunk gone
+ * after a deploy), maths is drawn as its TeX source, as a TeX error is, and the export still succeeds; `math.failed`
+ * keeps the rest of the export from trying again for every box.
+ */
+async function drawMarkdown(out: PDFPage, H: number, item: TextItem, font: (f: MdFont) => Promise<PDFFont>, math: { failed: boolean; onFail?: () => void }): Promise<void> {
+  if (!math.failed) {
+    // One failed request isn't the network being gone: try once more before the rest of the export does without.
+    const loaded = await loadMathFor([item]).then(
+      () => true,
+      () => loadMathFor([item]).then(() => true, () => false),
+    );
+    if (!loaded) {
+      math.failed = true;
+      math.onFail?.();
+    }
+  }
+  const color = parseColor(item.color);
+  const rot = item.rot ?? 0;
+  const [cos, sin] = [Math.cos(rot), Math.sin(rot)];
+  // Box-local (u right, v down) to PDF space (y up); pdf-lib turns counter-clockwise, ours turn clockwise.
+  const at = (u: number, v: number) => ({ x: item.x + u * cos - v * sin, y: H - (item.y + u * sin + v * cos) });
+  const rotate = rot ? { rotate: degrees((-rot * 180) / Math.PI) } : {};
+  // Every formula, even if the app's time slice defers some (it yields between slices instead of freezing).
+  const { ops } = await layoutMarkdownSettled(item.text, item.w, item.fontSize, { mathFailed: math.failed });
+  for (const op of ops) {
+    if (op.k === 'text') {
+      // Text no bundled font has draws as `?` (one per character), as plain boxes do; zero-width characters as nothing.
+      const text = op.fallback ? clusters(op.text).filter((c) => !isZeroWidth(c)).map(() => '?').join('') : op.text;
+      if (text) out.drawText(text, { ...at(op.x, op.y), size: op.size, font: await font(op.font), color, ...(op.alpha !== undefined ? { opacity: op.alpha } : {}), ...rotate });
+    }
+    else if (op.k === 'rect') out.drawRectangle({ ...at(op.x, op.y + op.h), width: op.w, height: op.h, color, ...(op.alpha < 1 ? { opacity: op.alpha } : {}), ...rotate });
+    else out.drawSvgPath(op.d, { ...at(op.x, op.y), scale: op.s, color, borderWidth: 0, ...rotate });
+  }
+}
+
 const runsWidth = (runs: Run[], size: number) => runs.reduce((w, r) => w + r.font.widthOfTextAtSize(r.text, size), 0);
 
 const isPng = (b: Uint8Array) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
@@ -69,12 +117,17 @@ export interface ExportPdfOptions {
   toPng?: (bytes: Uint8Array) => Promise<Uint8Array | null>;
   /** Called once for each image asset that still couldn't go in (it is left out of the PDF). */
   onSkippedImage?: (assetId: string) => void;
+  /**
+   * Called once if MathJax couldn't load (offline web, a chunk gone after a deploy; tried twice): Markdown boxes' maths
+   * is in the PDF as TeX source. The app says so and offers to export again.
+   */
+  onMathUnavailable?: () => void;
 }
 
 /**
  * Exports a notebook as PDF: paper or the source PDF page as background, strokes and shapes as vector paths,
  * images (PNG and JPEG; others via `opts.toPng`) and text boxes (Figtree, subset, wrapped with its metrics like on
- * screen; see `textRuns` for characters Figtree lacks).
+ * screen; see `textRuns` for characters Figtree lacks). Markdown boxes draw their layout (`drawMarkdown`).
  */
 export async function exportPdf(
   nb: Notebook,
@@ -95,6 +148,14 @@ export async function exportPdf(
       fonts = [fig, sym].map((font) => ({ font, has: new Set(font.getCharacterSet()) }));
     }
     return fonts;
+  };
+  // Markdown boxes' fonts, each embedded (subset) on first use.
+  const mdFonts = new Map<MdFont, Promise<PDFFont>>();
+  const mdMath = { failed: false, onFail: opts.onMathUnavailable };
+  const mdFont = (f: MdFont) => {
+    let p = mdFonts.get(f);
+    if (!p) mdFonts.set(f, (p = pdf.embedFont(f === 'r' ? figtreeBytes() : fromBase64(MD_FONT_B64[f]), { subset: true, features: NO_LIGATURES })));
+    return p;
   };
   const sources = new Map<string, Promise<PDFDocument>>();
   const embedded = new Map<string, PDFEmbeddedPage>();
@@ -167,6 +228,10 @@ export async function exportPdf(
           break;
         }
         case 'text': {
+          if (rendersMarkdown(item)) {
+            await drawMarkdown(out, H, item, mdFont, mdMath);
+            break;
+          }
           const fs = await textFonts();
           const size = item.fontSize;
           const rows = wrapText(item.text, item.w, (s) => runsWidth(textRuns(fs, s), size));

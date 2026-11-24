@@ -144,11 +144,11 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
 
 | Package | Tests | Other verification |
 |---|---|---|
-| core | 137 | Regions (clustering, context, the owner's page, first look, erased, labels, refs), readings stale rules, migration |
-| server | 33 | `wrangler dev` smoke test; `wrangler deploy --dry-run` (bundle ~1.1 MB gzipped) |
-| app | 128 | Every round-2 PR checked in headless Chrome, offline and signed in against `wrangler dev` with a scripted MCP agent |
+| core | 173 | Regions (clustering, context, the owner's page, first look, erased, labels, refs), readings stale rules, migration |
+| server | 48 | `wrangler dev` smoke test; `wrangler deploy --dry-run` (bundle ~1.9 MB gzipped, ~0.8 MB of it MathJax, evaluated only for maths) |
+| app | 219 | Every round-2 PR checked in headless Chrome, offline and signed in against `wrangler dev` with a scripted MCP agent |
 | qalm-ink | JVM freehand parity test (31 style × smoothing cases) | Android `assembleDebug` (x86_64); drawing on an emulator and on web |
-| desktop | 3 unit | Packaged `qalm.exe` end-to-end test (Playwright): library, open notebook, draw, reload route, PDF export via the native save dialog, deep link, no console errors |
+| desktop | 3 unit | Packaged `qalm.exe` end-to-end test (Playwright): library, open notebook, draw, live shapes, a Markdown text box via the format bar, reload route, PDF export (with the Markdown fonts) via the native save dialog, deep link, no console errors |
 
 **Round 2 (PRs #1–#24, all merged; audit issue #14 covers the findings):**
 - **Ink:** no blank frame when a stroke ends (PageCanvas reports what it drew; #5); pen styles fountain/ball/brush and
@@ -185,6 +185,11 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
   - **Pages:** a virtualised page list, the toolbar, zoom (pinch, Ctrl+wheel, ±), undo/redo, and add or delete pages.
   - **Writing tools:** pen, highlighter, eraser, lasso (move, recolour, duplicate, delete), text boxes, images and
     shape snapping.
+  - **Markdown** (tech-spec §2, Markdown): new text boxes render Markdown with TeX maths when they lose focus; a format
+    bar under the toolbar inserts the syntax while typing. Only boxes with `format: 'md'` render it (new boxes, pasted
+    text, and any box the bar touches); older boxes stay plain text. Comments render Markdown too (raw HTML shows as text).
+    Library choice: markdown-it + MathJax 3 in core, drawn by our own layout everywhere; Enriched Markdown (Software
+    Mansion) renders native text views, which can't feed the Skia page, PDF export or the server's crops.
   - **PDFs:** PDF backgrounds.
   - **AI:** the comments panel (starts closed at every width; docked at ≥ 1100 px, floating below that, closed when the
     window narrows), Ask, and Reading (what an agent read in the selected ink, with a "stale" badge; editable).
@@ -260,6 +265,18 @@ email-only sign-in, and `grants.notebook_ids` / `folder_ids` since grants cover 
   - **Live shapes** (#60): hold 400 ms within 2.5 mm and the shape snaps under the pen; drag to resize/rotate, lift to
     place; one undo restores the stroke. Tested on web/Electron (desktop e2e step); Android built only as a JVM test of
     `LiveShape.kt` (the view wiring is uncompiled); iOS never compiled. Needs a real-stylus feel check.
+  - **Markdown** is verified on web (headless Chrome, light and dark) and in the packaged desktop app (e2e step: format
+    bar keeps focus, box stored as `format: 'md'`, Figtree Bold in the PDF export). On Android and iPad it's unverified on
+    a device: the RN TextInput selection restore (`setSelection`), inline maths SVG inside `<Text>` in comments, and the
+    format bar staying clear of the keyboard need a check. MathJax loads on demand (tech-spec, Maths): its own ~0.58 MB
+    gzipped chunk on web/Electron; still in the Worker's single file (~1.9 MB) and the native bundle, but not evaluated
+    until a note has maths. Lists don't continue on Enter (type `- ` or use the bar). Maths is capped (`MATH_LIMITS`) after a
+    review found a 3.8 KB `\def` comment could OOM the Worker. Fallback runs (Cyrillic, CJK, emoji) and the right-to-left
+    plain fallback are only checked on web: on native, emoji and CJK come from system fonts and need a device check. On
+    web and desktop they show as missing-glyph boxes in plain and Markdown boxes alike (CanvasKit has only the bundled
+    fonts). A second review added: linear layout of long words, a 1 MB maths path cap per box, size-bounded caches, a 50 ms
+    maths time slice in the app (PDF export waits for every formula), indentation kept in converted old boxes, and
+    Figtree Regular in crops. The time slice's fill-in is unit-tested and seen on web; not timed on Hermes.
   - **Partial eraser and scribble to erase** (PR "Partial eraser and scribble to erase"): the eraser's Whole stroke /
     Partial switch (E toggles), pieces keep style and pressure (written once at pen-up: the stroke deleted, its pieces
     added with `splitFrom`; nothing mid-gesture), shapes erase whole, one undo per gesture; a quick zig-zag

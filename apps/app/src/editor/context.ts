@@ -4,6 +4,7 @@ import * as React from 'react';
 import type * as Y from 'yjs';
 
 import type { InputPrefs } from '../theme/ThemeProvider';
+import type { FormatKind } from './format.logic';
 import type { CrossPageUndo } from './undoStack';
 import type { EraserMode } from './items';
 import type { ToolId } from './view';
@@ -71,6 +72,8 @@ export interface EditorCtx {
   setSelection(s: Selection | null): void;
   editingText: EditingText | null;
   setEditingText(e: EditingText | null): void;
+  /** The text box being typed in registers how the format bar changes its text (null while none is). */
+  textFormatter: React.RefObject<((kind: FormatKind) => void) | null>;
   activeCommentId: string | null;
   /** False while the notebook's AI access is off: comment pins and cards are hidden (the threads stay). */
   showComments: boolean;

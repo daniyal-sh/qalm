@@ -1,4 +1,6 @@
 import { wrapText } from '../render/text';
+import { layoutMarkdown, rendersMarkdown } from '../markdown/layout';
+import { TEXT_CHAR_WIDTH, TEXT_LINE_HEIGHT } from './textConstants';
 import type { BBox, ImageItem, Item, TextItem } from '../types';
 
 export function unionBBox(a: BBox | null, b: BBox): BBox {
@@ -22,10 +24,7 @@ export function pointsBBox(pts: readonly { x: number; y: number }[], pad = 0): B
   return [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
 }
 
-/** Line height of typed text boxes, as a multiple of the font size. */
-export const TEXT_LINE_HEIGHT = 1.3;
-/** Average glyph advance of Figtree, as a multiple of the font size (estimates wrapping without a font). */
-export const TEXT_CHAR_WIDTH = 0.55;
+export { TEXT_LINE_HEIGHT, TEXT_CHAR_WIDTH };
 
 /** Rows a text box wraps into at its width (estimated). */
 export function textRows(item: Pick<TextItem, 'text' | 'w' | 'fontSize'>): number {
@@ -44,9 +43,13 @@ export function setTextMeasure(fn: TextMeasure | null): void {
   measure = fn;
 }
 
-/** Height of a text box: measured when a measure is installed, else estimated from an average glyph width. */
-export function textHeight(item: Pick<TextItem, 'text' | 'w' | 'fontSize'>): number {
+/**
+ * Height of a text box. A Markdown box (`format: 'md'`) is as tall as its layout (the same everywhere); a plain one is
+ * measured when a measure is installed, else estimated from an average glyph width.
+ */
+export function textHeight(item: Pick<TextItem, 'text' | 'w' | 'fontSize' | 'format'>): number {
   const row = item.fontSize * TEXT_LINE_HEIGHT;
+  if (rendersMarkdown(item)) return Math.max(row, layoutMarkdown(item.text, item.w, item.fontSize).height);
   const h = measure?.(item);
   if (h != null && Number.isFinite(h)) return Math.max(row, h);
   return textRows(item) * row;

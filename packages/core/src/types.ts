@@ -39,8 +39,14 @@ export interface StrokeItem {
    */
   splitFrom?: string;
 }
-/** `rot` (radians, clockwise on the page) turns a text box or image about its top-left corner `(x, y)`; missing = 0. */
-export interface TextItem { id: string; type: 'text'; x: number; y: number; w: number; text: string; fontSize: number; color: string; rot?: number }
+/** How a text box's text is drawn: `md` renders it as Markdown. Missing = plain text (every box from before Markdown). */
+export type TextFormat = 'md';
+/**
+ * `rot` (radians, clockwise on the page) turns a text box or image about its top-left corner `(x, y)`; missing = 0.
+ * `format: 'md'` is set on new boxes and on a box formatted with the format bar; boxes without it stay plain text, so an
+ * old note with a `*` never turns italic.
+ */
+export interface TextItem { id: string; type: 'text'; x: number; y: number; w: number; text: string; fontSize: number; color: string; rot?: number; format?: TextFormat }
 export interface ImageItem { id: string; type: 'image'; assetId: string; x: number; y: number; w: number; h: number; rot?: number }
 export type ShapeKind =
   | 'line'

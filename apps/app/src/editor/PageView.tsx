@@ -1,5 +1,5 @@
-import { boxSelect, EraseSession, inkOnPaper, textHeight, hitTestPoint, isIdentity, lassoSelect, Page, type Item, type PageInfo, type TextItem } from '@qalm/core';
-import { InkOverlay, PageCanvas, QalmInk, type InkOverlayProps } from 'qalm-ink';
+import { boxSelect, EraseSession, inkOnPaper, textHeight, hitTestPoint, isIdentity, lassoSelect, rendersMarkdown, Page, type Item, type PageInfo, type TextItem } from '@qalm/core';
+import { InkOverlay, PageCanvas, QalmInk, useMathFill, type InkOverlayProps } from 'qalm-ink';
 import * as React from 'react';
 import { PixelRatio, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
@@ -10,7 +10,8 @@ import { useSession, useVersion } from '../state/session';
 import { smoothingLevel } from '../theme/ThemeProvider';
 import { font } from '../theme/tokens';
 import { useEditor } from './context';
-import { adjustLiveShape, commitErase, commitSnapped, eraseAlong, scribbleErase, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, dropEmptyText, TEXT_LINE_HEIGHT, hitText, typeText, liveShape, makeStroke, pointsBBox } from './items';
+import { applyFormatTo, type Sel } from './format.logic';
+import { adjustLiveShape, commitErase, commitSnapped, eraseAlong, scribbleErase, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, dropEmptyText, formatText, TEXT_LINE_HEIGHT, hitText, typeText, liveShape, makeStroke, pointsBBox, transformPatch } from './items';
 import { EraseFade, type Fading } from './EraseFade';
 import { isAdditive } from './modifiers';
 import { PAPER_ACCENT, SelectionFrame, type LiveEdit } from './SelectionFrame';
@@ -321,9 +322,12 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   const toPage = (wx: number, wy: number, fn: (x: number, y: number) => void) =>
     rootRef.current?.measureInWindow((x, y) => fn((wx - x) / scale, (wy - y) / scale));
 
+  // A Markdown box's height changes as its maths fills in (MathJax loaded on demand, or a deferred time slice): pins on
+  // it move with it.
+  const mathFill = useMathFill(React.useMemo(() => items.some((it) => it.type === 'text' && rendersMarkdown(it)), [items]));
   const anchors = React.useMemo(
     () => (ed.showComments ? commentAnchors(comments, ed.activeCommentId, items) : []),
-    [comments, ed.activeCommentId, items, ed.showComments],
+    [comments, ed.activeCommentId, items, ed.showComments, mathFill], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const assetUri = React.useCallback((id: string) => imageUris.get(id), [imageUris]);
   const onDrawn = React.useCallback(
@@ -361,6 +365,8 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
       text: '',
       fontSize: DEFAULT_TEXT_SIZE,
       color: nightInk,
+      // New boxes render Markdown; older ones (no `format`) stay plain text.
+      format: 'md',
     };
     // Not on the page yet: the first character adds it (an abandoned empty box never exists).
     ed.setEditingText({ pageId: info.id, itemId: id, draft: item });
@@ -500,6 +506,39 @@ function TextEditor({ page, itemId, draft, scale, night, onDone }: { page: Page;
   const item = stored?.type === 'text' ? stored : draft;
   const [text, setText] = React.useState(item?.text ?? '');
   const input = React.useRef<React.ComponentRef<typeof TextInput>>(null);
+  // The latest text and selection, for the format bar (it acts between renders).
+  const latest = React.useRef(text);
+  latest.current = text;
+  const selection = React.useRef<Sel>({ start: text.length, end: text.length });
+  const pendingSel = React.useRef<Sel | null>(null);
+  // The format bar: Markdown around the selection, as one step with the typing (the box becomes Markdown).
+  React.useEffect(() => {
+    ed.textFormatter.current = (kind) => {
+      // A box from before Markdown: its text is escaped first, so `price *5*` doesn't turn italic.
+      const cur = page.item(itemId);
+      const legacy = cur?.type === 'text' && cur.format !== 'md';
+      const { text: v, sel } = applyFormatTo(latest.current, selection.current, kind, legacy);
+      latest.current = v;
+      setText(v);
+      const isNew = !page.item(itemId);
+      if (formatText(page, ed.undo, itemId, v, draft) && isNew && ed.editingText) ed.touchPage(ed.editingText.pageId);
+      selection.current = sel;
+      pendingSel.current = sel;
+    };
+    return () => {
+      ed.textFormatter.current = null;
+    };
+  });
+  // After a format, put the caret (or selection) back where the bar left it, and the focus in the box.
+  React.useEffect(() => {
+    const sel = pendingSel.current;
+    if (!sel) return;
+    pendingSel.current = null;
+    const el = input.current as unknown as { focus?(): void; setSelectionRange?(a: number, b: number): void; setSelection?(a: number, b: number): void } | null;
+    el?.focus?.();
+    if (el?.setSelectionRange) el.setSelectionRange(sel.start, sel.end);
+    else el?.setSelection?.(sel.start, sel.end);
+  }, [text]);
   const dropIfEmpty = React.useCallback(() => void dropEmptyText(page, ed.undo, itemId), [page, ed.undo, itemId]);
   // Leaving mid-edit (back to the library, the page unmounting) still drops an emptied box.
   React.useEffect(() => dropIfEmpty, [dropIfEmpty]);
@@ -515,10 +554,14 @@ function TextEditor({ page, itemId, draft, scale, night, onDone }: { page: Page;
       multiline
       value={text}
       onChangeText={(v) => {
+        latest.current = v;
         setText(v);
         // The first character adds a new box; it and the typing that follows are one undo step.
         const isNew = !page.item(itemId);
         if (typeText(page, ed.undo, itemId, v, draft) && isNew && ed.editingText) ed.touchPage(ed.editingText.pageId);
+      }}
+      onSelectionChange={(e) => {
+        selection.current = e.nativeEvent.selection;
       }}
       onBlur={finish}
       // Escape finishes typing (web and hardware keyboards).

@@ -188,6 +188,24 @@ export function typeText(page: Page, undo: Pick<CrossPageUndo, 'merging'>, id: s
 }
 
 /**
+ * The format bar changed a text box's text: like typing (the same undo step), and the box becomes Markdown
+ * (`format: 'md'`), so a plain box from before Markdown renders once it's formatted. Returns true when it's on the page.
+ */
+export function formatText(page: Page, undo: Pick<CrossPageUndo, 'merging'>, id: string, text: string, draft?: TextItem): boolean {
+  return undo.merging(
+    textUndoKey(id),
+    () => {
+      const it = page.item(id);
+      if (it?.type === 'text') page.updateItem(id, (it.format === 'md' ? { text } : { text, format: 'md' }) as Partial<TextItem>);
+      else if (draft && text.trim()) page.addItem({ ...draft, text, format: 'md' });
+      else return false;
+      return true;
+    },
+    2000,
+  );
+}
+
+/**
  * Removes a text box left empty. The removal joins the box's last typing step (however old), so one undo restores the
  * box as it was before that typing: not at all when that typing created it. Returns true if it removed the box.
  */

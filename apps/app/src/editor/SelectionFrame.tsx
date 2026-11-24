@@ -1,5 +1,6 @@
 import { frameCorners, moveBy, resizeSim, rotateSim, selectionFrame, textWidthPatch, type Frame, type Item, type TextItem } from '@qalm/core';
 import * as React from 'react';
+import { useMathFill } from 'qalm-ink';
 import { PanResponder, Platform, StyleSheet, View } from 'react-native';
 import { GestureDetector, usePanGesture, type PanGesture } from 'react-native-gesture-handler';
 
@@ -109,7 +110,9 @@ export function SelectionFrame({ items, scale, live, onLive, onCommit, onTap, ni
   const accent = night ? PAPER_ACCENT.night : PAPER_ACCENT.light;
   const line = { borderColor: accent.line };
   const knob = { borderColor: accent.line, backgroundColor: accent.knob };
-  const base = React.useMemo(() => selectionFrame(items), [items]);
+  // A Markdown box's height changes when its maths fills in (MathJax loaded on demand, or a deferred time slice).
+  const fill = useMathFill(true);
+  const base = React.useMemo(() => selectionFrame(items), [items, fill]); // eslint-disable-line react-hooks/exhaustive-deps
   const frame = liveFrame(items, live);
   const single = items.length === 1 ? items[0]! : null;
   const textOnly = single?.type === 'text' ? single : null;

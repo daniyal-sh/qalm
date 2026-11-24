@@ -1,4 +1,4 @@
-import { anchorInkRemoved, type Comment } from '@qalm/core';
+import { anchorInkRemoved, markdownToPlain, type Comment } from '@qalm/core';
 import * as React from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -10,6 +10,7 @@ import { PANEL_HEADER, radius, space } from '../theme/tokens';
 import { Avatar, Button, focusRing, IconButton, Segmented, TextField } from '../ui/controls';
 import { EmptyState } from '../ui/layout';
 import { Text } from '../ui/Text';
+import { Markdown } from '../ui/Markdown';
 import { filterFor, filterRows, rowsInView, type CommentFilter, type CommentRow, type RowBox } from './CommentsPanel.logic';
 import type { PageData } from './context';
 import { threadQuote } from './view';
@@ -57,7 +58,7 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
     >
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${t.author.name}${agent ? ', AI agent' : ''}, page ${row.index + 1}: ${t.text}`}
+        accessibilityLabel={`${t.author.name}${agent ? ', AI agent' : ''}, page ${row.index + 1}: ${markdownToPlain(t.text)}`}
         accessibilityHint={row.data ? (hasLine ? 'Highlights it on the page' : undefined) : 'Goes to its page'}
         accessibilityState={{ selected: active }}
         onPress={onSelect}
@@ -86,7 +87,8 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
             {where}
           </Text>
         ) : null}
-        <Text numberOfLines={row.comment ? undefined : 3}>{row.comment ? row.comment.text : t.text}</Text>
+        {/* An open thread shows its Markdown; a summary, the plain text of its first lines. */}
+        {row.comment ? <Markdown text={row.comment.text} /> : <Text numberOfLines={3}>{markdownToPlain(t.text)}</Text>}
       </Pressable>
       {row.comment && row.data ? (
         <Thread comment={row.comment} data={row.data} hasLine={hasLine} onJump={onJump} />
@@ -99,7 +101,7 @@ function Card({ row, active, onSelect, onJump }: { row: CommentRow; active: bool
                 {t.last.author.name} · {relativeTime(t.last.at)}
               </Text>
               <Text variant="body" numberOfLines={3}>
-                {t.last.text}
+                {markdownToPlain(t.last.text)}
               </Text>
             </View>
           ) : null}
@@ -123,7 +125,7 @@ function Thread({ comment: cm, data, hasLine, onJump }: { comment: Comment; data
           <Text variant="meta" tone="muted">
             {r.author.name} · {relativeTime(r.at)}
           </Text>
-          <Text variant="body">{r.text}</Text>
+          <Markdown text={r.text} />
         </View>
       ))}
       {reply !== null ? (
