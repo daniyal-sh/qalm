@@ -42,6 +42,8 @@ function ToolButton({ icon, label, selected, onPress }: { icon: ToolIconName; la
       accessibilityState={{ selected }}
       onPress={onPress}
       {...tip(label)}
+      // Web: a tool is a toggle button, so screen readers hear "pressed" for the current one.
+      {...((Platform.OS === 'web' && selected !== undefined ? { 'aria-pressed': selected } : {}) as object)}
       style={(s) => [
         styles.tool,
         hoverTransition,
