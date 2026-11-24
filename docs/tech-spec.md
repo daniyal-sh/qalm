@@ -275,15 +275,20 @@ characters of path).
   is no `newcommand` package (`\def`, `\newcommand`, `\renewcommand` are undefined), and after each formula the AMS
   `\DeclareMathOperator` table and the labels are reset.
 - **Limits** (`MATH_LIMITS`), because MathJax is synchronous and boxes and comments come from other devices and agents:
-  a formula is at most 1000 TeX characters, 200 KB of path and 50 em wide or tall; a box or comment renders at most 30
+  a formula is at most 1000 TeX characters, 200 KB of path and 50 em wide or tall, both its box and what its path
+  actually paints (`\smash`, `\rlap` or negative space can't hide a 1000 em rule in a tiny box); a box or comment renders at most 30
   formulas, 5000 TeX characters and 1 MB of path (`mathAllowance` with `fits`, `allowedMath`); MathJax's `maxMacros` is
   500 and `maxBuffer` 4 KB. Past a limit the TeX source shows. The Worker gives each step of an agent request (measuring
   regions, drawing the crop, encoding a thread) a budget of 10 000 new TeX characters (`withMathBudget`; its clock doesn't
   move during synchronous work, so it's counted in characters); layouts cut short by a budget aren't cached.
 - **Time slice** (app): `setMathTimeSlice(50)` (`src/lib/maths.ts`). Within one JS task new maths runs for at most
   ~50 ms (the first formula of a task always runs, so filling in always progresses); the rest shows its source, and
-  when the task ends `onMathDeferred` listeners re-render (PageCanvas redraws and re-bakes its Markdown boxes, comments
-  re-render), a slice at a time. A page of heavy boxes or a 100-reply thread never blocks for long. PDF export uses
+  when the task ends `onMathDeferred` listeners re-render (PageCanvas redraws its Markdown boxes, comments re-render),
+  a slice at a time. Each box and comment keeps the formulas it has resolved (`MathMemo`: an incomplete layout's, kept by
+  its key; a comment's, in the component), so progress never goes backwards when the visible maths outgrows the shared
+  formula cache (2000 formulas); a task that renders nothing new asks for no further pass, so once everything is in,
+  nothing runs. Incomplete layouts are marked `partial`; a page is re-baked only when its incomplete boxes change, and a
+  complete box is not re-recorded. A page of heavy boxes or a 100-reply thread never blocks for long. PDF export uses
   `layoutMarkdownSettled`, which yields between slices until every formula is in, so the PDF is complete.
 - **Loaded on demand.** MathJax is about 0.6 MB gzipped and most notes have no maths, so `markdown/math.ts` loads it with
   `import()` of `markdown/mathjax.ts`, the only way in (a core test fails if anything else imports it, core or app). The
@@ -310,8 +315,9 @@ cancelled, and on iPad and Android it's outside the page's scroll view (whose ta
 
 **Comments** render the same parse tree with React Native views (`ui/Markdown.tsx`; maths as react-native-svg paths); the
 panel's summaries, margin cards and accessibility labels use `markdownToPlain`, which shows maths in a readable plain form
-(`texToPlain`: `\int_0^1 x^2\,dx` → `∫₀¹ x² dx`, `\frac{a}{b}` → `a/b`), never raw TeX commands. Agents still get and
-send raw text.
+(`texToPlain`: `\int_0^1 x^2\,dx` → `∫₀¹ x² dx`, `\frac{a}{b}` → `a/b`), never raw TeX commands. `texToPlain` is one pass
+with an explicit stack (linear whatever the nesting; other users' comments are uncapped) and returns TeX past 1000
+characters as it is. Agents still get and send raw text.
 
 **Why not Enriched Markdown** (Software Mansion): its renderer draws native text views (RaTeX for maths on iOS and
 Android, KaTeX on web). Text boxes are drawn by one Skia renderer, into PDFs and into the server's crops, none of which a
