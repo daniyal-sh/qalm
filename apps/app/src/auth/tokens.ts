@@ -16,6 +16,16 @@ export interface User {
   name?: string;
 }
 
+/** Storage key for a server's tokens: `qalm:tokens@host[:port]`, or `qalm:tokens` with no server. */
+export function tokenKey(serverUrl: string | undefined): string {
+  if (!serverUrl) return 'qalm:tokens';
+  try {
+    return `qalm:tokens@${new URL(serverUrl).host}`;
+  } catch {
+    return `qalm:tokens@${serverUrl}`;
+  }
+}
+
 export class AuthError extends Error {}
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
