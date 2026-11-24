@@ -56,7 +56,7 @@
     },
 
     // Production on https://qalm-api.apollolearn.app (deploy: pnpm --filter @qalm/server deploy:prod). The web app is
-    // on https://qalm.apollolearn.app/app (apps/site). REPLACE_ME ids: create the resources and fill them in (handover.md).
+    // on https://qalm.apollolearn.app/app (apps/site). Resources created 2026-11-24 (handover.md §7).
     "production": {
       "name": "qalm-api",
       "workers_dev": false,
@@ -69,12 +69,12 @@
         {
           "binding": "DB",
           "database_name": "qalm-prod",
-          "database_id": "REPLACE_ME_D1_QALM_PROD_ID",
+          "database_id": "26805932-7d5f-4c6d-896b-d5784c2ade0d",
           "migrations_dir": "migrations"
         }
       ],
       "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "qalm-assets-prod" }],
-      "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "REPLACE_ME_KV_QALM_OAUTH_PROD_ID" }],
+      "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "f4718837af774fc483d2ac67f108abdb" }],
       "vars": {
         "PUBLIC_URL": "https://qalm-api.apollolearn.app",
         "MAGIC_LINK_URL": "https://qalm.apollolearn.app/app/auth/email/verify",
