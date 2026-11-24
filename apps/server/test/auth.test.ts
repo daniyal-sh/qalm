@@ -62,7 +62,7 @@ describe('auth', () => {
 
   it('GET on a magic link never uses it up or returns tokens', async () => {
     const m = await startEmail('scanner@example.com');
-    expect(m.link.startsWith('https://qalm.app/auth/email/verify?token=')).toBe(true); // MAGIC_LINK_URL: the app's route
+    expect(m.link.startsWith('https://qalm.example/app/auth/email/verify?token=')).toBe(true); // MAGIC_LINK_URL: the app's route, under its base path
     // A mail scanner (or an old link that points at the server) follows it, twice.
     for (let i = 0; i < 2; i++) {
       const r = await call(`/auth/email/verify?token=${encodeURIComponent(m.token)}`);
@@ -71,7 +71,7 @@ describe('auth', () => {
       expect(r.headers.get('Cache-Control')).toBe('no-store');
       const html = await r.text();
       expect(html).toContain('scanner@example.com');
-      expect(unescape(html)).toContain(`href="https://qalm.app/auth/email/verify?token=${encodeURIComponent(m.token)}"`);
+      expect(unescape(html)).toContain(`href="https://qalm.example/app/auth/email/verify?token=${encodeURIComponent(m.token)}"`);
       expect(html).not.toMatch(/accessToken|refreshToken/);
     }
     // Lookup (the app's confirmation screen) doesn't use it up either.

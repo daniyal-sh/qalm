@@ -1,0 +1,16 @@
+{
+  "name": "@qalm/site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:site": "node scripts/build.mjs",
+    "preview": "wrangler dev --port 8790",
+    "deploy:staging": "node scripts/build.mjs && wrangler deploy --env staging",
+    "deploy:prod": "node scripts/build.mjs && wrangler deploy --env production",
+    "test": "node --test test/worker.test.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.166.0"
+  }
+}

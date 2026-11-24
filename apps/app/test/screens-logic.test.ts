@@ -27,6 +27,7 @@ describe('magic link', () => {
   it('extracts the token from links and bare tokens', () => {
     expect(extractMagicToken('https://api.qalm.app/auth/email/verify?token=abc%2Ddef1234567890xyz')).toBe('abc-def1234567890xyz');
     expect(extractMagicToken('qalm://auth/email/verify?x=1&token=tok_1234567890abcdef')).toBe('tok_1234567890abcdef');
+    expect(extractMagicToken('https://qalm.apollolearn.app/app/auth/email/verify?token=tok_1234567890abcdef')).toBe('tok_1234567890abcdef'); // the web app under /app
     expect(extractMagicToken('  Zm9vYmFyYmF6cXV4MTIzNDU2  ')).toBe('Zm9vYmFyYmF6cXV4MTIzNDU2');
     expect(extractMagicToken('hello')).toBeNull();
     expect(extractMagicToken('')).toBeNull();
