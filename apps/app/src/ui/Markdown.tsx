@@ -1,4 +1,4 @@
-import { allowedMath, parseMarkdown, texToPath, type MathBox, type MdBlock, type MdInline } from '@qalm/core';
+import { allowedMath, mathDeferredEpoch, onMathDeferred, parseMarkdown, texToPath, type MathBox, type MdBlock, type MdInline } from '@qalm/core';
 import * as React from 'react';
 import { Linking, Platform, StyleSheet, View, type TextStyle } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -152,7 +152,10 @@ function Blocks({ blocks, size, color, depth = 0 }: { blocks: readonly MdBlock[]
 export function Markdown({ text, color }: { text: string; color?: string }) {
   const { c } = useTheme();
   const blocks = React.useMemo(() => parseMarkdown(text), [text]);
-  const allowed = React.useMemo(() => allowedMath(blocks), [blocks]);
+  // Maths the time slice deferred (a long thread renders in one task) fills in on later renders.
+  const [fill, setFill] = React.useState(mathDeferredEpoch);
+  React.useEffect(() => onMathDeferred(() => setFill(mathDeferredEpoch())), []);
+  const allowed = React.useMemo(() => allowedMath(blocks), [blocks, fill]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <MathAllowed.Provider value={allowed}>
       <Blocks blocks={blocks} size={typeRamp.body.fontSize} color={color ?? c.ink} />

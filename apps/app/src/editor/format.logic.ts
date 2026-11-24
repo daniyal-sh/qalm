@@ -166,7 +166,7 @@ const LINE_START = /^( {0,3})(#|[-+](?= |$)|\d{1,9}(?=[.)](?: |$))|-+ *$|=+ *$)/
 
 /**
  * Escapes text written as plain (a text box from before Markdown) so it reads the same as Markdown: `price *5*` stays
- * `price *5*`, `# x` isn't a heading. Returns the escaped text and where each old index lands in it.
+ * `price *5*`, `# x` isn't a heading, an indented line isn't code (and keeps its indentation). Returns the escaped text and where each old index lands in it.
  */
 export function escapeMarkdown(text: string): { text: string; at(i: number): number } {
   const out: string[] = [];
@@ -178,9 +178,18 @@ export function escapeMarkdown(text: string): { text: string; at(i: number): num
     // A heading, list or rule marker at the start of a line: escape its first character (for "1." the dot).
     const m = LINE_START.exec(line);
     const escAt = m ? m[1]!.length + (/^\d/.test(m[2]!) ? m[2]!.length : 0) : -1;
+    // Leading indentation: 4 spaces or a tab would start a code block, and less is dropped. Its first character becomes
+    // an entity, so the line starts with text and the indentation shows (whitespace-only lines stay blank).
+    const indented = /^[ \t]/.test(line) && line.trim() !== '';
     for (let i = 0; i < line.length; i++) {
       map.push(n);
       const ch = line[i]!;
+      if (i === 0 && indented) {
+        const entity = ch === '\t' ? '&#9;' : '&#32;';
+        out.push(entity);
+        n += entity.length;
+        continue;
+      }
       if (i === escAt || INLINE_SPECIAL.has(ch)) {
         out.push('\\');
         n++;

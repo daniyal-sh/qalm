@@ -33,7 +33,7 @@ import notoMath from '../assets/fonts/NotoSansMath-Subset.ttf';
 import { bakeBudget, jobStillValid, planBake, type Baked, type BakePlan } from './bake';
 import { disposeLater } from './dispose';
 import { provideTextFonts, textParagraph } from './textMetrics';
-import { drawMarkdownText, markdownPicture, provideMarkdownFallback, useMdTypefaces, type MdTypefaces } from './markdownText';
+import { drawMarkdownText, markdownPicture, provideMarkdownFallback, useMathFill, useMdTypefaces, type MdTypefaces } from './markdownText';
 import { INK_CHUNK, inkGeometryKey, inkRuns, sameItems, type InkItem, type Run } from './inkRuns';
 import { traceOutline } from './outlinePath';
 import { usePageImage } from './usePageImage';
@@ -594,9 +594,10 @@ function useBase(
 }
 
 /** A Markdown text box (`format: 'md'`): core's layout, recorded as a picture. */
-function MarkdownTextNode({ item, md, fonts }: { item: TextItem; md: MdTypefaces; fonts: SkTypefaceFontProvider }) {
-  // `fonts`: its fallback runs are measured with them, so the layout changes once they load.
-  const picture = React.useMemo(() => markdownPicture(item, md), [item.x, item.y, item.rot, item.color, item.fontSize, item.text, item.w, md, fonts]); // eslint-disable-line react-hooks/exhaustive-deps
+function MarkdownTextNode({ item, md, fonts, fill }: { item: TextItem; md: MdTypefaces; fonts: SkTypefaceFontProvider; fill: number }) {
+  // `fonts`: its fallback runs are measured with them, so the layout changes once they load. `fill`: maths deferred by
+  // the time slice is ready to draw.
+  const picture = React.useMemo(() => markdownPicture(item, md), [item.x, item.y, item.rot, item.color, item.fontSize, item.text, item.w, md, fonts, fill]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => () => disposeLater(picture as unknown as { dispose?: () => void }), [picture]);
   return <Picture picture={picture} />;
 }
@@ -634,7 +635,10 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
     provideMarkdownFallback(fonts);
   }
   // Markdown text boxes' fonts (bold, italic, mono, maths), loaded only for pages that have one.
-  const md = useMdTypefaces(React.useMemo(() => items.some((it) => it.type === 'text' && rendersMarkdown(it)), [items]));
+  const hasMd = React.useMemo(() => items.some((it) => it.type === 'text' && rendersMarkdown(it)), [items]);
+  const md = useMdTypefaces(hasMd);
+  // Maths the app's time slice deferred: redraw (and re-bake) the page's Markdown boxes once it's ready.
+  const fill = useMathFill(hasMd);
   const pdf = usePageImage(pdfImage);
   const bounds = React.useMemo(() => Skia.XYWHRect(-pageW, -pageH, pageW * 3, pageH * 3), [pageW, pageH]);
   const liveIds = React.useMemo(() => (live?.ids.length ? new Set(live.ids) : null), [live?.ids]);
@@ -685,8 +689,8 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
   const backdrop = React.useMemo((): Backdrop => ({ ...paper, pdf, highlights }), [paper, pdf, highlights]);
   const target = React.useMemo(() => {
     const ratio = PixelRatio.get();
-    return { w: Math.round(width * ratio), h: Math.round(height * ratio), key: `${objectId(paper)}|${objectId(pdf)}|${fonts ? 1 : 0}|${md ? 1 : 0}|${JSON.stringify(highlights)}` };
-  }, [width, height, paper, pdf, fonts, md, highlights]);
+    return { w: Math.round(width * ratio), h: Math.round(height * ratio), key: `${objectId(paper)}|${objectId(pdf)}|${fonts ? 1 : 0}|${md ? 1 : 0}|${fill}|${JSON.stringify(highlights)}` };
+  }, [width, height, paper, pdf, fonts, md, fill, highlights]);
   const { plan, base, hadBase } = useBase(items, target, pageW, pageH, liveIds, fonts, md, backdrop, ink.pathOf);
   const tailItems = React.useMemo(() => (base ? items.slice(plan.tailStart) : NO_ITEMS), [base, items, plan.tailStart]);
   const tail = useInk(tailItems, bounds, liveIds);
@@ -714,7 +718,7 @@ export const PageCanvas = React.memo(function PageCanvas({ info, items: stored, 
       }
       const it = run.item;
       let node: React.ReactElement | null = null;
-      if (it.type === 'text' && rendersMarkdown(it)) node = md && fonts ? <MarkdownTextNode key={it.id} item={it} md={md} fonts={fonts} /> : null;
+      if (it.type === 'text' && rendersMarkdown(it)) node = md && fonts ? <MarkdownTextNode key={it.id} item={it} md={md} fonts={fonts} fill={fill} /> : null;
       else if (it.type === 'text') node = fonts ? <TextNode key={it.id} item={it} fonts={fonts} /> : null;
       else {
         const uri = assetUri?.(it.assetId);

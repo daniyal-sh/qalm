@@ -9,6 +9,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { persistClip } from '../src/editor/clipboard';
+// Turns on the maths time slice (MathJax never blocks the UI for long).
+import '../src/lib/maths';
 import { desktop } from '../src/lib/desktop';
 import { useFullscreenShortcut } from '../src/lib/fullscreen';
 import { PEN_DETECTED_TOAST } from '../src/lib/inputPrefs';

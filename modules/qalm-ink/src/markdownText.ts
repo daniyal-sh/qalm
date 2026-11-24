@@ -1,4 +1,4 @@
-import { layoutMarkdown, setFallbackTextMeasure, type MdFont, type TextItem } from '@qalm/core';
+import { layoutMarkdown, mathDeferredEpoch, onMathDeferred, setFallbackTextMeasure, type MdFont, type TextItem } from '@qalm/core';
 import * as React from 'react';
 import {
   FontHinting,
@@ -58,18 +58,38 @@ function fontOf(face: SkTypeface, size: number): SkFont {
   return f;
 }
 
+/** Maths paths as Skia paths, most recently used last; bounded by count and by their SVG size (one box may hold ~1 MB). */
 const MAX_PATHS = 400;
+const MAX_PATH_CHARS = 4_000_000;
 const paths = new Map<string, SkPath | null>();
+let pathChars = 0;
 function pathOf(d: string): SkPath | null {
-  if (paths.has(d)) return paths.get(d)!;
+  const hit = paths.get(d);
+  if (hit !== undefined) {
+    paths.delete(d);
+    paths.set(d, hit);
+    return hit;
+  }
   const p = Skia.Path.MakeFromSVGString(d);
-  if (paths.size >= MAX_PATHS) {
+  paths.set(d, p);
+  pathChars += d.length;
+  while (paths.size > MAX_PATHS || (pathChars > MAX_PATH_CHARS && paths.size > 1)) {
     const [k, old] = paths.entries().next().value!;
     paths.delete(k);
+    pathChars -= k.length;
     if (old) disposeLater(old as unknown as { dispose?: () => void });
   }
-  paths.set(d, p);
   return p;
+}
+
+/**
+ * Re-renders when maths the app's time slice deferred can be filled in (`onMathDeferred`): the number to include in
+ * what Markdown drawing memoises on. `enabled`: only pages with Markdown boxes listen.
+ */
+export function useMathFill(enabled: boolean): number {
+  const [epoch, setEpoch] = React.useState(mathDeferredEpoch);
+  React.useEffect(() => (enabled ? onMathDeferred(() => setEpoch(mathDeferredEpoch())) : undefined), [enabled]);
+  return enabled ? epoch : 0;
 }
 
 /**
@@ -95,9 +115,10 @@ function fallbackParagraph(text: string, font: MdFont, size: number, color: stri
 
 /** Installs Skia's measure for fallback runs into core's layout (after the text fonts load; layouts are redone). */
 export function provideMarkdownFallback(fonts: SkTypefaceFontProvider): void {
-  if (fallbackFonts === fonts) return;
+  // Every page canvas loads its own provider of the same fonts: the first one serves them all (it is never freed), so
+  // switching pages doesn't throw away measured widths and cached layouts.
+  if (fallbackFonts) return;
   fallbackFonts = fonts;
-  widths.clear();
   setFallbackTextMeasure((text, font, size) => {
     const key = `${font}|${size}|${text}`;
     let w = widths.get(key);
@@ -109,7 +130,7 @@ export function provideMarkdownFallback(fonts: SkTypefaceFontProvider): void {
       widths.set(key, w);
     }
     return w;
-  });
+  }, TEXT_FONTS.join('+'));
 }
 
 /**
