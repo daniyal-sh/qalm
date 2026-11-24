@@ -39,28 +39,63 @@ export function fontHas(font: MdFont, cp: number): boolean {
 
 /** Code points that belong to the character before them: combining marks, joiners, variation selectors, skin tones, tags. */
 const ATTACHES = /^[\p{M}\u200D\uFE00-\uFE0F\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}]$/u;
+const MARK = /^\p{M}$/u;
 const ZWJ = 0x200d;
+/** Combining marks kept per character: "zalgo" text stacks hundreds, which would all land on one spot anyway. */
+export const MAX_MARKS = 8;
+/** Code points per cluster: a longer emoji (ZWJ) sequence starts a new cluster rather than growing one forever. */
+export const MAX_CLUSTER = 32;
 
-/** Splits text into rough grapheme clusters (never between a character and its marks, or inside an emoji sequence). */
+/**
+ * Splits text into rough grapheme clusters (never between a character and its marks, or inside an emoji sequence),
+ * dropping combining marks past `MAX_MARKS` on one character. Linear in the text: each cluster is bounded.
+ */
 export function clusters(text: string): string[] {
   const out: string[] = [];
   let prevZwj = false;
+  let size = 0;
+  let marks = 0;
   for (const ch of text) {
-    if (out.length && (prevZwj || ATTACHES.test(ch))) out[out.length - 1] += ch;
-    else out.push(ch);
+    const mark = MARK.test(ch);
+    if (out.length && (prevZwj || mark || ATTACHES.test(ch))) {
+      if (mark && marks >= MAX_MARKS) continue;
+      if (size < MAX_CLUSTER) {
+        out[out.length - 1] += ch;
+        size++;
+        if (mark) marks++;
+        prevZwj = ch.codePointAt(0) === ZWJ;
+        continue;
+      }
+      if (mark) continue;
+    }
+    out.push(ch);
+    size = 1;
+    marks = 0;
     prevZwj = ch.codePointAt(0) === ZWJ;
   }
   return out;
 }
 
+/** Characters that take no room (zero-width space, joiners, direction marks, word joiner, BOM). */
+const ZERO_WIDTH = /^[\u200B-\u200F\u2060-\u2064\uFEFF]+$/;
+/** Is this cluster only zero-width characters? (No width; nothing to draw in a PDF.) */
+export const isZeroWidth = (cluster: string): boolean => ZERO_WIDTH.test(cluster);
+
 /** Measures fallback runs (the app installs Skia's); null = estimate. */
 export type FallbackMeasure = (text: string, font: MdFont, size: number) => number;
 let fallbackMeasure: FallbackMeasure | null = null;
+let fallbackKey: string | null = null;
 let epoch = 0;
 
-/** Installs how fallback runs are measured (the app: a Skia Paragraph, as it draws them). Layouts made before are redone. */
-export function setFallbackTextMeasure(fn: FallbackMeasure | null): void {
+/**
+ * Installs how fallback runs are measured (the app: a Skia Paragraph, as it draws them); layouts made before are redone.
+ * `key` names the fonts it measures with: installing again with the same key changes nothing (each page canvas loads
+ * its own copy of the same fonts, and must not throw every cached layout away).
+ */
+export function setFallbackTextMeasure(fn: FallbackMeasure | null, key?: string): void {
+  if (fn && key !== undefined && key === fallbackKey) return;
   fallbackMeasure = fn;
+  fallbackKey = fn ? (key ?? null) : null;
   epoch++;
 }
 
@@ -70,7 +105,7 @@ export const textMetricsEpoch = (): number => epoch;
 /** Per 1000 em, for text no bundled font has: wide for CJK and emoji, else an average glyph. */
 function estimate(text: string, size: number): number {
   let w = 0;
-  for (const c of clusters(text)) w += c.codePointAt(0)! >= 0x2e80 ? 1000 : 600;
+  for (const c of clusters(text)) w += isZeroWidth(c) ? 0 : c.codePointAt(0)! >= 0x2e80 ? 1000 : 600;
   return (w * size) / 1000;
 }
 

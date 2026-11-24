@@ -304,7 +304,7 @@ export class AgentHub {
       const threads = this.threads();
       const pages = await this.loadPages([resolveThread(threads, r0).pageId].filter((id) => nb.pages().some((p) => p.id === id)));
       this.requireAccess();
-      return { text: encodeQinkThread(nb, pages, threads, r0), svg: null, changed: false };
+      return { text: withMathBudget(CROP_MATH, () => encodeQinkThread(nb, pages, threads, r0)), svg: null, changed: false };
     }
     let ids: string[] = [];
     if (r0 === 'outline') ids = nb.pages().map((p) => p.id);

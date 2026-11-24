@@ -37,6 +37,10 @@ export const MATH_LIMITS = {
   perDoc: 30,
   /** TeX characters rendered per text box or comment, in total (~0.3 s of MathJax at worst, on a desktop). */
   docChars: 5000,
+  /** Path data per text box or comment, in total (~1 MB; 30 formulas at the per-formula cap would be ~6 MB). */
+  docPathChars: 1_000_000,
+  /** Largest width or height of one formula, in em (`\rule{1pt}{100000em}` would make a box too tall to select). */
+  maxEm: 50,
   /** MathJax's own limits: macro expansions per formula, and the size its input may grow to while expanding. */
   maxMacros: 500,
   maxBuffer: 4 * 1024,
@@ -239,19 +243,82 @@ export function withMathBudget<T>(limit: { chars: number; ms: number }, fn: () =
 /** How many formulas a budget has turned away so far (layouts that had any aren't cached). */
 export const mathSkipped = (): number => skipped;
 
-/**
- * Counts the maths of one text box or comment against `MATH_LIMITS.perDoc` and `docChars`: true while a formula may
- * still be rendered.
- */
-export function mathAllowance(): (tex: string) => boolean {
+/** One text box's or comment's maths allowance (`mathAllowance`). */
+export interface MathAllowance {
+  /** Counts a formula against `MATH_LIMITS.perDoc` and `docChars`: true while one may still be rendered. */
+  (tex: string): boolean;
+  /** Counts a rendered formula's path against `MATH_LIMITS.docPathChars`: false (show its source) once that's spent. */
+  fits(box: MathBox): boolean;
+}
+
+/** A fresh maths allowance for one text box or comment (see `MathAllowance`). */
+export function mathAllowance(): MathAllowance {
   let n = 0;
   let chars = 0;
-  return (tex) => {
+  let pathChars = 0;
+  const allow = ((tex: string) => {
     if (n >= MATH_LIMITS.perDoc || chars + tex.length > MATH_LIMITS.docChars) return false;
     n++;
     chars += tex.length;
     return true;
+  }) as MathAllowance;
+  allow.fits = (box) => {
+    if (pathChars + box.path.length > MATH_LIMITS.docPathChars) return false;
+    pathChars += box.path.length;
+    return true;
   };
+  return allow;
+}
+
+/**
+ * The app's time slice: within one JS task, new maths may run for `ms` (then formulas show their source), so a page of
+ * heavy boxes, a long comment thread or an export never blocks the UI for long. When a task that ran out ends, the
+ * `onMathDeferred` listeners are told, and re-render to fill the rest in, a slice at a time. A `withMathBudget` takes
+ * precedence while it runs. The Worker doesn't use slices (its clock doesn't move during work): it uses budgets.
+ */
+let sliceMs: number | null = null;
+let sliceUntil = 0;
+let sliceOpen = false;
+let sliceDeferred = false;
+let deferredEpoch = 0;
+const deferredListeners = new Set<() => void>();
+const timers = globalThis as unknown as { setTimeout(fn: () => void, ms: number): unknown };
+
+/** Turns the time slice on (`ms`) or off (null). */
+export function setMathTimeSlice(ms: number | null): void {
+  sliceMs = ms;
+}
+
+/** Calls `fn` after each task in which maths was deferred to a later one; returns an unsubscribe. */
+export function onMathDeferred(fn: () => void): () => void {
+  deferredListeners.add(fn);
+  return () => void deferredListeners.delete(fn);
+}
+
+/** Changes after each task that deferred maths (renderers include it in what they memoise on). */
+export const mathDeferredEpoch = (): number => deferredEpoch;
+
+function endSlice(): void {
+  sliceOpen = false;
+  if (!sliceDeferred) return;
+  sliceDeferred = false;
+  deferredEpoch++;
+  for (const fn of [...deferredListeners]) fn();
+}
+
+/** True when the current task's slice is spent (and notes that maths was deferred). */
+function sliceSpent(): boolean {
+  if (sliceMs === null) return false;
+  if (!sliceOpen) {
+    // The first new formula of a task always runs (each is capped), so filling in always makes progress.
+    sliceOpen = true;
+    sliceUntil = now() + sliceMs;
+    timers.setTimeout(endSlice, 0);
+    return false;
+  }
+  if (now() <= sliceUntil) return false;
+  sliceDeferred = true;
+  return true;
 }
 
 /**
@@ -267,6 +334,10 @@ export function texToPath(tex: string, display: boolean): MathBox | null {
     cache.delete(key);
     cache.set(key, hit);
     return hit;
+  }
+  if (!budget && sliceSpent()) {
+    skipped++;
+    return null;
   }
   if (budget) {
     if (budget.chars < tex.length || now() > budget.until) {
@@ -292,7 +363,9 @@ export function texToPath(tex: string, display: boolean): MathBox | null {
       const paths: string[] = [];
       for (const child of adaptor.childNodes(svg)) collect(adaptor, child as LiteElement, [1, 1, -minX, 0], paths);
       const path = paths.join('');
-      if (path.length <= MATH_LIMITS.pathChars) box = { w: vw / 1000, a: -minY / 1000, d: (vh + minY) / 1000, path };
+      const size = { w: vw / 1000, a: -minY / 1000, d: (vh + minY) / 1000 };
+      const fits = size.w <= MATH_LIMITS.maxEm && size.a + size.d <= MATH_LIMITS.maxEm;
+      if (path.length <= MATH_LIMITS.pathChars && fits) box = { ...size, path };
     }
   } catch {
     box = null;

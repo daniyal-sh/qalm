@@ -41,8 +41,10 @@ describe('maths limits (one box or comment can’t stall the app, a PDF export o
     const t0 = performance.now();
     expect(texToPath('x'.repeat(MATH_LIMITS.texChars + 1), false)).toBeNull();
     expect(performance.now() - t0).toBeLessThan(5);
-    // Exactly at the cap (spacing, so its outlines stay small): rendered.
-    expect(texToPath('\\;'.repeat((MATH_LIMITS.texChars - 1) / 3) + 'y', false)).not.toBeNull();
+    // Exactly at the cap (empty groups, so it stays small and narrow): rendered.
+    const atCap = '{}'.repeat((MATH_LIMITS.texChars - 2) / 2) + 'yy';
+    expect(atCap).toHaveLength(MATH_LIMITS.texChars);
+    expect(texToPath(atCap, false)).not.toBeNull();
   });
 
   it('a formula whose outlines are too big shows its source', () => {
@@ -68,8 +70,8 @@ describe('maths limits (one box or comment can’t stall the app, a PDF export o
   });
 
   it('caps the TeX characters of one box', () => {
-    // 896 characters each, mostly spacing (small outlines): 5 fit in 5000 characters, the 6th and 7th don't.
-    const big = (k: number) => `$${'\\quad'.repeat(179)}${String.fromCharCode(97 + k)}$`;
+    // 895 characters each, mostly empty groups (small and narrow): 5 fit in 5000 characters, the 6th and 7th don't.
+    const big = (k: number) => `$${'{}'.repeat(447)}${String.fromCharCode(97 + k)}$`;
     const text = Array.from({ length: 7 }, (_, k) => big(k)).join('\n\n');
     expect(paths(text, 100000)).toBe(5);
   });
@@ -231,7 +233,6 @@ describe('caches', () => {
 describe('agents’ crops place glyphs by advance', () => {
   it('turns off kerning and ligatures for Markdown text', () => {
     const svg = pageSvg(box('office AV'));
-    expect(svg).toContain('font-kerning="none"');
-    expect(svg).toContain('font-variant-ligatures="none"');
+    expect(svg).toContain('style="font-kerning:none;font-variant-ligatures:none"');
   });
 });

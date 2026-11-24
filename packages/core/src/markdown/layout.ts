@@ -1,6 +1,6 @@
 import { TEXT_LINE_HEIGHT } from '../geometry/textConstants';
-import { fontRuns, hasRtl, textMetricsEpoch, textWidth, type MdFont } from './fonts';
-import { mathAllowance, mathSkipped, texToPath } from './math';
+import { clusters, fontRuns, hasRtl, textMetricsEpoch, textWidth, type MdFont } from './fonts';
+import { mathAllowance, mathSkipped, texToPath, type MathAllowance, type MathBox } from './math';
 import { parseMarkdown, type Marks, type MdBlock, type MdInline } from './parse';
 import type { TextItem } from '../types';
 
@@ -69,6 +69,16 @@ function wordPiece(text: string, m: Marks, font: MdFont, size: number): Piece {
   return { kind: 'word', text, m, font, size, pad, w: textWidth(text, font, size) + 2 * pad, a: size, d: size * (TEXT_LINE_HEIGHT - 1) };
 }
 
+/** A tab is laid out as four spaces (no font has a glyph for it). */
+const TAB = '    ';
+
+/** A formula within the box's allowance (count, TeX and path size), else null: its source is shown. */
+function allowedFormula(allow: MathAllowance, tex: string, display: boolean): MathBox | null {
+  if (!allow(tex)) return null;
+  const box = texToPath(tex, display);
+  return box && allow.fits(box) ? box : null;
+}
+
 /** CJK ideographs and kana: a line may break between any two of them (there are no spaces). */
 const IDEOGRAPH = /([\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF\u{20000}-\u{3FFFF}])/u;
 /** A break opportunity that takes no room. */
@@ -80,7 +90,7 @@ function pieces(ctx: Ctx, c: readonly MdInline[], size: number, bold: boolean): 
   for (const x of c) {
     if (x.t === 'br') out.push(null);
     else if (x.t === 'math') {
-      const box = ctx.allow(x.tex) ? texToPath(x.tex, false) : null;
+      const box = allowedFormula(ctx.allow, x.tex, false);
       if (box) {
         const z = size * MATH_SCALE;
         out.push({ kind: 'math', m: x.m, w: box.w * z, a: Math.max(size, box.a * z + 0.15 * size), d: Math.max(size * (TEXT_LINE_HEIGHT - 1), box.d * z + 0.1 * size), math: { d: box.path, s: z / 1000 } });
@@ -88,7 +98,7 @@ function pieces(ctx: Ctx, c: readonly MdInline[], size: number, bold: boolean): 
     } else {
       const font = markFont(x.m, bold);
       const z = x.m.code ? size * CODE_SCALE : size;
-      for (const part of x.text.split(/( +)/)) {
+      for (const part of x.text.replace(/\t/g, TAB).split(/( +)/)) {
         if (!part) continue;
         if (part.startsWith(' ') && !x.m.code) out.push({ kind: 'space', m: x.m, w: textWidth(part, font, z), a: 0, d: 0, text: part, font, size: z });
         else if (x.m.code || !IDEOGRAPH.test(part)) out.push(wordPiece(part, x.m, font, z));
@@ -106,15 +116,28 @@ function pieces(ctx: Ctx, c: readonly MdInline[], size: number, bold: boolean): 
 
 /** Breaks a word too wide for a whole line into pieces that fit. */
 function splitWord(p: Piece, max: number): Piece[] {
-  const out: Piece[] = [];
-  let cur = '';
-  for (const ch of p.text!) {
-    if (cur && textWidth(cur + ch, p.font!, p.size!) + 2 * (p.pad ?? 0) > max) {
-      out.push(wordPiece(cur, p.m, p.font!, p.size!));
-      cur = ch;
-    } else cur += ch;
+  return splitByWidth(p.text!, p.font!, p.size!, max - 2 * (p.pad ?? 0)).map((t) => wordPiece(t, p.m, p.font!, p.size!));
+}
+
+/**
+ * Splits text into parts no wider than `max`, between grapheme clusters, measuring each cluster once (linear: a long
+ * word of combining marks or emoji used to be re-measured from its start for every character).
+ */
+function splitByWidth(text: string, font: MdFont, size: number, max: number): string[] {
+  const out: string[] = [];
+  let cur: string[] = [];
+  let w = 0;
+  for (const c of clusters(text)) {
+    const cw = textWidth(c, font, size);
+    if (cur.length && w + cw > max) {
+      out.push(cur.join(''));
+      cur = [];
+      w = 0;
+    }
+    cur.push(c);
+    w += cw;
   }
-  if (cur) out.push(wordPiece(cur, p.m, p.font!, p.size!));
+  if (cur.length) out.push(cur.join(''));
   return out;
 }
 
@@ -123,11 +146,26 @@ function lines(ps: readonly (Piece | null)[], width: number): Piece[][] {
   const out: Piece[][] = [];
   let line: Piece[] = [];
   let lineW = 0;
+  /** Words on the current line (it may also hold leading spaces). */
+  let words = 0;
+  /** The line starts a paragraph or follows a hard break: its leading spaces (indentation) are kept. */
+  let hard = true;
   const push = () => {
     while (line.length && line[line.length - 1]!.kind === 'space') line.pop();
     out.push(line);
     line = [];
     lineW = 0;
+    words = 0;
+    hard = false;
+  };
+  /** Makes room for `w`: a new line, or, on a line of only indentation, dropping the indentation. */
+  const room = (w: number) => {
+    if (lineW + w <= width) return;
+    if (words) push();
+    else {
+      line = [];
+      lineW = 0;
+    }
   };
   // Words with no space between them (`**a**b`) can't be broken apart: group them.
   const groups: (Piece[] | null)[] = [];
@@ -141,29 +179,32 @@ function lines(ps: readonly (Piece | null)[], width: number): Piece[][] {
   for (const g of groups) {
     if (g === null) {
       push();
+      hard = true;
       continue;
     }
     if (g[0]!.kind === 'space') {
-      if (line.length) {
+      if (line.length || hard) {
         line.push(g[0]!);
         lineW += g[0]!.w;
       }
       continue;
     }
     const gw = g.reduce((s, p) => s + p.w, 0);
-    if (line.length && lineW + gw > width) push();
-    if (gw <= width || line.length) {
+    room(gw);
+    if (gw <= width || words) {
       line.push(...g);
       lineW += gw;
+      words += g.length;
       continue;
     }
     // Wider than a whole line: place piece by piece, splitting words.
     for (const p of g) {
       const parts = p.kind === 'word' && p.w > width ? splitWord(p, width) : [p];
       for (const q of parts) {
-        if (line.length && lineW + q.w > width) push();
+        room(q.w);
         line.push(q);
         lineW += q.w;
+        words++;
       }
     }
   }
@@ -174,7 +215,7 @@ function lines(ps: readonly (Piece | null)[], width: number): Piece[][] {
 interface Ctx {
   ops: MdOp[];
   /** The box's maths allowance (`mathAllowance`): past it, formulas show their source. */
-  allow: (tex: string) => boolean;
+  allow: MathAllowance;
 }
 
 /** Text at (x, baseline y) as ops, split by font (the maths font, fallback runs); returns the width. */
@@ -267,15 +308,9 @@ function layBlock(ctx: Ctx, b: MdBlock, x: number, y: number, width: number, S: 
       const z = S * CODE_SCALE;
       const pad = S * 0.5;
       const rows: string[] = [];
-      for (const row of b.text.split('\n')) {
-        let cur = '';
-        for (const ch of row) {
-          if (cur && textWidth(cur + ch, 'm', z) > width - 2 * pad) {
-            rows.push(cur);
-            cur = ch;
-          } else cur += ch;
-        }
-        rows.push(cur);
+      for (const row of b.text.replace(/\t/g, TAB).split('\n')) {
+        const parts = splitByWidth(row, 'm', z, width - 2 * pad);
+        rows.push(...(parts.length ? parts : ['']));
       }
       const lh = z * TEXT_LINE_HEIGHT;
       const h = rows.length * lh + 2 * pad;
@@ -286,7 +321,7 @@ function layBlock(ctx: Ctx, b: MdBlock, x: number, y: number, width: number, S: 
       return h;
     }
     case 'math': {
-      const box = ctx.allow(b.tex) ? texToPath(b.tex, true) : null;
+      const box = allowedFormula(ctx.allow, b.tex, true);
       if (!box) return layBlock(ctx, { t: 'code', text: `$$${b.tex}$$` }, x, y, width, S, depth);
       // Too wide: shrink to fit the box.
       const z = Math.min(S * MATH_SCALE, box.w > 0 ? width / box.w : S);
@@ -307,9 +342,20 @@ function layBlock(ctx: Ctx, b: MdBlock, x: number, y: number, width: number, S: 
  */
 export const LAYOUT_VERSION = 1;
 
-/** Layouts by box (text, width, size), most recently used last: enough for every box of a long notebook. */
-const MAX_CACHED = 4000;
-const cache = new Map<string, MdLayout>();
+/**
+ * Layouts by box (text, width, size), most recently used last: enough for every box of a long notebook, and bounded by
+ * size too (a box may hold up to ~1 MB of maths paths).
+ */
+export const LAYOUT_CACHE = { count: 4000, chars: 16_000_000 };
+const cache = new Map<string, { layout: MdLayout; size: number }>();
+let cachedChars = 0;
+
+/** Roughly how many characters a layout keeps alive: its path data, text and ops. */
+function layoutSize(l: MdLayout): number {
+  let n = 0;
+  for (const op of l.ops) n += 48 + (op.k === 'path' ? op.d.length : op.k === 'text' ? op.text.length : 0);
+  return n;
+}
 
 /**
  * The layout of a Markdown text box (`format: 'md'`) at its width and font size. Cached (LRU), keyed with the layout
@@ -322,7 +368,7 @@ export function layoutMarkdown(text: string, width: number, fontSize: number): M
     // Most recently used last.
     cache.delete(key);
     cache.set(key, hit);
-    return hit;
+    return hit.layout;
   }
   const skippedBefore = mathSkipped();
   const ctx: Ctx = { ops: [], allow: mathAllowance() };
@@ -330,22 +376,43 @@ export function layoutMarkdown(text: string, width: number, fontSize: number): M
   const height = Math.max(fontSize * TEXT_LINE_HEIGHT, layBlocks(ctx, parseMarkdown(text), 0, 0, w, fontSize, 0));
   const out = { ops: ctx.ops, height };
   if (mathSkipped() !== skippedBefore) return out;
-  cache.set(key, out);
-  if (cache.size > MAX_CACHED) cache.delete(cache.keys().next().value!);
+  const size = layoutSize(out);
+  cache.set(key, { layout: out, size });
+  cachedChars += size;
+  while (cache.size > LAYOUT_CACHE.count || cachedChars > LAYOUT_CACHE.chars) {
+    const [k, old] = cache.entries().next().value!;
+    cache.delete(k);
+    cachedChars -= old.size;
+  }
   return out;
 }
 
+const timers = globalThis as unknown as { setTimeout(fn: () => void, ms: number): unknown };
+
 /**
- * The formulas of a parsed comment that may be rendered (`MATH_LIMITS.perDoc` and `docChars`, in reading order); the
- * rest show their source. The comment renderer's equivalent of a box layout's maths allowance.
+ * `layoutMarkdown`, complete: while maths is deferred to later tasks (the app's time slice, `setMathTimeSlice`), it
+ * yields and lays out again, so the UI keeps running between slices. For PDF export, which must show every formula.
+ */
+export async function layoutMarkdownSettled(text: string, width: number, fontSize: number): Promise<MdLayout> {
+  for (let i = 0; ; i++) {
+    const before = mathSkipped();
+    const l = layoutMarkdown(text, width, fontSize);
+    if (mathSkipped() === before || i >= 10_000) return l;
+    await new Promise<void>((done) => timers.setTimeout(done, 0));
+  }
+}
+
+/**
+ * The formulas of a parsed comment that may be rendered (`MATH_LIMITS` per comment, in reading order; this renders them,
+ * so under a time slice some may come later); the rest show their source. The comment renderer's equivalent of a box layout's maths allowance.
  */
 export function allowedMath(blocks: readonly MdBlock[]): Set<object> {
   const allow = mathAllowance();
   const out = new Set<object>();
   const walk = (bs: readonly MdBlock[]) => {
     for (const b of bs) {
-      if (b.t === 'p' || b.t === 'h') for (const x of b.c) if (x.t === 'math' && allow(x.tex)) out.add(x);
-      if (b.t === 'math' && allow(b.tex)) out.add(b);
+      if (b.t === 'p' || b.t === 'h') for (const x of b.c) if (x.t === 'math' && allowedFormula(allow, x.tex, false)) out.add(x);
+      if (b.t === 'math' && allowedFormula(allow, b.tex, true)) out.add(b);
       if (b.t === 'quote') walk(b.c);
       if (b.t === 'list') b.items.forEach(walk);
     }

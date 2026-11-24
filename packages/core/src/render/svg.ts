@@ -41,8 +41,9 @@ export function markdownSvg(item: Pick<TextItem, 'x' | 'y' | 'w' | 'text' | 'fon
     return `<path transform="translate(${n(op.x)} ${n(op.y)}) scale(${op.s.toFixed(5)})" d="${op.d}"/>`;
   });
   const rot = item.rot ? ` rotate(${n((item.rot * 180) / Math.PI)})` : '';
-  // The layout places glyphs by their plain advances: no kerning or ligatures here either (resvg applies both by default).
-  return `<g transform="translate(${n(item.x)} ${n(item.y)})${rot}" fill="${fill}" font-kerning="none" font-variant-ligatures="none">${parts.join('')}</g>`;
+  // The layout places glyphs by their plain advances: no kerning or ligatures here either. resvg applies both by default
+  // and only honours turning them off as a style (not as attributes).
+  return `<g transform="translate(${n(item.x)} ${n(item.y)})${rot}" fill="${fill}" style="font-kerning:none;font-variant-ligatures:none">${parts.join('')}</g>`;
 }
 
 /** SVG markup of one item, in page units. `ink` overrides every colour (used by the line strip). */

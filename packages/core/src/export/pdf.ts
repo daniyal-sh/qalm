@@ -10,8 +10,8 @@ import type { Notebook } from '../model/notebook';
 import type { Page } from '../model/page';
 import { FIGTREE_REGULAR_B64 } from './figtreeFont';
 import { FONT_B_B64, FONT_BI_B64, FONT_I_B64, FONT_M_B64, FONT_X_B64 } from '../markdown/fontData';
-import { layoutMarkdown, rendersMarkdown } from '../markdown/layout';
-import { clusters, type MdFont } from '../markdown/fonts';
+import { layoutMarkdownSettled, rendersMarkdown } from '../markdown/layout';
+import { clusters, isZeroWidth, type MdFont } from '../markdown/fonts';
 import type { TextItem } from '../types';
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -76,9 +76,14 @@ async function drawMarkdown(out: PDFPage, H: number, item: TextItem, font: (f: M
   // Box-local (u right, v down) to PDF space (y up); pdf-lib turns counter-clockwise, ours turn clockwise.
   const at = (u: number, v: number) => ({ x: item.x + u * cos - v * sin, y: H - (item.y + u * sin + v * cos) });
   const rotate = rot ? { rotate: degrees((-rot * 180) / Math.PI) } : {};
-  for (const op of layoutMarkdown(item.text, item.w, item.fontSize).ops) {
-    // Text no bundled font has draws as `?` (one per character), as plain boxes do.
-    if (op.k === 'text') out.drawText(op.fallback ? clusters(op.text).map(() => '?').join('') : op.text, { ...at(op.x, op.y), size: op.size, font: await font(op.font), color, ...rotate });
+  // Every formula, even if the app's time slice defers some (it yields between slices instead of freezing).
+  const { ops } = await layoutMarkdownSettled(item.text, item.w, item.fontSize);
+  for (const op of ops) {
+    if (op.k === 'text') {
+      // Text no bundled font has draws as `?` (one per character), as plain boxes do; zero-width characters as nothing.
+      const text = op.fallback ? clusters(op.text).filter((c) => !isZeroWidth(c)).map(() => '?').join('') : op.text;
+      if (text) out.drawText(text, { ...at(op.x, op.y), size: op.size, font: await font(op.font), color, ...rotate });
+    }
     else if (op.k === 'rect') out.drawRectangle({ ...at(op.x, op.y + op.h), width: op.w, height: op.h, color, ...(op.alpha < 1 ? { opacity: op.alpha } : {}), ...rotate });
     else out.drawSvgPath(op.d, { ...at(op.x, op.y), scale: op.s, color, borderWidth: 0, ...rotate });
   }

@@ -1,6 +1,6 @@
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
 import resvgWasm from '@resvg/resvg-wasm/index_bg.wasm';
-import figtree from '../assets/Figtree_500Medium.ttf';
+import figtree from '../assets/Figtree-Regular.ttf';
 import figtreeBold from '../assets/Figtree-Bold.ttf';
 import figtreeItalic from '../assets/Figtree-Italic.ttf';
 import figtreeBoldItalic from '../assets/Figtree-BoldItalic.ttf';
@@ -8,7 +8,8 @@ import geistMono from '../assets/GeistMono-Regular.ttf';
 import notoMath from '../assets/NotoSansMath-Subset.ttf';
 
 let ready: Promise<void> | null = null;
-// Figtree for text; its bold and italics, Geist Mono and Noto Sans Math for Markdown text boxes (core's `markdownSvg`).
+// Figtree Regular for text (what the page draws and the Markdown layout measures); its bold and italics, Geist Mono
+// and Noto Sans Math for Markdown text boxes (core's `markdownSvg`).
 const fonts = [figtree, figtreeBold, figtreeItalic, figtreeBoldItalic, geistMono, notoMath].map((b) => new Uint8Array(b));
 
 /** Renders an SVG (the Q-ink strip) to PNG with resvg. Text uses the bundled fonts. */

@@ -266,14 +266,14 @@ export function parseMarkdown(src: string): MdBlock[] {
 }
 
 function plainInline(c: readonly MdInline[]): string {
-  return c.map((x) => (x.t === 'text' ? x.text : x.t === 'math' ? x.tex : '\n')).join('');
+  return c.map((x) => (x.t === 'text' ? x.text : x.t === 'math' ? texToPlain(x.tex) : '\n')).join('');
 }
 
 function plainBlocks(bs: readonly MdBlock[]): string[] {
   const out: string[] = [];
   for (const b of bs) {
     if (b.t === 'p' || b.t === 'h') out.push(plainInline(b.c));
-    else if (b.t === 'code' || b.t === 'math') out.push(b.t === 'math' ? b.tex : b.text);
+    else if (b.t === 'code' || b.t === 'math') out.push(b.t === 'math' ? texToPlain(b.tex) : b.text);
     else if (b.t === 'quote') out.push(...plainBlocks(b.c));
     else if (b.t === 'list') b.items.forEach((it, k) => out.push(`${b.ordered ? `${b.start + k}.` : '•'} ${plainBlocks(it).join(' ')}`));
   }
@@ -283,4 +283,84 @@ function plainBlocks(bs: readonly MdBlock[]): string[] {
 /** The text of some Markdown without its syntax (comment previews, toasts, accessibility labels). */
 export function markdownToPlain(src: string): string {
   return plainBlocks(parseMarkdown(src)).join('\n');
+}
+
+/** TeX commands with a one-character (or word) plain form, for previews. */
+const TEX_SYMBOLS: Record<string, string> = {
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε', zeta: 'ζ', eta: 'η', theta: 'θ',
+  vartheta: 'ϑ', iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π', rho: 'ρ', sigma: 'σ', tau: 'τ',
+  upsilon: 'υ', phi: 'φ', varphi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω', Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ',
+  Xi: 'Ξ', Pi: 'Π', Sigma: 'Σ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+  int: '∫', iint: '∬', oint: '∮', sum: '∑', prod: '∏', infty: '∞', partial: '∂', nabla: '∇', sqrt: '√',
+  cdot: '·', times: '×', div: '÷', pm: '±', mp: '∓', le: '≤', leq: '≤', ge: '≥', geq: '≥', ne: '≠', neq: '≠',
+  approx: '≈', equiv: '≡', sim: '∼', propto: '∝', to: '→', rightarrow: '→', leftarrow: '←', Rightarrow: '⇒',
+  Leftarrow: '⇐', leftrightarrow: '↔', Leftrightarrow: '⇔', mapsto: '↦', implies: '⇒', iff: '⇔', in: '∈', notin: '∉',
+  subset: '⊂', subseteq: '⊆', supset: '⊃', cup: '∪', cap: '∩', emptyset: '∅', forall: '∀', exists: '∃', neg: '¬',
+  land: '∧', lor: '∨', angle: '∠', degree: '°', circ: '∘', ldots: '…', cdots: '⋯', dots: '…', prime: '′',
+  langle: '⟨', rangle: '⟩', lfloor: '⌊', rfloor: '⌋', lceil: '⌈', rceil: '⌉', mid: '|', vert: '|',
+  quad: ' ', qquad: '  ', ',': ' ', ';': ' ', ':': ' ', '!': '', ' ': ' ', '{': '{', '}': '}', '%': '%', '$': '$', '#': '#', '&': '&', '_': '_',
+};
+const SUPERSCRIPT: Record<string, string> = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', n: 'ⁿ', i: 'ⁱ' };
+const SUBSCRIPT: Record<string, string> = { '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉', '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎' };
+
+/**
+ * A readable plain form of TeX for previews (comment cards, accessibility labels): `\int_0^1 x^2\,dx` → `∫₀¹ x² dx`,
+ * `\frac{a}{b}` → `a/b`. Approximate by design; unknown commands lose their backslash.
+ */
+export function texToPlain(tex: string): string {
+  let i = 0;
+  /** The next argument: a {group} or one character / command. */
+  const arg = (): string => {
+    while (tex[i] === ' ') i++;
+    if (tex[i] === '{') {
+      let depth = 0;
+      const start = ++i;
+      for (; i < tex.length; i++) {
+        if (tex[i] === '\\') i++;
+        else if (tex[i] === '{') depth++;
+        else if (tex[i] === '}' && depth-- === 0) break;
+      }
+      const inner = tex.slice(start, i);
+      i++;
+      return texToPlain(inner);
+    }
+    return item();
+  };
+  const script = (map: Record<string, string>, mark: string) => {
+    const a = arg();
+    const all = [...a].every((ch) => map[ch]);
+    return all ? [...a].map((ch) => map[ch]).join('') : `${mark}${a.length > 1 ? `(${a})` : a}`;
+  };
+  const item = (): string => {
+    const ch = tex[i];
+    if (ch === undefined) return '';
+    if (ch === '\\') {
+      const m = /^\\([A-Za-z]+|.)/.exec(tex.slice(i));
+      const name = m?.[1] ?? '';
+      i += 1 + name.length;
+      if (name === 'frac' || name === 'dfrac' || name === 'tfrac') {
+        const a = arg();
+        const b = arg();
+        const wrap = (s: string) => (s.length > 1 && /[^\w.]/.test(s) ? `(${s})` : s);
+        return `${wrap(a)}/${wrap(b)}`;
+      }
+      if (name === 'sqrt') {
+        const a = arg();
+        return `√${a.length > 1 ? `(${a})` : a}`;
+      }
+      if (/^(text|mathrm|mathbf|mathit|mathsf|mathtt|mathcal|mathbb|operatorname|boldsymbol|textbf|textit|mbox)$/.test(name)) return arg();
+      if (name === 'left' || name === 'right' || name === 'big' || name === 'Big' || name === 'bigg' || name === 'Bigg') return '';
+      if (name in TEX_SYMBOLS) return TEX_SYMBOLS[name]!;
+      return name;
+    }
+    i++;
+    if (ch === '^') return script(SUPERSCRIPT, '^');
+    if (ch === '_') return script(SUBSCRIPT, '_');
+    if (ch === '{' || ch === '}') return '';
+    if (ch === '~') return ' ';
+    return ch;
+  };
+  let out = '';
+  while (i < tex.length) out += item();
+  return out.replace(/\s+/g, ' ').trim();
 }

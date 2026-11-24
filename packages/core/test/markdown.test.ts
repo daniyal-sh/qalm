@@ -72,7 +72,7 @@ describe('parseMarkdown', () => {
   });
 
   it('gives comment previews their plain text', () => {
-    expect(markdownToPlain('**Nice** work: $x^2$\n\n- one\n- two')).toBe('Nice work: x^2\n• one\n• two');
+    expect(markdownToPlain('**Nice** work: $x^2$\n\n- one\n- two')).toBe('Nice work: x²\n• one\n• two');
   });
 });
 
