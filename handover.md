@@ -180,7 +180,7 @@ All on `main` (the agents' working branch was `build/v1`). Every package type-ch
     shape snapping.
   - **Markdown** (tech-spec §2, Markdown): new text boxes render Markdown with TeX maths when they lose focus; a format
     bar under the toolbar inserts the syntax while typing. Only boxes with `format: 'md'` render it (new boxes, pasted
-    text, and any box the bar touches); older boxes stay plain text. Comments render Markdown too, with raw HTML stripped.
+    text, and any box the bar touches); older boxes stay plain text. Comments render Markdown too (raw HTML shows as text).
     Library choice: markdown-it + MathJax 3 in core, drawn by our own layout everywhere; Enriched Markdown (Software
     Mansion) renders native text views, which can't feed the Skia page, PDF export or the server's crops.
   - **PDFs:** PDF backgrounds.
@@ -261,7 +261,9 @@ email-only sign-in, and `grants.notebook_ids` / `folder_ids` since grants cover 
     bar keeps focus, box stored as `format: 'md'`, Figtree Bold in the PDF export). On Android and iPad it's unverified on
     a device: the RN TextInput selection restore (`setSelection`), inline maths SVG inside `<Text>` in comments, and the
     format bar staying clear of the keyboard need a check. MathJax adds ~0.8 MB gzipped to the Worker (now ~1.9 MB) and
-    to the app bundle. Lists don't continue on Enter (type `- ` or use the bar).
+    to the app bundle. Lists don't continue on Enter (type `- ` or use the bar). Maths is capped (`MATH_LIMITS`) after a
+    review found a 3.8 KB `\def` comment could OOM the Worker. Fallback runs (Cyrillic, CJK, emoji) and the right-to-left
+    plain fallback are only checked on web: on native, emoji and CJK come from system fonts and need a device check.
   - Fractions like ⅔ have no glyph on the page; PDF export uses Symbol, so symbol-heavy lines may wrap differently.
   - "Pen and finger" two-finger pan and pinch are verified with synthetic touch on Electron only; Android and iPad need
     a device check (iOS changes are unbuilt).

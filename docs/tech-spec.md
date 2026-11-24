@@ -114,7 +114,7 @@ type Item = StrokeItem | TextItem | ImageItem | ShapeItem;
 type BBox = [x0: number, y0: number, x1: number, y1: number];
 interface Reading { id: string; ids: string[] /* the strokes it reads */; text: string; src: 'agent'|'user'; by?: string /* the agent */; stale?: boolean; updatedAt: number }
 interface Comment { id: string; author: { kind: 'agent'|'user'; name: string }; text: string; createdAt: number; resolved: boolean; replies: { author: {kind:'agent'|'user'; name:string}; text: string; at: number }[]; anchor?: BBox /* fallback box */; anchorIds?: string[] /* the strokes it is about: its box is derived from them live */; ask?: boolean /* started by an Ask */ }
-// Comment and reply text is Markdown (rendered by the app, raw HTML stripped; agents send and receive it as written).
+// Comment and reply text is Markdown (rendered by the app, raw HTML shown as text; agents send and receive it as written).
 // A thread with anchorIds sits on those strokes (follows them; "Ink removed" once they're all gone); with only anchor on a box; with neither on the page.
 interface Ask { id: string; pageId: string; text: string; at: number; sel?: { itemIds: string[]; bbox: BBox }; commentId?: string }
 ```
@@ -233,12 +233,16 @@ packQalm(...) / unpackQalm(bytes) -> { index: Y.Doc; pages: Map<pageId, Y.Doc>; 
 ### Markdown (text boxes with `format: 'md'`, and comments)
 **Which boxes.** New text boxes (typed with the text tool or pasted from another app) get `format: 'md'`, and so does any
 box the format bar touches. Boxes without the flag stay plain text, so an old note with `*` or `#` never changes. The flag
-is an ordinary item field, so it syncs through the page's Yjs doc, undo and `.qalm` like any other.
+is an ordinary item field, so it syncs through the page's Yjs doc, undo and `.qalm` like any other. The first format bar
+press on an old box escapes its existing Markdown characters (`escapeMarkdown`, the selection remapped), so `price *5*`
+and `# x` keep reading as typed and only the new formatting applies. A box with right-to-left text (Arabic, Hebrew) draws
+as plain text everywhere (`rendersMarkdown`): the layout places words left to right.
 
 **Syntax** (`markdown/parse.ts`, markdown-it 15 `commonmark` + strikethrough): bold, italic, strikethrough, headings,
 bullet and numbered lists, blockquotes, inline code and fenced/indented code blocks, links, `$…$` inline maths and
 `$$…$$` display maths (own rules: `$5 and $6` stays text, Markdown escapes don't apply inside maths). A single newline is a
-line break (`breaks: true`), as people type in a note. **Raw HTML is stripped**: its tags never render or show. Links
+line break (`breaks: true`), as people type in a note. **Raw HTML is never rendered**: it shows as the text it is
+(`html: false`), so `if 0<x and y>1`, `List<T>` or a `<pre>` line stay as typed. Links
 open only `http:`, `https:` and `mailto:` (`safeHref`); images show their alt text and are never fetched.
 
 **One layout, every renderer.** `layoutMarkdown(text, w, fontSize)` turns a box into draw ops in box-local units (text
@@ -248,11 +252,26 @@ underlines, and maths as paths). Runs are measured with the real advance widths 
 bold, italic and bold italic, Geist Mono for code, Noto Sans Math for symbols Figtree lacks), so a box wraps identically
 on the page (Skia `drawText`, unhinted linear metrics), in PDF exports (pdf-lib, the same fonts embedded as subsets) and
 in agents' crops (`markdownSvg`, rendered by resvg with the same fonts), on every platform. `textHeight` of a Markdown
-box is its layout height, so frames and hit boxes fit.
+box is its layout height, so frames and hit boxes fit. Text none of these fonts has (Cyrillic, CJK, emoji, Devanagari, …)
+is a **fallback run** in its style: on the page the app measures and draws it with a Skia Paragraph, as plain boxes are
+drawn (system fonts behind it on iOS and Android; `setFallbackTextMeasure`); PDF export draws `?` and agents' crops
+leave it to resvg, as for plain boxes. CJK wraps between characters; emoji sequences and accents are never split. Kerning
+and ligatures are off in the crops and the PDF, as the layout measures plain advances. Layouts are cached (LRU, 4000) by
+`LAYOUT_VERSION`, the text-metrics epoch, size, width and text.
 
-**Maths** (`markdown/math.ts`): MathJax 3 (TeX in, SVG out, no DOM: `liteAdaptor`, packages base, ams, newcommand,
-noundefined, boldsymbol) gives glyph outlines, flattened into one absolute path per formula; drawn 1.15× the text size
-(Computer Modern runs small next to Figtree). A TeX error shows the source in code style. Cached per formula.
+**Maths** (`markdown/math.ts`): MathJax 3 (TeX in, SVG out, no DOM: `liteAdaptor`, packages base, ams, noundefined,
+boldsymbol) gives glyph outlines, flattened into one absolute path per formula; drawn 1.15× the text size (Computer Modern
+runs small next to Figtree). A TeX error shows the source in code style. Cached per formula (LRU, 2000 formulas or 4 M
+characters of path).
+- **One MathJax serves every box and user** (in a Worker isolate, every request), so no formula may change another: there
+  is no `newcommand` package (`\def`, `\newcommand`, `\renewcommand` are undefined), and after each formula the AMS
+  `\DeclareMathOperator` table and the labels are reset.
+- **Limits** (`MATH_LIMITS`), because MathJax is synchronous and boxes and comments come from other devices and agents:
+  a formula is at most 1000 TeX characters and 200 KB of path; a box or comment renders at most 30 formulas and 5000 TeX
+  characters (`mathAllowance`, `allowedMath`); MathJax's `maxMacros` is 500 and `maxBuffer` 4 KB. Past a limit the TeX
+  source shows. The Worker gives each step of an agent request (measuring regions, drawing the crop) a budget of 10 000
+  new TeX characters (`withMathBudget`; its clock doesn't move during synchronous work, so it's counted in characters);
+  layouts cut short by a budget aren't cached.
 
 **Editing.** The box shows its raw Markdown while it's being typed in, and renders when it loses focus. A format bar
 (bold, italic, strikethrough, heading, bullet list, numbered list, quote, code, link, maths) sits under the toolbar while
