@@ -1,5 +1,6 @@
 // The fullscreen focus layout's floating tool pill: pen, highlighter, eraser, lasso, laser, ruler, colour, undo / redo and
-// exit (on a narrow edge the laser and ruler fold into "More tools").
+// exit. On a narrow edge (a portrait phone) the lasso, laser and ruler fold into "More tools", so the pill is no longer
+// than it was before the laser and ruler came.
 // It sits on one window edge (vertical on the left and right), can be dragged to another one by its grip (a tap on
 // the grip moves it to the next edge, for keyboards and screen readers), and remembers where it was (local prefs).
 import { splitAlpha, type PaperColor } from '@qalm/core';
@@ -21,7 +22,7 @@ import type { ToolId } from './view';
 
 const PILL_KEY = 'focusPill';
 const NEXT_EDGE: Record<Edge, Edge> = { top: 'right', right: 'bottom', bottom: 'left', left: 'top' };
-/** A pill button and its gap: the extras (laser, ruler) are two of them; folded, one "More tools" button. */
+/** A pill button and its gap. Folded, one "More tools" button stands for three (lasso, laser, ruler). */
 const BTN_ALONG = CONTROL_H + 2;
 const PILL_TOOLS: { id: ToolId; icon: 'pen' | 'highlighter' | 'eraser' | 'lasso'; label: string }[] = [
   { id: 'pen', icon: 'pen', label: 'Pen' },
@@ -72,8 +73,8 @@ export function FocusPill(p: FocusPillProps) {
   const [size, setSize] = React.useState<Size & { vertical: boolean; compact: boolean }>({ w: 0, h: 0, vertical, compact: false });
   // Right after the pill turns (top ↔ side), its last measured size is the other way round.
   const full = size.vertical === vertical ? size : { w: size.h, h: size.w };
-  // Its length with the laser and ruler shown (measured folded: one More button in place of the two).
-  const along = (vertical ? full.h : full.w) + (size.compact ? BTN_ALONG : 0);
+  // Its length with everything shown (measured folded: one More button in place of three).
+  const along = (vertical ? full.h : full.w) + (size.compact ? 2 * BTN_ALONG : 0);
   const compact = size.w > 0 && pillCompact(p.place, p.view, along, p.pad);
   const [more, setMore] = React.useState(false);
   // On a narrow screen the pill shrinks to fit its edge; `pill` and `at` are the box it shows in.
@@ -112,6 +113,7 @@ export function FocusPill(p: FocusPillProps) {
   const colour = hl ? splitAlpha(p.tools.hlColor, 1).rgb : p.tools.penColor;
   const extras = (
     <>
+      {compact ? <ToolButton icon="lasso" label="Lasso select" selected={t === 'lasso'} onPress={() => p.onTool('lasso')} /> : null}
       <ToolButton icon="laser" label="Laser pointer" selected={t === 'laser'} onPress={() => p.onTool('laser')} />
       <ToolButton toggle icon="ruler" label={p.ruler ? 'Hide ruler' : 'Show ruler'} selected={p.ruler} onPress={p.onRuler} />
     </>
@@ -169,14 +171,14 @@ export function FocusPill(p: FocusPillProps) {
           >
             <Icon name="more-vertical" size={16} color={c.faint} />
           </View>
-          {PILL_TOOLS.map((x) => (
+          {PILL_TOOLS.filter((x) => !(compact && x.id === 'lasso')).map((x) => (
             <ToolButton key={x.id} icon={x.icon} label={x.label} selected={t === x.id} onPress={() => p.onTool(x.id)} />
           ))}
           {compact ? (
             <IconButton
               icon="more-horizontal"
               label="More tools"
-              selected={more || t === 'laser' || p.ruler}
+              selected={more || t === 'lasso' || t === 'laser' || p.ruler}
               onPress={() => {
                 setColours(false);
                 setMore((x) => !x);

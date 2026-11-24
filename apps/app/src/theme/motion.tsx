@@ -3,7 +3,7 @@
  * platform's reduce-motion setting: things appear and disappear at once instead.
  */
 import * as React from 'react';
-import { AccessibilityInfo, Animated, Easing, Platform, type StyleProp, type ViewStyle } from 'react-native';
+import { AccessibilityInfo, Animated, Easing, Platform, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { motion } from './tokens';
 
@@ -117,7 +117,9 @@ export function Appear({
     Animated.timing(v, { toValue: 1, duration, easing: easeOut, useNativeDriver: NATIVE_DRIVER }).start();
   }, [v, reduce, duration]);
   const d = distance ?? motion.rise;
-  const transform: object[] = [];
+  // The style's own transforms (e.g. the focus pill's shrink on a phone) stay; the entrance is added after them.
+  const own = (StyleSheet.flatten(style)?.transform ?? []) as object[];
+  const transform: object[] = [...own];
   if (from === 'bottom' || from === 'top') transform.push({ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [from === 'top' ? -d : d, 0] }) });
   if (from === 'left' || from === 'right') transform.push({ translateX: v.interpolate({ inputRange: [0, 1], outputRange: [from === 'left' ? -d : d, 0] }) });
   if (scale) transform.push({ scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) });

@@ -466,7 +466,7 @@ from the region images with its own vision. That keeps the app about 20 MB light
     there's no menu bar), browsers the Fullscreen API, iPad and Android hide the system bars (`expo-status-bar`,
     `expo-navigation-bar` immersive). The header, toolbar and side panels give way to a floating pill (pen, highlighter,
     eraser, lasso, laser, ruler, colour, undo/redo, exit) that can be dragged to any edge and is remembered (`focusPill`
-    pref). Where even the shrunk pill (0.8×) can't fit along its edge (a portrait phone), the laser and ruler fold into a
+    pref). Where even the shrunk pill (0.8×) can't fit along its edge (a portrait phone), the lasso, laser and ruler fold into a
     "More tools" button (`pillCompact`). Esc clears a selection first, then leaves fullscreen; leaving restores the panels.
   - Presentation view: F5 (web / desktop), the laser's "Present" option or More → Present. Fullscreen with no chrome:
     no header, toolbar, pill, page numbers and menus, margin cards, comment pins, selection or ruler. The page is fitted

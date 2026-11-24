@@ -14,11 +14,12 @@ describe('ruler angles', () => {
     expect(snapRulerAngle(deg(-30))).toBeCloseTo(deg(330));
     expect(RULER.snapDeg).toBe(4);
   });
-  it('reads 0–179°', () => {
+  it('reads 0–179° as a protractor does (counter-clockwise; the pose is clockwise)', () => {
     expect(rulerDegrees(0)).toBe(0);
-    expect(rulerDegrees(deg(45))).toBe(45);
-    expect(rulerDegrees(deg(190))).toBe(10);
-    expect(rulerDegrees(deg(-30))).toBe(150);
+    expect(rulerDegrees(deg(-30))).toBe(30); // rising to the right
+    expect(rulerDegrees(deg(45))).toBe(135); // falling to the right
+    expect(rulerDegrees(deg(170))).toBe(10);
+    expect(rulerDegrees(deg(90))).toBe(90);
   });
 });
 

@@ -127,12 +127,13 @@ function Shape({ name, color }: { name: ToolIconName; color: string }) {
         </>
       );
     case 'laser':
-      // A pointer and the bright point it throws.
+      // A pointer, its beam, and the glowing point it throws.
       return (
         <>
-          <Path d="M3.6 20.4l6.6-6.6" {...p} strokeWidth={3} />
-          <Circle cx={15.4} cy={8.6} r={2.2} fill={color} />
-          <Path d="M15.4 2.8v1.4M21.2 8.6h-1.4M19.5 4.5l-1 1M19.5 12.7l-1-1M11.3 4.5l1 1" {...p} />
+          <Path d="M3.4 20.6l4.4-4.4" {...p} strokeWidth={3.2} />
+          <Path d="M9.6 14.4l3.2-3.2" {...p} strokeDasharray="1.4 1.6" />
+          <Circle cx={16.4} cy={7.6} r={2.2} fill={color} />
+          <Circle cx={16.4} cy={7.6} r={4.6} {...p} />
         </>
       );
     case 'laser-trail':

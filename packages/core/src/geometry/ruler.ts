@@ -40,10 +40,13 @@ export function snapRulerAngle(angle: number, tolDeg: number = RULER.snapDeg): n
   return Math.abs(angle - k * step) <= (tolDeg * Math.PI) / 180 ? norm(k * step) : norm(angle);
 }
 
-/** The angle shown on the ruler: 0–179°, whole degrees (a ruler at 190° reads 10°). */
+/**
+ * The angle shown on the ruler, as a protractor reads it: 0–179°, whole degrees, counter-clockwise from horizontal. A
+ * ruler rising to the right reads 30°, one falling to the right 150° (`angle` itself is clockwise, as the screen's y
+ * runs down).
+ */
 export function rulerDegrees(angle: number): number {
-  const d = Math.round((norm(angle) * 180) / Math.PI) % 180;
-  return d;
+  return Math.round(((2 * Math.PI - norm(angle)) * 180) / Math.PI) % 180;
 }
 
 /** One long edge: from `a` to `b` (px), with `n` its outward unit normal. */

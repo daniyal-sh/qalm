@@ -89,7 +89,7 @@ describe('presentation fit', () => {
 });
 
 describe('focus pill on a phone', () => {
-  it('folds the laser and ruler into More tools only when they would not fit', () => {
+  it('folds the lasso, laser and ruler into More tools only when they would not fit', () => {
     const room = 390 - 2 * PILL_MARGIN;
     expect(pillCompact(DEFAULT_PILL, { w: 1200, h: 800 }, 520)).toBe(false);
     expect(pillCompact(DEFAULT_PILL, { w: 390, h: 800 }, room / PILL_MIN_SCALE + 1)).toBe(true);

@@ -36,7 +36,7 @@ export interface RulerProps {
 }
 
 export function Ruler({ pose: committed, view, origin, pxPerMm, input, onChange, onClose }: RulerProps) {
-  const { c } = useTheme();
+  const { c, scheme } = useTheme();
   const root = React.useRef<React.ComponentRef<typeof View>>(null);
   const [moving, setMoving] = React.useState<RulerPose | null>(null);
   const pose = moving ?? committed;
@@ -53,7 +53,8 @@ export function Ruler({ pose: committed, view, origin, pxPerMm, input, onChange,
 
   const rebase = (rotate: boolean) => {
     const s = g.current;
-    s.start = s.pointers.size ? { pose: live.current.pose, pts: new Map(s.pointers), rotate } : null;
+    // Copies of the points: the live ones are updated in place as the pointers move.
+    s.start = s.pointers.size ? { pose: live.current.pose, pts: new Map([...s.pointers].map(([id, q]) => [id, { ...q }])), rotate } : null;
   };
   const toView = (p: Pt): Pt => ({ x: p.x - live.current.origin.x, y: p.y - live.current.origin.y });
   const update = () => {
@@ -212,6 +213,8 @@ export function Ruler({ pose: committed, view, origin, pxPerMm, input, onChange,
   }, []);
   const ticks = React.useMemo(() => rulerTicks(pose.length - 2 * ZERO_INSET, pxPerMm), [pose.length, pxPerMm]);
   const deg = rulerDegrees(pose.angle);
+  const turn = ((pose.angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  const upsideDown = turn > Math.PI / 2 && turn < (3 * Math.PI) / 2;
   const H = pose.thickness;
   const tickColor = c.ink2;
 
@@ -230,8 +233,9 @@ export function Ruler({ pose: committed, view, origin, pxPerMm, input, onChange,
           width: pose.length,
           height: H,
           transform: [{ rotate: `${pose.angle}rad` }],
-          // Translucent so the page shows through (the owner's choice for an on-page tool); hairline edges.
-          backgroundColor: c.surface + 'cc',
+          // Translucent so the page shows through (the owner's choice for an on-page tool): a soft tint that reads on
+          // white paper in the light theme, the dark surface in the dark one.
+          backgroundColor: (scheme === 'dark' ? c.surface2 : c.soft) + 'b8',
           borderColor: c.ink2,
         },
         Platform.OS === 'web' ? ({ touchAction: 'none', cursor: 'grab', userSelect: 'none' } as object) : null,
@@ -252,7 +256,8 @@ export function Ruler({ pose: committed, view, origin, pxPerMm, input, onChange,
             {t.label}
           </Text>
         ))}
-      <View pointerEvents="none" style={[styles.readout, { backgroundColor: c.accentSoft, borderColor: c.accentLine }]}>
+      {/* The readout stays upright, whichever way the ruler is turned. */}
+      <View pointerEvents="none" style={[styles.readout, { backgroundColor: c.accentSoft, borderColor: c.accentLine }, upsideDown ? { transform: [{ rotate: '180deg' }] } : null]}>
         <Text variant="smallStrong" style={{ color: c.accentInk, fontVariant: ['tabular-nums'] }}>
           {deg}°
         </Text>

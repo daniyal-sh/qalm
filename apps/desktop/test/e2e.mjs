@@ -356,7 +356,8 @@ try {
     }
     await shot('ruler-1-snapped.png');
     log('ruler: pen strokes starting outside its edge and over it were drawn straight along the edge');
-    // Drag the body with the mouse (not on the readout or the handles), then turn it by its handle to about 44°: 45°.
+    // Drag the body with the mouse (not on the readout or the handles), then turn it clockwise by its handle by about
+    // 44°: it snaps to 45° and, falling to the right, reads 135°.
     const grab = [rb.x + rb.width * 0.3, rb.y + rb.height * 0.75];
     await win.mouse.move(...grab);
     await win.mouse.down();
@@ -375,11 +376,11 @@ try {
       await win.mouse.move(centre[0] + reach * Math.cos(a), centre[1] + reach * Math.sin(a));
     }
     await win.mouse.up();
-    await win.getByLabel('Ruler, 45°').first().waitFor({ timeout: 5_000 });
+    await win.getByLabel('Ruler, 135°').first().waitFor({ timeout: 5_000 });
     await shot('ruler-2-turned.png');
     await win.keyboard.press('r');
     await rulerEl.waitFor({ state: 'detached', timeout: 5_000 });
-    log('ruler: the mouse dragged it and turned it by the handle, snapping to 45°; R hid it');
+    log('ruler: the mouse dragged it and turned it by the handle, snapping to 45° (reads 135°); R hid it');
 
     // 4f. Laser: K picks it; a pen stroke leaves a red trail that fades within about a second, and nothing is added.
     const before4f = await pageItems();

@@ -71,6 +71,8 @@ import {
 } from './view';
 
 const GAP = 44;
+/** Presenting: the page is fitted this much clear of the bottom (the bar) and the top. */
+const PRESENT_BAR_ROOM = 56;
 /** The cross-page undo stack's id for the notebook's page list. */
 const PAGES_UNDO = '__pages';
 const DEFAULT_TOOLS: ToolState = {
@@ -321,6 +323,11 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     requestAnimationFrame(() => vScroll.current?.scrollTo({ y, animated: false }));
   }, [base]);
 
+  // Presentation (below): the page index shown, or null. Declared before the pinch: its callbacks become worklets that
+  // capture what they use when the editor renders.
+  const [presentAt, setPresentAt] = React.useState<number | null>(null);
+  const presentRef = React.useRef(presentAt);
+  presentRef.current = presentAt;
   const pinchScale = React.useRef(1);
   const pinch = usePinchGesture({
     runOnJS: true,
@@ -741,9 +748,6 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   toggleRulerRef.current = toggleRuler;
 
   // ---- presentation: no chrome, fullscreen, the page fitted and centred, page arrows and the laser ----
-  const [presentAt, setPresentAt] = React.useState<number | null>(null);
-  const presentRef = React.useRef(presentAt);
-  presentRef.current = presentAt;
   const presentSaved = React.useRef<{ tool: ToolId; zoom: number; fullscreen: boolean; sawFullscreen: boolean } | null>(null);
   const startPresenting = () => {
     if (presentRef.current !== null || !pagesRef.current.length) return;
@@ -783,7 +787,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     const page = pages[presentAt];
     if (!page) return;
     const widest = Math.max(1, ...pages.map((x) => x.size.w));
-    const z = fitZoom(page, widest, base, viewport);
+    // Room for the bar at the bottom (and as much at the top, so the page stays centred).
+    const z = fitZoom(page, widest, base, { w: viewport.w, h: viewport.h - 2 * PRESENT_BAR_ROOM });
     if (Math.abs(z - zoom) > 1e-3) {
       setLiveScale(1);
       setZoom(z);
