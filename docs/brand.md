@@ -16,9 +16,43 @@ export const BRAND = {
 Lockup: the mark, then "qalm" (semibold, -0.02em tracking) with "by Apollo" under it (medium, muted, 0.58×).
 
 ## Mark
-`assets/brand/qalm-mark.svg`: a **pen nib** (qalam = pen) ringed by Apollo's orbit, with Apollo's planet on the front
-of the ring. It's the same construction as Board's mark: the orbit passes behind the nib at the top and in front of it at the bottom. The nib and slit are
-in ink, the orbit is in accent (indigo) and the planet is in assistant (blue). In-app, the colours follow the theme tokens.
+**Mark A, "nib in orbit, refined"** (chosen from `mockups/logo-options.html`): a **pen nib** outline (qalam = pen) with a
+slit and a breather hole, ringed by Apollo's orbit (an ellipse tilted −20°) that passes **behind** the nib at the top and
+**in front** of it at the bottom, with Apollo's planet riding the front of the ring inside a small halo.
+
+**Source:** `assets/brand/mark.mjs` holds the geometry, weights and colours; `node assets/brand/build.mjs` writes the
+standalone SVGs below (and refreshes `MARK_SVG` in `apps/server/src/brand.ts`). Each SVG has a `viewBox` tight to its
+ink, no `<use>`, no CSS and no `currentColor`, so anything can inline it. There is **no occluder fill and no halo
+stroke**: one `<mask>` cuts the back arc where it passes behind the nib, another cuts the ring around the planet. The
+mark is transparent everywhere but its ink, so it sits on any background without recolouring. (When inlining it twice
+on one page, give each copy its own mask ids: `markSvg({ id })`.)
+
+| File | Use | Ink | Orbit | Planet |
+|---|---|---|---|---|
+| `qalm-mark.svg` | light surfaces | #27272a | #4338ca | #1d4ed8 |
+| `qalm-mark-dark.svg` | dark surfaces, and on the app icon | #f4f4f5 | #7b72ff | #60a5fa |
+| `qalm-mark-small.svg`, `-small-dark.svg` | 24 px and below | as above | as above | as above |
+| `qalm-icon.svg` | the app icon: graphite tile #1c1c1f, square 1024, dark mark at 72% | | | |
+
+**The app icon is always the graphite tile** ("the black one"): tile #1c1c1f with the dark mark, everywhere an icon
+stands for the app: the desktop app (Windows full bleed; macOS on Apple's 824 grid, rounded), iOS, Android (adaptive
+background #1c1c1f with the mark inside the 66 dp safe zone, plus a one-colour monochrome layer), browser favicons,
+the apple-touch-icon, the email header and the MCP consent page. **Inside the UI** (the lockup on sign-in, the library,
+settings, the site header and footer) the mark follows the theme instead: the light mark on light, the dark mark on
+dark, with no tile. Splash screens are the app canvas (#f3f3f5 / #151517) with the themed mark.
+
+**Small sizes** (tuned by rendering the icon at 16, 24 and 32 px): the regular drawing (nib 6, orbit 5, slit 4.5,
+hole r 4.2, planet r 6.2, in the 100-unit grid) goes thin and grey at favicon size, so:
+- up to 24 px, `small`: nib 8, orbit 7, slit 5.5, hole r 5.2, planet r 8.4;
+- up to 16 px, `tiny`: nib 9, orbit 7.5, slit 6, planet r 10 and **no breather hole** (at 16 px it merged with the slit
+  into a grey blob; the slit alone still reads as a nib);
+- on icon tiles of 32 px and below the mark fills 82% of the tile instead of 72%.
+`weightFor(px)` and `iconScaleFor(px)` in `mark.mjs` pick these; the in-app `Mark` does the same by its rendered size.
+
+**Regenerating:** `node assets/brand/build.mjs` (SVGs), `pnpm --filter @qalm/desktop icons`, `pnpm --filter @qalm/app icons`
+(writes `apps/app/assets/icons`), `node apps/site/landing/build.mjs` and `pnpm --filter @qalm/site build:og` (og.png and
+the PNG icons, including `brand/qalm-icon-96.png`, which emails load from the site because Gmail shows neither SVG nor
+`data:` images).
 
 ## Tokens (light / dark)
 | Token | Light | Dark | Use |

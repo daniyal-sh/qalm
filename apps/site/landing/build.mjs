@@ -8,7 +8,8 @@
 //   download/unavailable.html   what /download/windows|android show until the installer is in R2 (src/worker.js)
 //   favicon.svg, robots.txt, sitemap.xml
 //
-// og.png and apple-touch-icon.png need a browser, so they come from og.mjs (run it after changing the hero).
+// og.png and the PNG icons (apple-touch-icon, favicon-16/32, brand/qalm-icon-96) need a browser, so they come from
+// og.mjs (run it after changing the hero or the mark).
 // Usage: node landing/build.mjs [outDir]    (default: ../public). The output is deterministic.
 import fs from 'node:fs';
 import path from 'node:path';

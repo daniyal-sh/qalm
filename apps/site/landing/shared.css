@@ -6,6 +6,7 @@
   --line:#d3d3d9; --line-2:#e4e4e8;
   --accent:#4338ca; --accent-hover:#3730a3; --accent-ink:#3730a3; --accent-soft:#eeedfa; --accent-line:#c7c3ee; --on-accent:#fff;
   --assistant:#1d4ed8; --assistant-soft:#ebf0fc; --assistant-line:#bfcdf4;
+  --mark-ink:#27272a; --mark-orbit:#4338ca; --mark-planet:#1d4ed8;
   --context:#0f766e; --context-soft:#e4f1ef; --good:#047857; --good-soft:#e6f2ee; --warn:#9a4a08; --warn-soft:#f5ede6;
   --bad:#b91c1c; --bad-soft:#f8e9e9;
   --shadow-1:0 1px 2px rgba(0,0,0,.04);
@@ -25,6 +26,7 @@
     --line:#303035; --line-2:#28282d;
     --accent:#5b50f0; --accent-hover:#6d63f4; --accent-ink:#a9a3ff; --accent-soft:#26244a; --accent-line:#403b86; --on-accent:#fff;
     --assistant:#60a5fa; --assistant-soft:#1d2a3d; --assistant-line:#2f4b72;
+    --mark-ink:#f4f4f5; --mark-orbit:#7b72ff; --mark-planet:#60a5fa;
     --context:#5eccc4; --context-soft:#17302e; --good:#34d399; --good-soft:#1a2e27; --warn:#fbbf24; --warn-soft:#332a17;
     --bad:#f87171; --bad-soft:#351f20;
     --shadow-1:0 1px 2px rgba(0,0,0,.3);
@@ -63,11 +65,11 @@ h1,h2,h3,p{margin:0}
 .site-head{padding:20px 0}
 .site-head .wrap{display:flex;align-items:center;gap:24px}
 .lockup{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}
-.lockup svg{width:42px;height:35px}
+.lockup svg{width:44px;height:40px}
 .lockup .name{display:flex;flex-direction:column;line-height:1}
 .lockup b{font-size:22px;font-weight:600;letter-spacing:-.02em}
 .lockup small{font-size:12.8px;font-weight:500;color:var(--muted);margin-top:3px}
-.mark .nib{stroke:var(--ink)} .mark .nibfill{fill:var(--ink)} .mark .orbit{stroke:var(--accent)} .mark .planet{fill:var(--assistant)}
+.mark .nib{stroke:var(--mark-ink)} .mark .nibfill{fill:var(--mark-ink)} .mark .orbit{stroke:var(--mark-orbit)} .mark .planet{fill:var(--mark-planet)}
 .site-nav{display:flex;gap:4px;margin-left:auto}
 .site-nav a{padding:10px 12px;border-radius:var(--r8);text-decoration:none;color:var(--muted);font-size:15px;font-weight:500}
 .site-nav a:hover{color:var(--ink);background:var(--soft)}

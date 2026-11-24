@@ -10,6 +10,7 @@
     "web": "node scripts/web-assets.mjs && expo start --web",
     "export:web": "node scripts/web-assets.mjs && expo export -p web",
     "web-assets": "node scripts/web-assets.mjs",
+    "icons": "node scripts/icons.mjs",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "bench:micro": "vitest run --config scripts/bench/vitest.micro.mts",
@@ -53,6 +54,7 @@
     "yjs": "^13.6.33"
   },
   "devDependencies": {
+    "@resvg/resvg-wasm": "2.6.2",
     "@types/react": "~19.3.0",
     "fake-indexeddb": "^6.2.8",
     "typescript": "~6.0.3",

@@ -1,6 +1,7 @@
 // What every page on qalm.apollolearn.app shares: facts about the site, the <head>, the header and footer, the mark,
 // icons and the shared CSS.
 import fs from 'node:fs';
+import { iconScaleFor, iconSvg, markSvg, weightFor } from '../../../assets/brand/mark.mjs';
 
 export const ORIGIN = 'https://qalm.apollolearn.app';
 
@@ -33,32 +34,21 @@ export const BUILD_NOTE =
   '<b>Early builds, not yet signed.</b> On Windows, SmartScreen may warn you: choose <b>More info</b>, then <b>Run anyway</b>. ' +
   'On Android, allow installs from your browser when it asks.';
 
-const MARK_SRC = readText(new URL('../../../assets/brand/qalm-mark.svg', import.meta.url)).replace(/<!--.*?-->\s*/s, '');
-
-/** The mark, coloured by the theme tokens. `id` keeps its mask unique on a page that shows it twice. */
+/** The mark, coloured by the theme (the light mark on light, the dark mark on dark: `--mark-*` in shared.css).
+ * `id` keeps its masks unique on a page that shows it twice. */
 export function mark(id) {
-  return MARK_SRC.replace('<svg ', '<svg class="mark" aria-hidden="true" focusable="false" ')
-    .replace(' xmlns="http://www.w3.org/2000/svg"', '')
-    .replaceAll('qalm-ring', `qalm-ring-${id}`)
-    .replace(/stroke="#4338CA"/g, 'class="orbit"')
-    .replace(/stroke="#27272A"/g, 'class="nib"')
-    .replace(/fill="#27272A"/g, 'class="nibfill"')
-    .replace(/fill="#1D4ED8"/g, 'class="planet"')
-    .replace(/\n\s*/g, '');
+  return markSvg({ id: `qalm-${id}`, classes: true, attrs: 'class="mark" aria-hidden="true" focusable="false"' })
+    .replace(/ (stroke|fill)="#[0-9a-f]{6}"/g, '');
 }
 
-/** favicon.svg: the mark, with a light nib on dark browser chrome. */
+/** favicon.svg: the app icon, the graphite tile, rounded, with the heavier small-size mark (tabs draw it at 16–32 px). */
 export function faviconSvg() {
-  return MARK_SRC.replace(
-    /(<svg[^>]*>)/,
-    '$1<style>@media (prefers-color-scheme:dark){.n{stroke:#f4f4f5}.f{fill:#f4f4f5}.o{stroke:#6d63f4}.p{fill:#60a5fa}}</style>',
-  )
-    .replace(/stroke="#27272A"/g, 'stroke="#27272A" class="n"')
-    .replace(/fill="#27272A"/g, 'fill="#27272A" class="f"')
-    .replace(/stroke="#4338CA"/g, 'stroke="#4338CA" class="o"')
-    .replace(/fill="#1D4ED8"/g, 'fill="#1D4ED8" class="p"')
-    .replace(/\n\s*/g, '')
-    .concat('\n');
+  return iconSvg({ size: 64, radius: 0.22, weight: 'small', scale: iconScaleFor(16) }) + '\n';
+}
+
+/** The app icon as a page's PNG source (og.mjs screenshots it): square for apple-touch-icon, rounded for favicons. */
+export function iconForPng(px, { square = false } = {}) {
+  return iconSvg({ size: px, radius: square ? 0 : 0.22, weight: weightFor(px), scale: iconScaleFor(px) });
 }
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -76,6 +66,7 @@ export function head({ title, description, path, ogTitle = title, noindex = fals
     '<meta name="theme-color" content="#f6f6f8" media="(prefers-color-scheme: light)">',
     '<meta name="theme-color" content="#151517" media="(prefers-color-scheme: dark)">',
     '<link rel="icon" href="/favicon.svg" type="image/svg+xml">',
+    '<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">',
     '<link rel="apple-touch-icon" href="/apple-touch-icon.png">',
     '<meta property="og:type" content="website">',
     '<meta property="og:site_name" content="qalm by Apollo">',

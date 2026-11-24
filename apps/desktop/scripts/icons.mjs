@@ -1,10 +1,13 @@
-// Builds the app icons from assets/brand/qalm-mark.svg into resources/icons/:
-// icon.png (1024), icon.ico (Windows, PNG entries 16–256) and icon.icns (macOS, PNG entries 16–1024).
-// The mark sits on a white rounded tile (brand `surface`, `line` hairline) inside Apple's 824/1024 grid.
+// Builds the app icons from the brand's graphite tile (assets/brand/mark.mjs) into resources/icons/:
+// icon.png (1024), icon.svg, icon.ico (Windows, PNG entries 16–256) and icon.icns (macOS, PNG entries 16–1024).
+// The app icon is always the graphite tile (#1c1c1f) with the dark mark (docs/brand.md, "Mark").
+// - Windows (.ico, and icon.png for the dev window): full bleed, a rounded tile filling the canvas.
+// - macOS (.icns): Apple's grid, an 824/1024 rounded tile with transparent margin.
+// Small entries use the brand's heavier weights and a larger mark (weightFor / iconScaleFor), so 16–24 px stay legible.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
 
@@ -13,32 +16,27 @@ const out = join(here, '..', 'resources', 'icons');
 const require = createRequire(import.meta.url);
 await initWasm(readFileSync(require.resolve('@resvg/resvg-wasm/index_bg.wasm')));
 
-const mark = readFileSync(join(here, '..', '..', '..', 'assets', 'brand', 'qalm-mark.svg'), 'utf8');
-const inner = mark.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+const { iconSvg, iconScaleFor, weightFor } = await import(pathToFileURL(join(here, '..', '..', '..', 'assets', 'brand', 'mark.mjs')).href);
 
-// 1024 canvas with a tile of side `tile` (macOS: 824, Apple's grid; Windows: nearly full bleed), mark ~73% of the tile.
-function iconSvg(tile) {
-  const o = (1024 - tile) / 2;
-  const W = tile * 0.73;
-  const H = (W * 100) / 120;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <rect x="${o}" y="${o}" width="${tile}" height="${tile}" rx="${tile * 0.225}" fill="#ffffff" stroke="#d3d3d9" stroke-width="${tile / 200}"/>
-  <svg x="${512 - W / 2}" y="${512 - H / 2 + tile / 80}" width="${W}" height="${H}" viewBox="0 0 120 100" fill="none" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>
-</svg>`;
-}
-const svg = iconSvg(824);
-const winSvg = iconSvg(960);
+/** Windows: full bleed. `px` is the size it will be shown at, which picks the weight. */
+const winSvg = (px = 1024) => iconSvg({ radius: 0.2, weight: weightFor(px), scale: iconScaleFor(px) });
+/** macOS: the 824 grid; the tile is 824/1024 of the canvas, so the weight follows the tile's rendered size. */
+const macSvg = (px = 1024) => {
+  const tilePx = (px * 824) / 1024;
+  return iconSvg({ tile: 824, radius: 0.225, weight: weightFor(tilePx), scale: iconScaleFor(tilePx) });
+};
 
-const png = (size, src = svg) => Buffer.from(new Resvg(src, { fitTo: { mode: 'width', value: size } }).render().asPng());
+const png = (size, src) => Buffer.from(new Resvg(src, { fitTo: { mode: 'width', value: size } }).render().asPng());
 
 mkdirSync(out, { recursive: true });
-writeFileSync(join(out, 'icon.svg'), svg);
-writeFileSync(join(out, 'icon.png'), png(1024));
+writeFileSync(join(out, 'icon.svg'), winSvg());
+writeFileSync(join(out, 'icon.png'), png(1024, winSvg()));
+writeFileSync(join(out, 'icon-mac.png'), png(1024, macSvg()));
 
 // ICO: header + directory of PNG-compressed images (Vista+).
 {
   const sizes = [16, 24, 32, 48, 64, 128, 256];
-  const imgs = sizes.map((s) => png(s, winSvg));
+  const imgs = sizes.map((s) => png(s, winSvg(s)));
   const head = Buffer.alloc(6 + 16 * sizes.length);
   head.writeUInt16LE(0, 0);
   head.writeUInt16LE(1, 2);
@@ -61,7 +59,7 @@ writeFileSync(join(out, 'icon.png'), png(1024));
 {
   const types = [['icp4', 16], ['icp5', 32], ['icp6', 64], ['ic07', 128], ['ic08', 256], ['ic09', 512], ['ic10', 1024], ['ic11', 32], ['ic12', 64], ['ic13', 256], ['ic14', 512]];
   const chunks = types.map(([t, s]) => {
-    const data = png(s);
+    const data = png(s, macSvg(s));
     const h = Buffer.alloc(8);
     h.write(t, 0, 'ascii');
     h.writeUInt32BE(data.length + 8, 4);
