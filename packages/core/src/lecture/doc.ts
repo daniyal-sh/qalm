@@ -2,6 +2,7 @@ import * as Y from 'yjs';
 import { LOCAL_ORIGIN } from '../origin';
 import { packTimelineChunk, unpackTimeline } from './timeline';
 import type { AudioChunk, LectureCrop, LectureEvent, LectureMeta, LectureSummary, TranscriptSegment } from './types';
+import { cleanCrop, cleanSegment, cleanTranscript } from './validate';
 
 /** Doc id of a session: `lec:{notebookId}:{sessionId}` (docs/lecture-mode.md §5). */
 export const lectureDocId = (notebookId: string, sessionId: string) => `lec:${notebookId}:${sessionId}`;
@@ -87,9 +88,9 @@ export class LectureDoc {
     if (segments.length) this.doc.transact(() => this.transcriptArr.push([...segments]), LOCAL_ORIGIN);
   }
 
-  /** Segments in time order. */
+  /** Segments in time order (malformed ones, which a client could have written, are left out). */
   transcript(): TranscriptSegment[] {
-    return [...this.transcriptArr.toArray()].sort((a, b) => a.t0 - b.t0);
+    return cleanTranscript(this.transcriptArr.toArray()).sort((a, b) => a.t0 - b.t0);
   }
 
   /** Number of transcript segments (in arrival order: what an agent has been sent is a count). */
@@ -97,9 +98,13 @@ export class LectureDoc {
     return this.transcriptArr.length;
   }
 
-  /** Segments in arrival order from index `from` (live MCP lines). */
-  transcriptFrom(from: number): TranscriptSegment[] {
-    return this.transcriptArr.slice(from);
+  /**
+   * Segments in arrival order from index `from` (live MCP lines), at most `max`. `next` is the index to continue
+   * from: it counts malformed segments too (they are skipped, not retried).
+   */
+  transcriptFrom(from: number, max = Infinity): { segs: TranscriptSegment[]; next: number } {
+    const raw = this.transcriptArr.slice(from, Number.isFinite(max) ? from + max : undefined);
+    return { segs: raw.map(cleanSegment).filter((x): x is TranscriptSegment => !!x), next: from + raw.length };
   }
 
   addCrop(crop: LectureCrop, origin: unknown = LECTURE_SERVER_ORIGIN): void {
@@ -107,7 +112,11 @@ export class LectureDoc {
   }
 
   crops(): LectureCrop[] {
-    return [...this.cropArr.toArray()].sort((a, b) => a.t - b.t);
+    return this.cropArr
+      .toArray()
+      .map(cleanCrop)
+      .filter((c): c is LectureCrop => !!c)
+      .sort((a, b) => a.t - b.t);
   }
 
   /** Every asset the session holds (audio and crop PNGs), by sha256. */

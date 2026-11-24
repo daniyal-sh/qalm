@@ -15,6 +15,8 @@ import {
   fmtT,
   lectureBundleOf,
   lectureDocFromBundle,
+  lectureFiles,
+  readLectureFiles,
   packQalm,
   parseCropRegions,
   parseLectureRef,
@@ -189,7 +191,7 @@ describe('LectureDoc', () => {
     lec.addTranscript([{ t0: 1000, t1: 2000, text: 'hello' }]);
     lec.addCrop({ t: 500, sha: 'b'.repeat(64), w: 10, h: 10, text: '', regions: [] });
     expect(lec.assetShas()).toHaveLength(2);
-    expect(lec.transcriptFrom(0)).toHaveLength(1);
+    expect(lec.transcriptFrom(0).segs).toHaveLength(1);
   });
 
   it('lists sessions in the library, not in notebook docs', () => {
@@ -245,7 +247,7 @@ describe('.qalm with lectures', () => {
     lec.addCrop({ t: 2000, sha: 'b'.repeat(64), w: 4, h: 4, text: 'R1 [1] p1 @1,2 3x4 +1', regions: parseCropRegions('R1 [1] p1 @1,2 3x4 +1') });
     lec.addTranscript([{ t0: 100, t1: 900, text: 'today: integrals', src: 'device' }]);
     const pages = new Map([[pageId, page.doc]]);
-    const bundle = lectureBundleOf(lec, (id) => (id === pageId ? 1 : 0));
+    const bundle = lectureBundleOf(lec, 's1', (id) => (id === pageId ? 1 : 0));
     bundle.audio[0]!.bytes = audio;
     bundle.crops[0]!.png = png;
     return { nb, pageId, pages, bundle, audio, png };
@@ -319,5 +321,77 @@ describe('.qalm with lectures', () => {
     lec.appendEvents(events);
     page.doc.transact(() => page.doc.getMap('items'), LOCAL_ORIGIN);
     expect([...page.doc.share.keys()].some((k) => /lect|timeline|audio/i.test(k))).toBe(false);
+  });
+});
+
+describe('lecture review fixes', () => {
+  const meta = { id: 's1', notebookId: 'nb', startedAt: 1, durationMs: 60_000, state: 'stopped' as const, lastT: 60_000, transcriber: 'none' as const };
+
+  it('more: is exact and always moves forward, even with many crops in one second (or one ms)', () => {
+    const crops = Array.from({ length: 12 }, (_, i) => ({ t: 5000 + i * 10, sha: `c${i}`, w: 1, h: 1, text: '', regions: [] }));
+    let from = 0;
+    const seen: string[] = [];
+    for (let n = 0; n < 5; n++) {
+      const parts = encodeLectureRead('L1', meta, [], crops, from);
+      seen.push(...parts.flatMap((p) => ('image' in p ? [p.image] : [])));
+      const more = /more: read\("L1@(.+)"\)/.exec(parts.map((p) => ('text' in p ? p.text : '')).join('\n'));
+      if (!more) break;
+      const ref = parseLectureRef(`L1@${more[1]}`)!;
+      expect(ref.from).toBeGreaterThan(from);
+      from = ref.from;
+    }
+    expect(new Set(seen).size).toBe(12);
+    expect(parseT('03:12.25')).toBe(192_250);
+    expect(parseT('7.5')).toBe(7500);
+    // Twelve crops in the very same ms: the pointer still advances past that ms.
+    const same = crops.map((c) => ({ ...c, t: 5000 }));
+    const text = encodeLectureRead('L1', meta, [], same, 5000).map((p) => ('text' in p ? p.text : '')).join('\n');
+    expect(text).toContain('more: read("L1@00:05.001")');
+  });
+
+  it('imports a corrupt session without breaking reads: bad transcript, crops and events are dropped', () => {
+    const files: Zippable = {
+      'lecture/abc/session.json': strToU8(JSON.stringify({ id: '', startedAt: 'x', durationMs: 9000, pages: [{ id: 'p' }, 'junk', { id: 'pg', n: 1 }], audio: 'nope', title: 7 })),
+      'lecture/abc/transcript.json': strToU8(JSON.stringify([{ t0: 1000, t1: 2000, text: 'ok' }, { t0: 'a', text: 'bad time' }, { t0: 3000, text: 42 }, null, 'x', { t0: 4000, text: 'words', words: [{ w: 1 }, { w: 'w', t0: 4000, t1: 4100 }] }])),
+      'lecture/abc/crops/000-1000.json': strToU8(JSON.stringify({ t: 1000, text: 5, regions: [{ label: 'R1', page: 1, box: [1, 2, 3, 4] }, { label: 'R2', box: 'x' }] })),
+      'lecture/abc/crops/001-2000.json': strToU8('{broken'),
+      'lecture/abc/crops/002-3000.json': strToU8(JSON.stringify({ t: 'later' })),
+      'lecture/abc/timeline.jsonl': strToU8(
+        ['{"t":0,"k":"start","at":1}', '{"t":5,"k":"add","p":"pg","items":"no"}', '{"t":6,"k":"add","p":"pg","items":[{"id":"a","type":"stroke","points":[]}, 3]}', '{"t":7,"k":"bogus"}', '{"t":-1,"k":"stop"}', '[1,2]'].join('\n'),
+      ),
+    };
+    const [b] = readLectureFiles(unzipSync(zipSync(files)));
+    expect(b!.id).toBe('abc');
+    expect(b!.meta).toMatchObject({ id: 'abc', startedAt: 0, durationMs: 9000 });
+    expect(b!.meta.title).toBeUndefined();
+    expect(b!.pages).toEqual([{ id: 'pg', n: 1 }]);
+    expect(b!.transcript).toEqual([{ t0: 1000, t1: 2000, text: 'ok' }, { t0: 4000, t1: 4000, text: 'words', words: [{ w: 'w', t0: 4000, t1: 4100 }] }]);
+    expect(b!.crops.map((c) => c.crop)).toEqual([{ t: 1000, sha: '', w: 0, h: 0, text: '', regions: [{ label: 'R1', page: 1, box: [1, 2, 3, 4], add: 0, erase: 0 }] }]);
+    expect(b!.events.map((e) => e.k)).toEqual(['start', 'add']);
+    expect((b!.events[1] as { items: unknown[] }).items).toHaveLength(1);
+    // Restored and read like MCP would: no throw.
+    const lec = new LectureDoc(lectureDocFromBundle(b!, { sessionId: 'n1', notebookId: 'nb', pageIds: new Map([['pg', 'pg2']]), audioShas: [], cropShas: ['s'] }));
+    expect(() => encodeLectureRead('L1', lec.meta(), lec.transcript(), lec.crops())).not.toThrow();
+  });
+
+  it('a session doc with garbage written into it still reads (transcript, crops, live lines)', () => {
+    const lec = new LectureDoc(new Y.Doc());
+    const raw = lec.doc.getArray<unknown>('transcript');
+    raw.push([{ t0: 1, t1: 2, text: 'fine' }, { bad: true }, { t0: 3, t1: 4, text: 'also' }]);
+    lec.doc.getArray<unknown>('crops').push([{ t: 'no' }, { t: 5, sha: 'x', regions: 'no' }]);
+    expect(lec.transcript().map((s) => s.text)).toEqual(['fine', 'also']);
+    expect(lec.crops()).toEqual([{ t: 5, sha: 'x', w: 0, h: 0, text: '', regions: [] }]);
+    // next counts the malformed one too, so a live reader moves past it; max caps a batch.
+    expect(lec.transcriptFrom(0, 2)).toEqual({ segs: [{ t0: 1, t1: 2, text: 'fine' }], next: 2 });
+    expect(lec.transcriptFrom(2)).toEqual({ segs: [{ t0: 3, t1: 4, text: 'also' }], next: 3 });
+  });
+
+  it('the export folder is the session id passed in, never meta.id', () => {
+    const lec = new LectureDoc(new Y.Doc()); // meta never set: meta.id is ''
+    lec.appendEvents([{ t: 0, k: 'start', at: 1 }]);
+    const b = lectureBundleOf(lec, 'sess-9', () => 0);
+    expect(Object.keys(lectureFiles(b)).every((n) => n.startsWith('lecture/sess-9/'))).toBe(true);
+    expect(() => lectureFiles({ ...b, id: '' })).toThrow();
+    expect(() => lectureFiles({ ...b, id: '../x' })).toThrow();
   });
 });

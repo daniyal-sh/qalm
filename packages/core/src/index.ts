@@ -111,8 +111,10 @@ export {
   unpackTimelineChunk,
   unpackTimeline,
   fmtT,
+  fmtTExact,
   parseT,
 } from './lecture/timeline';
+export { cleanSegment, cleanTranscript, cleanCrop } from './lecture/validate';
 export { lectureFiles, readLectureFiles, lectureReadme, lectureBundleOf, lectureDocFromBundle, type LectureBundle } from './lecture/bundle';
 export {
   emptyLectures,

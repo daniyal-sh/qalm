@@ -34,11 +34,41 @@ function eventToJson(e: LectureEvent): Record<string, unknown> {
   return o;
 }
 
-function eventFromJson(o: Record<string, unknown>): LectureEvent | null {
-  if (typeof o.t !== 'number' || typeof o.k !== 'string') return null;
-  const e = { ...o } as Record<string, unknown>;
-  if (Array.isArray(o.items)) e.items = (o.items as Record<string, unknown>[]).map(itemFromJson);
-  if (Array.isArray(o.before)) e.before = (o.before as Record<string, unknown>[]).map(itemFromJson);
+const isItem = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && typeof (v as { id?: unknown }).id === 'string' && typeof (v as { type?: unknown }).type === 'string';
+
+/** One event, checked: a known kind with the fields it needs (imports and other clients' chunks can be anything). */
+function eventFromJson(o: unknown): LectureEvent | null {
+  if (typeof o !== 'object' || o === null || Array.isArray(o)) return null;
+  const r = o as Record<string, unknown>;
+  if (typeof r.t !== 'number' || !Number.isFinite(r.t) || r.t < 0 || typeof r.k !== 'string') return null;
+  const e = { ...r } as Record<string, unknown>;
+  switch (r.k) {
+    case 'start':
+      if (typeof r.at !== 'number') return null;
+      break;
+    case 'page':
+      if (typeof r.p !== 'string' || typeof r.n !== 'number') return null;
+      break;
+    case 'base':
+      if (typeof r.p !== 'string' || !Array.isArray(r.ids)) return null;
+      e.ids = r.ids.filter((x) => typeof x === 'string');
+      break;
+    case 'add':
+    case 'erase':
+    case 'update':
+      if (typeof r.p !== 'string' || !Array.isArray(r.items)) return null;
+      e.items = r.items.filter(isItem).map(itemFromJson);
+      if (Array.isArray(r.before)) e.before = r.before.filter(isItem).map(itemFromJson);
+      else delete e.before;
+      break;
+    case 'pause':
+    case 'resume':
+    case 'stop':
+      break;
+    default:
+      return null;
+  }
   return e as unknown as LectureEvent;
 }
 
@@ -54,7 +84,7 @@ export function eventsFromJsonl(text: string): LectureEvent[] {
     const s = line.trim();
     if (!s) continue;
     try {
-      const e = eventFromJson(JSON.parse(s) as Record<string, unknown>);
+      const e = eventFromJson(JSON.parse(s) as unknown);
       if (e) out.push(e);
     } catch {
       /* a torn line: skip */
@@ -90,9 +120,17 @@ export function fmtT(ms: number): string {
   return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-/** Parses `mm:ss`, `h:mm:ss` or plain seconds into ms; null if it isn't a time. */
+/** `fmtT` with the milliseconds when there are any (`03:12.345`): an exact point, for `more:` pointers. */
+export function fmtTExact(ms: number): string {
+  const r = Math.max(0, Math.round(ms));
+  return r % 1000 ? `${fmtT(r)}.${String(r % 1000).padStart(3, '0')}` : fmtT(r);
+}
+
+/** Parses `mm:ss`, `h:mm:ss` or plain seconds (each with optional `.mmm`) into ms; null if it isn't a time. */
 export function parseT(s: string): number | null {
-  const m = /^(?:(\d+):)?(\d+):(\d{1,2})$/.exec(s.trim());
-  if (m) return ((Number(m[1] ?? 0) * 60 + Number(m[2])) * 60 + Number(m[3])) * 1000;
-  return /^\d+$/.test(s.trim()) ? Number(s) * 1000 : null;
+  const m = /^(?:(\d+):)?(\d+):(\d{1,2})(?:\.(\d{1,3}))?$/.exec(s.trim());
+  const frac = (f: string | undefined) => (f ? Number(f.padEnd(3, '0')) : 0);
+  if (m) return ((Number(m[1] ?? 0) * 60 + Number(m[2])) * 60 + Number(m[3])) * 1000 + frac(m[4]);
+  const p = /^(\d+)(?:\.(\d{1,3}))?$/.exec(s.trim());
+  return p ? Number(p[1]) * 1000 + frac(p[2]) : null;
 }

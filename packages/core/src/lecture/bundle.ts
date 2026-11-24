@@ -3,9 +3,12 @@ import { strFromU8, strToU8 } from 'fflate';
 import { LectureDoc } from './doc';
 import { eventsFromJsonl, eventsToJsonl, fmtT } from './timeline';
 import type { AudioChunk, LectureCrop, LectureEvent, LectureMeta, TranscriptSegment } from './types';
+import { cleanCrop, cleanTranscript } from './validate';
 
 /** One session as it goes into (or comes out of) a lecture `.qalm` (docs/lecture-mode.md §8). */
 export interface LectureBundle {
+  /** The session id: its folder name `lecture/{id}/` (the session doc's id, never taken from `meta`). */
+  id: string;
   meta: LectureMeta;
   /** Pages the session touched, with their 1-based position at export. */
   pages: { id: string; n: number }[];
@@ -70,7 +73,8 @@ moment, start from each page's \`base\` ink and apply \`timeline.jsonl\` events 
 
 /** The files of one session, under `lecture/{sessionId}/`. */
 export function lectureFiles(b: LectureBundle): Record<string, Uint8Array> {
-  const dir = `lecture/${b.meta.id}/`;
+  if (!/^[A-Za-z0-9_-]+$/.test(b.id)) throw new Error(`Bad lecture session id ${JSON.stringify(b.id)}`);
+  const dir = `lecture/${b.id}/`;
   const files: Record<string, Uint8Array> = {};
   files[`${dir}LECTURE.md`] = strToU8(lectureReadme(b.meta));
   files[`${dir}session.json`] = strToU8(JSON.stringify({ ...b.meta, pages: b.pages, audio: b.audio.map((a) => a.chunk) }, null, 2));
@@ -99,28 +103,48 @@ export function readLectureFiles(files: Record<string, Uint8Array>): LectureBund
   const out: LectureBundle[] = [];
   for (const [id, f] of dirs) {
     try {
-      const s = JSON.parse(strFromU8(f['session.json']!)) as LectureMeta & { pages?: { id: string; n: number }[]; audio?: AudioChunk[] };
-      const listed = s.audio ?? [];
+      const s = JSON.parse(strFromU8(f['session.json']!)) as Partial<LectureMeta> & { pages?: unknown; audio?: unknown };
+      if (typeof s !== 'object' || s === null) continue;
+      const listed = (Array.isArray(s.audio) ? s.audio : []).filter(
+        (c): c is AudioChunk => typeof c === 'object' && c !== null && Number.isFinite((c as AudioChunk).t0),
+      );
       const audioFiles = Object.keys(f).filter((n) => n.startsWith('audio/')).sort();
       const audio = audioFiles.map((n, i) => {
         const m = /^audio\/\d+-(\d+)\.(\w+)$/.exec(n);
         const t0 = m ? Number(m[1]) : 0;
         const chunk = listed.find((c) => Math.round(c.t0) === t0) ?? listed[i];
         const bytes = f[n]!;
-        return { chunk: { sha: chunk?.sha ?? '', mime: chunk?.mime ?? MIME[m?.[2] ?? ''] ?? 'application/octet-stream', t0, dur: chunk?.dur ?? 0, bytes: bytes.length }, bytes };
+        const mime = typeof chunk?.mime === 'string' ? chunk.mime : (MIME[m?.[2] ?? ''] ?? 'application/octet-stream');
+        const dur = Number.isFinite(chunk?.dur) ? Math.max(0, chunk!.dur) : 0;
+        return { chunk: { sha: typeof chunk?.sha === 'string' ? chunk.sha : '', mime, t0, dur, bytes: bytes.length }, bytes };
       });
       const crops = Object.keys(f)
         .filter((n) => /^crops\/.+\.json$/.test(n))
         .sort()
-        .map((n) => {
-          const j = JSON.parse(strFromU8(f[n]!)) as LectureCrop;
+        .flatMap((n) => {
+          let crop: LectureCrop | null = null;
+          try {
+            crop = cleanCrop({ ...(JSON.parse(strFromU8(f[n]!)) as object), sha: '' });
+          } catch {
+            /* a broken crop file: leave it out */
+          }
           const png = f[n.replace(/\.json$/, '.png')];
-          return { crop: { t: j.t, sha: '', w: j.w ?? 0, h: j.h ?? 0, text: j.text ?? '', regions: j.regions ?? [] }, ...(png ? { png } : {}) };
+          return crop ? [{ crop, ...(png ? { png } : {}) }] : [];
         });
-      const transcript = f['transcript.json'] ? (JSON.parse(strFromU8(f['transcript.json'])) as TranscriptSegment[]) : [];
+      let transcript: TranscriptSegment[] = [];
+      try {
+        transcript = f['transcript.json'] ? cleanTranscript(JSON.parse(strFromU8(f['transcript.json']))) : [];
+      } catch {
+        /* a broken transcript: the session keeps its audio and ink */
+      }
+      const pages = (Array.isArray(s.pages) ? s.pages : []).filter(
+        (p): p is { id: string; n: number } => typeof p === 'object' && p !== null && typeof (p as { id?: unknown }).id === 'string' && Number.isFinite((p as { n?: unknown }).n),
+      );
+      const transcriber = s.transcriber === 'device' || s.transcriber === 'cloud' ? s.transcriber : 'none';
       out.push({
-        meta: { id, notebookId: s.notebookId ?? '', startedAt: Number(s.startedAt) || 0, durationMs: Number(s.durationMs) || 0, state: 'stopped', lastT: Number(s.lastT) || 0, transcriber: s.transcriber ?? 'none', ...(s.title ? { title: s.title } : {}) },
-        pages: s.pages ?? [],
+        id,
+        meta: { id, notebookId: typeof s.notebookId === 'string' ? s.notebookId : '', startedAt: Number(s.startedAt) || 0, durationMs: Math.max(0, Number(s.durationMs) || 0), state: 'stopped', lastT: Math.max(0, Number(s.lastT) || 0), transcriber, ...(typeof s.title === 'string' && s.title ? { title: s.title } : {}) },
+        pages,
         events: f['timeline.jsonl'] ? eventsFromJsonl(strFromU8(f['timeline.jsonl'])) : [],
         audio,
         crops,
@@ -134,11 +158,12 @@ export function readLectureFiles(files: Record<string, Uint8Array>): LectureBund
 }
 
 /** Collects a session doc into a bundle (asset bytes are filled in by the caller). */
-export function lectureBundleOf(lec: LectureDoc, pagePos: (pageId: string) => number): LectureBundle {
+export function lectureBundleOf(lec: LectureDoc, sessionId: string, pagePos: (pageId: string) => number): LectureBundle {
   const events = lec.events();
   const ids = [...new Set(events.flatMap((e) => ('p' in e ? [e.p] : [])))];
   return {
-    meta: lec.meta(),
+    id: sessionId,
+    meta: { ...lec.meta(), id: sessionId },
     pages: ids.map((id) => ({ id, n: pagePos(id) })).filter((p) => p.n > 0),
     events,
     audio: lec.audio().map((chunk) => ({ chunk })),

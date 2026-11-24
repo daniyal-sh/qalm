@@ -1,4 +1,4 @@
-import { fmtT, parseT } from './timeline';
+import { fmtT, fmtTExact, parseT } from './timeline';
 import type { LectureCrop, LectureMeta, TranscriptSegment } from './types';
 
 /** Lecture labels (`L1`, `L2`, …), notebook-wide and never reused. Stored by the server's notebook room. */
@@ -21,11 +21,14 @@ export function resolveLecture(l: QinkLectures, label: string): string | null {
 }
 
 const MAX_LINE = 1000;
-const quote = (s: string) => JSON.stringify(s.length > MAX_LINE ? `${s.slice(0, MAX_LINE)}…` : s);
+const quote = (v: unknown) => {
+  const s = typeof v === 'string' ? v : '';
+  return JSON.stringify(s.length > MAX_LINE ? `${s.slice(0, MAX_LINE)}…` : s);
+};
 
 /** A live transcript line in a `wait` update: `L2 03:12 "so the derivative"` (docs/lecture-mode.md §7). */
 export function transcriptLine(label: string, s: TranscriptSegment): string {
-  return `${label} ${fmtT(s.t0)} ${quote(s.text.trim())}`;
+  return `${label} ${fmtT(s.t0)} ${quote(String(s.text ?? '').trim())}`;
 }
 
 /** `L2 2026-11-24 47:10 stopped` (outline and session lists). */
@@ -38,7 +41,7 @@ export function lectureLine(label: string, m: LectureMeta): string {
 export const LECTURE_READ_WINDOW_MS = 10 * 60_000;
 export const LECTURE_READ_IMAGES = 8;
 
-/** Parses `L2` or `L2@10:00` (and `L2@600`); null if it isn't a lecture ref. */
+/** Parses `L2` or `L2@10:00` (also `L2@600` seconds and `L2@10:00.250` with ms); null if it isn't a lecture ref. */
 export function parseLectureRef(ref: string): { label: string; from: number } | null {
   const m = /^(L\d+)(?:@(.+))?$/i.exec(ref.trim().replace(/\s+/g, ''));
   if (!m) return null;
@@ -71,7 +74,7 @@ export function encodeLectureRead(label: string, meta: LectureMeta, transcript: 
   let cut: number | null = null;
   for (const r of rows) {
     if (r.seg) {
-      lines.push(`${fmtT(r.t)} ${quote(r.seg.text.trim())}`);
+      lines.push(`${fmtT(r.t)} ${quote(String(r.seg.text ?? '').trim())}`);
       continue;
     }
     const c = r.crop!;
@@ -88,8 +91,10 @@ export function encodeLectureRead(label: string, meta: LectureMeta, transcript: 
     parts.push({ image: c.sha });
   }
   if (!rows.length) lines.push('(nothing in this part)');
-  const next = cut ?? (to < meta.durationMs ? to : null);
-  if (next !== null) lines.push(`more: read("${label}@${fmtT(next)}")`);
+  // The pointer is exact (ms), so the next read starts at the first crop left out. It always moves forward: should
+  // more than LECTURE_READ_IMAGES crops share the window's first ms, the rest of that ms is skipped.
+  const next = cut !== null ? Math.max(cut, from + 1) : to < meta.durationMs ? to : null;
+  if (next !== null) lines.push(`more: read("${label}@${fmtTExact(next)}")`);
   flush();
   return parts;
 }
