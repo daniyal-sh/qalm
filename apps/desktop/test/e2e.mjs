@@ -354,8 +354,49 @@ try {
       }
       if (!along.points.every((q) => q.p > 0)) throw new Error(`ruler (${label}): pressure lost`);
     }
+    // A quick back-and-forth along the ruler, over the line just ruled there, looks like a scribble once snapped to
+    // one line: it is ink, and the line stays.
+    {
+      const known = await pageItems();
+      await win.keyboard.press('p');
+      const x0 = rb.x + rb.width * 0.25;
+      const x1 = rb.x + rb.width * 0.6;
+      const back = [];
+      for (let leg = 0; leg < 8; leg++) for (let k = 0; k <= 8; k++) back.push([leg % 2 ? x1 - ((x1 - x0) * k) / 8 : x0 + ((x1 - x0) * k) / 8, rb.y - 12 + (k % 3)]);
+      await penLine(back);
+      const now = await pageItems();
+      if (now.length !== known.length + 1 || known.some((b) => !now.some((x) => x.id === b.id))) {
+        throw new Error(`ruler: a back-and-forth along it should be kept as ink and erase nothing (${known.length} → ${now.length} items)`);
+      }
+    }
     await shot('ruler-1-snapped.png');
-    log('ruler: pen strokes starting outside its edge and over it were drawn straight along the edge');
+    log('ruler: pen strokes starting outside its edge and over it were drawn straight along the edge; a back-and-forth along it erased nothing');
+
+    // Holding the ruler with a finger while the pen draws: the finger moves it down 40 px and stays down; the pen
+    // starts just outside the moved edge at once (before the pose settles) and follows that edge, not the old one.
+    await win.waitForTimeout(2100); // past the pen's hand-side window, so the finger isn't taken for a palm
+    const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 7, radiusX: 4, radiusY: 4 }] });
+    const hold = [rb.x + rb.width * 0.15, rb.y + rb.height * 0.7];
+    await touch('touchStart', ...hold);
+    for (let i = 1; i <= 8; i++) await touch('touchMove', hold[0], hold[1] + i * 5);
+    const heldBox = await rulerEl.boundingBox();
+    if (Math.abs(heldBox.y - (rb.y + 40)) > 2) throw new Error(`ruler: a finger should move it down 40 px (${JSON.stringify(heldBox)})`);
+    const knownHeld = await pageItems();
+    await win.keyboard.press('p');
+    const hy = heldBox.y - 12;
+    await penLine(Array.from({ length: 20 }, (_, i) => [rb.x + rb.width * 0.3 + i * 12, hy + Math.sin(i / 2) * 5]));
+    // Back where it was, and let go.
+    for (let i = 7; i >= 0; i--) await touch('touchMove', hold[0], hold[1] + i * 5);
+    await touch('touchEnd');
+    const held = strokesOf(await pageItems()).find((it) => !knownHeld.some((b) => b.id === it.id));
+    if (!held) throw new Error('ruler (held): the stroke was not added');
+    const heldYs = held.points.map((q) => q.y);
+    const wantHeld = (heldBox.y - box.y) / pxPerUnit - held.width / 2;
+    if (Math.max(...heldYs) - Math.min(...heldYs) > 0.01 || Math.abs(heldYs[0] - wantHeld) > 1.5) {
+      throw new Error(`ruler (held): not along the moved edge (y ${heldYs[0].toFixed(2)}, want ${wantHeld.toFixed(2)})`);
+    }
+    if (Math.abs((await rulerEl.boundingBox()).y - rb.y) > 2) throw new Error('ruler (held): the finger should have moved it back');
+    log('ruler: held by a finger and moved, the pen ruled along its new edge before the finger lifted');
     // Drag the body with the mouse (not on the readout or the handles), then turn it clockwise by its handle by about
     // 44°: it snaps to 45° and, falling to the right, reads 135°.
     const grab = [rb.x + rb.width * 0.3, rb.y + rb.height * 0.75];
@@ -406,9 +447,24 @@ try {
     if ((await laserCount()) !== 0) throw new Error('laser: the trail should be gone after about a second');
     const faded = await win.screenshot({ clip });
     if (!faded.equals(plain)) writeFileSync(join(shots, 'laser-2-after.png'), faded);
+    // The laser never erases: neither the right mouse button nor the pen's barrel button, across the line from 4c.
+    const across = Array.from({ length: 16 }, (_, i) => [lx0 - 20 + ((lx1 - lx0 + 40) * i) / 15, ly + Math.sin(i) * 6]);
+    await win.mouse.move(...across[0]);
+    await win.mouse.down({ button: 'right' });
+    for (const q of across.slice(1)) await win.mouse.move(...q);
+    await win.mouse.up({ button: 'right' });
+    const barrel = (type, x, y, down) =>
+      cdp.send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'right', buttons: down ? 2 : 0, clickCount: type === 'mouseMoved' ? 0 : 1, pointerType: 'pen', force: 0.5 });
+    await barrel('mouseMoved', ...across[0], false);
+    await barrel('mousePressed', ...across[0], true);
+    for (const q of across.slice(1)) await barrel('mouseMoved', ...q, true);
+    await barrel('mouseReleased', ...across[across.length - 1], false);
+    await win.waitForTimeout(1300);
     const after4f = await pageItems();
-    if (after4f.length !== before4f.length) throw new Error(`laser: added ${after4f.length - before4f.length} items`);
-    log(`laser: a trail of ${shown} points faded within 1.3 s and added no item${faded.equals(plain) ? '; the page looks as before' : ''}`);
+    if (after4f.length !== before4f.length || before4f.some((b) => !after4f.some((x) => x.id === b.id))) {
+      throw new Error(`laser: the page changed (${before4f.length} → ${after4f.length} items)`);
+    }
+    log(`laser: a trail of ${shown} points faded within 1.3 s and added no item${faded.equals(plain) ? '; the page looks as before' : ''}; right button and barrel button erased nothing`);
     await win.keyboard.press('p');
   }
 
@@ -443,7 +499,23 @@ try {
   log('fullscreen: F11 / button on, Esc / pill off; focus pill and header follow');
 
   // 5c. Presentation: F5 hides every control but the page arrows, the laser and Stop; the page is fitted and the window
-  // fullscreen; Esc ends it and the header comes back.
+  // fullscreen; Esc ends it and the header comes back. F5 while typing in a text box neither reloads nor presents.
+  {
+    await win.evaluate(() => (window.__e2eNoReload = true));
+    await win.keyboard.press('t');
+    const tb = await win.locator('canvas[data-qalm-ink="1"]').first().boundingBox();
+    await win.mouse.click(tb.x + tb.width * 0.5, tb.y + 60);
+    await win.keyboard.type('hi');
+    await win.keyboard.press('F5');
+    await win.waitForTimeout(800);
+    const state = await win.evaluate(() => ({ kept: window.__e2eNoReload === true, typing: ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName ?? '') }));
+    if (!state.kept) throw new Error('F5 while typing reloaded the page');
+    if (await win.getByLabel(/^Stop presenting/).first().isVisible()) throw new Error('F5 while typing should not present');
+    if (!state.typing) throw new Error('F5 while typing should leave the text box being typed');
+    await win.keyboard.press('Escape');
+    await win.keyboard.press('p');
+    log('F5 while typing in a text box: no reload, no presentation');
+  }
   await win.keyboard.press('F5');
   await win.getByLabel(/^Stop presenting/).first().waitFor({ timeout: 10_000 });
   await waitFull(true);

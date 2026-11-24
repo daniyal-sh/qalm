@@ -56,6 +56,8 @@ export interface StrokeEndEvent {
    * store. `points` is still the hand-drawn stroke up to the snap (for undo). The overlay hands it off under `id`.
    */
   shape?: { kind: string; pts: [number, number][] };
+  /** Ruled along the ruler (its points lie on one line): never a scribble. */
+  ruler?: boolean;
 }
 
 /**
@@ -108,6 +110,11 @@ export interface InkOverlayProps {
    * edge line, pushed out by half the pen width, keeping its pressure. Such a stroke never snaps to a shape.
    */
   ruler?: InkRuler | null;
+  /**
+   * Web only: the ruler as it is right now, read when a stroke starts (a finger may be moving it; `ruler` only
+   * changes once its pose settles). Takes precedence over `ruler`.
+   */
+  getRuler?(): InkRuler | null;
   /**
    * laser only: 'trail' (default) leaves a glowing red trail that fades over LASER_FADE_MS; 'dot' shows one point
    * that follows the pen (and a hovering pen or mouse). The laser never emits strokes: nothing is saved.

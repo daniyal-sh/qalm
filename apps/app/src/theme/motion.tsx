@@ -117,14 +117,18 @@ export function Appear({
     Animated.timing(v, { toValue: 1, duration, easing: easeOut, useNativeDriver: NATIVE_DRIVER }).start();
   }, [v, reduce, duration]);
   const d = distance ?? motion.rise;
-  // The style's own transforms (e.g. the focus pill's shrink on a phone) stay; the entrance is added after them.
-  const own = (StyleSheet.flatten(style)?.transform ?? []) as object[];
+  // The style's own transforms (e.g. the focus pill's shrink on a phone) and opacity (the pill stays hidden until it
+  // has measured itself) stay; the entrance is added to them.
+  const flat = StyleSheet.flatten(style);
+  const own = (flat?.transform ?? []) as object[];
+  const ownOpacity = typeof flat?.opacity === 'number' ? flat.opacity : undefined;
+  const opacity = ownOpacity === undefined ? v : Animated.multiply(v, ownOpacity);
   const transform: object[] = [...own];
   if (from === 'bottom' || from === 'top') transform.push({ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [from === 'top' ? -d : d, 0] }) });
   if (from === 'left' || from === 'right') transform.push({ translateX: v.interpolate({ inputRange: [0, 1], outputRange: [from === 'left' ? -d : d, 0] }) });
   if (scale) transform.push({ scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) });
   return (
-    <Animated.View pointerEvents={pointerEvents} style={[style, { opacity: v, transform } as unknown as Animated.WithAnimatedValue<ViewStyle>]}>
+    <Animated.View pointerEvents={pointerEvents} style={[style, { opacity, transform } as unknown as Animated.WithAnimatedValue<ViewStyle>]}>
       {children}
     </Animated.View>
   );

@@ -64,6 +64,12 @@ class RulerSnapTest {
     assertEquals(1.0, dist(l[0], l[1], l[2], l[3]) - dist(ea[0], ea[1], eb[0], eb[1]), eps)
   }
 
+  @Test fun theLaserNeverErases() {
+    assertEquals("laser", Laser.toolFor("laser", eraserHeld = true))
+    assertEquals("eraser", Laser.toolFor("pen", eraserHeld = true))
+    assertEquals("pen", Laser.toolFor("pen", eraserHeld = false))
+  }
+
   @Test fun laserTrailFades() {
     val pts = mutableListOf(Laser.Pt(0f, 0f, 0L, true), Laser.Pt(1f, 0f, 500L, false), Laser.Pt(2f, 0f, 900L, false))
     assertEquals(1f, Laser.alpha(0L), 0f)

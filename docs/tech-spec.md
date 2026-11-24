@@ -472,8 +472,11 @@ from the region images with its own vision. That keeps the app about 20 MB light
     no header, toolbar, pill, page numbers and menus, margin cards, comment pins, selection or ruler. The page is fitted
     whole and centred (`fitZoom`, which may go below the 0.75× minimum; pinch is off), the laser is the tool, and a
     small bar at the bottom has previous / next, "n / m", the laser's trail / dot and Stop. Keys: → ↓ Space Enter PgDn
-    next, ← ↑ Backspace PgUp previous, Home / End, K switches trail / dot, Esc or F5 stops. Leaving fullscreen any
-    other way stops it too; stopping restores the tool, the zoom and the page.
+    next, ← ↑ Backspace PgUp previous, Home / End, K switches trail / dot, Esc or F5 stops (`present.logic.ts`); Space
+    or Enter on a focused bar button only presses it. F5 never reloads the page, even in a text field (where it does
+    nothing). While presenting, the pen button doesn't switch to the eraser and Ctrl+wheel / trackpad pinch don't zoom;
+    pages deleted on another device meanwhile keep the index on a page that exists (none left: it stops). Leaving
+    fullscreen any other way stops it too; stopping restores the tool, the zoom and the page.
   - Desktop keys (web and Electron; not while typing): P pen, H highlighter, E eraser (again: whole stroke / partial),
     L lasso, T text, K laser (again: trail / dot), R ruler on / off, F5 present, F11 or Ctrl+Cmd+F fullscreen, Esc
     (selection, then fullscreen or presenting), Ctrl/Cmd + Z / Shift+Z / Y undo and redo, Ctrl/Cmd + C / X / V / D / A,
@@ -608,21 +611,28 @@ that ink is all deleted, the thread shows only in the panel ("Ink removed").
   midpoint and move it with them (a second finger anywhere counts once one is on the ruler); the round handle at its
   right end turns it with the mouse; × hides it. Angles snap to multiples of 45° within **4°** (`RULER.snapDeg`). A
   palm (the overlay's palm rules) doesn't move it. In "Pen and finger" a finger on the ruler moves it instead of
-  drawing. The pose goes to the overlays (window coordinates) only when a move ends, so dragging doesn't re-render pages.
+  drawing. The pose goes to the overlays (window coordinates) when a move holds still for **80 ms**
+  (`RULER_SETTLE_MS`: a finger holding the ruler while the pen draws along it) and when it ends, so dragging doesn't
+  re-render pages every frame; on web an overlay also reads the live pose at pen-down (`getRuler`), so a stroke follows
+  the ruler where it is even mid-move.
 - **Drawing along it** (`rulerEdgeAt`, `rulerLine`, `projectOnLine`; ports in `RulerSnap.kt` / `RulerSnap.swift`): a
   pen or highlighter stroke that **starts within 24 px** (`RULER.snapPx`, `RULER_SNAP_PX`; dp / pt on native) outside a
   long edge, or over the ruler's half next to it, and along its length (plus 24 px at each end) follows that edge:
   every point, predicted ones too, is projected onto the edge line pushed out by half the pen width, keeping pressure,
-  tilt and time. Such a stroke never snaps to a shape. On web a pen landing on the ruler is handed to the overlay
+  tilt and time. Such a stroke never snaps to a shape, and is never taken for a scribble (`ruler` on `onStrokeEnd`:
+  going back and forth along the ruler would look like one). On web a pen landing on the ruler is handed to the overlay
   underneath (`forwardToInk`: a synthetic pointerdown, then the overlay captures the pointer). Zoom-proof: the line is
   mapped into each page's units when the stroke starts.
-- **Native:** the overlays snap (Android: `getLocationInWindow` / density, assuming the edge-to-edge RN root sits at the
-  window origin; iOS: `convert(_:to: nil)`). The ruler view itself is React Native, so on iPad and Android a pen landing
+- **Native:** the overlays snap. The pose is in React Native's `measureInWindow` coordinates, so Android measures its
+  own origin the same way (`getLocationOnScreen` less `getWindowVisibleDisplayFrame`, so a status bar doesn't shift
+  it) and iOS uses UIWindow coordinates (`convert(_:to: nil)`), which is what RN reports there. The ruler view itself is React Native, so on iPad and Android a pen landing
   on the ruler's body moves it (only web forwards it); strokes starting outside the edge snap everywhere.
 
 ### Laser pointer
 - A tool (toolbar, pill, K) whose options are **Trail** (default) and **Dot** (`tools.laserMode`). It draws on the ink
-  overlay only and never emits a stroke, so nothing is saved, synced or undoable.
+  overlay only and never emits a stroke, so nothing is saved, synced or undoable. It never erases either: the pen's
+  barrel button, the eraser end and the right mouse button (which erase that stroke with the other tools) draw the
+  laser too.
 - **Trail:** a red line, a 3 px core in brand `bad` (#b91c1c) over a 10 px glow in its dark tint (#f87171) at 35 %,
   each segment fading with its age and gone after **1 s** (`LASER_FADE_MS`), also after the pen lifts. **Dot:** a 4 px
   core in a 9 px glow under the pen, and under a hovering pen or mouse (the mouse cursor is hidden). Sizes are screen

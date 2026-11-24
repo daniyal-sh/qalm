@@ -455,13 +455,16 @@ export function InkOverlay(props: InkOverlayProps) {
 
     const start = (ev: PointerEvent, isPen: boolean) => {
       const P = propsRef.current;
-      const eraserOverride = erasesWhileHeld(ev);
+      // The barrel button, the eraser end and the right mouse button erase that stroke, except with the laser: pointing
+      // must never change the page.
+      const eraserOverride = P.tool !== 'laser' && erasesWhileHeld(ev);
       const tool = eraserOverride ? 'eraser' : P.tool;
       if (tool === 'none') return;
       const kind: Kind = tool === 'eraser' ? 'erase' : tool === 'lasso' ? 'lasso' : tool === 'laser' ? 'laser' : 'ink';
       const rect = canvas.getBoundingClientRect();
       // Near a ruler edge: the stroke follows that edge (projected onto it, half the pen's width outside it).
-      const edge = kind === 'ink' && P.ruler ? rulerEdgeAt(P.ruler, [ev.clientX, ev.clientY], RULER_SNAP_PX) : null;
+      const ruler = P.getRuler ? P.getRuler() : P.ruler;
+      const edge = kind === 'ink' && ruler ? rulerEdgeAt(ruler, [ev.clientX, ev.clientY], RULER_SNAP_PX) : null;
       const line = edge
         ? rulerLine(edge, ([x, y]) => [((x - rect.left) * P.pageSize.w) / rect.width, ((y - rect.top) * P.pageSize.h) / rect.height], P.width / 2)
         : null;
@@ -553,6 +556,7 @@ export function InkOverlay(props: InkOverlayProps) {
             style: live.style,
             smoothing: live.smoothing,
             ...(shape ? { shape: { kind: shape.kind, pts: shape.pts } } : null),
+            ...(live.line ? { ruler: true } : null),
           },
         });
       }

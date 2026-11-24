@@ -60,6 +60,8 @@ export interface EditorCtx {
   input: InputPrefs;
   /** The on-screen ruler in window coordinates while it's shown (editor UI, never in the page), else null. */
   ruler: InkRuler | null;
+  /** The ruler right now, also mid-move (web overlays read it at pen-down). */
+  getRuler(): InkRuler | null;
   /** An overlay saw a real pen (auto-picks "draw with"). */
   onPenSeen(): void;
   undo: CrossPageUndo;

@@ -19,6 +19,8 @@ const ZERO_INSET = 16;
 /** Tick lengths (px) for mm, 5 mm and cm. */
 const TICK = { mm: 7, half: 11, cm: 16 } as const;
 const HANDLE = 30;
+/** A moving ruler's pose goes to the overlays once it has held still this long (ms), and when the move ends. */
+export const RULER_SETTLE_MS = 80;
 
 export interface RulerProps {
   /** Pose in the view's px (the editor's page area). */
@@ -30,18 +32,25 @@ export interface RulerProps {
   /** Page mm at the current zoom, in px (the ticks measure the page). */
   pxPerMm: number;
   input: Pick<InkInputSettings, 'hand' | 'palm'>;
-  /** A move ended: the new pose (while it moves, the ruler shows it itself, so the editor doesn't re-render). */
+  /**
+   * The pose to commit: once a move pauses for RULER_SETTLE_MS (a finger holding the ruler while the pen draws along
+   * it) and when it ends. In between, the ruler shows the move itself, so the editor doesn't re-render every frame.
+   */
   onChange(pose: RulerPose): void;
+  /** Every pose while it moves (cheap: the editor keeps it in a ref for an overlay's pen-down on web). */
+  onLive?(pose: RulerPose): void;
   onClose(): void;
 }
 
-export function Ruler({ pose: committed, view, origin, pxPerMm, input, onChange, onClose }: RulerProps) {
+export function Ruler({ pose: committed, view, origin, pxPerMm, input, onChange, onLive, onClose }: RulerProps) {
   const { c, scheme } = useTheme();
   const root = React.useRef<React.ComponentRef<typeof View>>(null);
   const [moving, setMoving] = React.useState<RulerPose | null>(null);
   const pose = moving ?? committed;
-  const live = React.useRef({ pose, view, origin, input, onChange });
-  live.current = { pose, view, origin, input, onChange };
+  const live = React.useRef({ pose, view, origin, input, onChange, onLive });
+  live.current = { pose, view, origin, input, onChange, onLive };
+  const settle = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => () => void (settle.current && clearTimeout(settle.current)), []);
 
   // ---- gestures, in window coordinates; `origin` turns them into the view's px ----
   const g = React.useRef({
@@ -76,9 +85,18 @@ export function Ruler({ pose: committed, view, origin, pxPerMm, input, onChange,
     const kept = keepInView(next, live.current.view);
     live.current.pose = kept; // a rebase before the next render starts from here
     setMoving(kept);
+    live.current.onLive?.(kept);
+    // Held still for a moment (the pen about to draw along it): the overlays get this pose now, not when it's let go.
+    if (settle.current) clearTimeout(settle.current);
+    settle.current = setTimeout(() => {
+      settle.current = null;
+      live.current.onChange(live.current.pose);
+    }, RULER_SETTLE_MS);
   };
   const end = () => {
     const s = g.current;
+    if (settle.current) clearTimeout(settle.current);
+    settle.current = null;
     if (s.moved) live.current.onChange(live.current.pose);
     s.moved = false;
     setMoving(null);

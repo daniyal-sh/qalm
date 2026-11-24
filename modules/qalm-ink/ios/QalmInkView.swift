@@ -791,6 +791,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
         "heldMs": held,
         "style": a.style,
         "smoothing": a.smoothing,
+        "ruler": a.line != nil,
       ]
       if let s = snapped {
         event["shape"] = ["kind": s.kind, "pts": s.pts.map { [$0.x, $0.y] }] as [String: Any]

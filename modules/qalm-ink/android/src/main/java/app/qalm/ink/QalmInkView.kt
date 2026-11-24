@@ -9,6 +9,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
+import android.graphics.Rect
 import android.os.Build
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
@@ -310,7 +311,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   private fun reject(reason: String) = onRejectedTouch(mapOf("reason" to reason))
 
   private fun start(ev: MotionEvent, idx: Int, isPen: Boolean, eraser: Boolean): Boolean {
-    val t = if (eraser) "eraser" else tool
+    val t = Laser.toolFor(tool, eraser)
     if (t == "none") return false
     val kind = when (t) {
       "eraser" -> "erase"
@@ -360,14 +361,23 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   // ---- ruler: the window-dp pose, mapped onto this page ----
   /**
+   * This view's origin in React Native's window coordinates (px), as `measureInWindow` reports them: its place on
+   * screen less the window's visible display frame (so a status bar above the app doesn't shift the ruler).
+   */
+  private fun rnWindowOrigin(): IntArray {
+    val o = IntArray(2).also { getLocationOnScreen(it) }
+    val frame = Rect().also { getWindowVisibleDisplayFrame(it) }
+    return intArrayOf(o[0] - frame.left, o[1] - frame.top)
+  }
+
+  /**
    * The ruler line a stroke starting at view px (x, y) follows (page units, pushed out by [offset]), or null. The
-   * pose is in React Native window dp (measureInWindow); the app is edge-to-edge, so the RN root sits at the window's
-   * origin and getLocationInWindow / density gives the same units.
+   * pose is in React Native window dp (measureInWindow), so this view's origin is measured the same way.
    */
   private fun rulerLine(x: Float, y: Float, offset: Double): DoubleArray? {
     val r = ruler ?: return null
     val d = resources.displayMetrics.density.toDouble()
-    val o = IntArray(2).also { getLocationInWindow(it) }
+    val o = rnWindowOrigin()
     val edge = RulerSnap.edgeAt(r, (o[0] + x) / d, (o[1] + y) / d) ?: return null
     val toPage = { wx: Double, wy: Double -> doubleArrayOf((wx * d - o[0]) / unitPxX(), (wy * d - o[1]) / unitPxY()) }
     return RulerSnap.line(edge, toPage, offset)
@@ -430,6 +440,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
             "heldMs" to Math.round(heldMs).toDouble(),
             "style" to l.style,
             "smoothing" to l.smoothing,
+            "ruler" to (l.line != null),
           ) + (if (shapeKind != null) mapOf("shape" to mapOf("kind" to shapeKind, "pts" to l.snapCur.map { listOf(it[0], it[1]) })) else emptyMap()),
         )
       }

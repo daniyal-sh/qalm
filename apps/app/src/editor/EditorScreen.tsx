@@ -2,7 +2,7 @@ import { createNotebookUndoManager, inkOnPaper, Notebook, Page, PEN_WIDTHS, HIGH
 import { router } from 'expo-router';
 import { NavigationBar } from 'expo-navigation-bar';
 import { StatusBar } from 'expo-status-bar';
-import { QalmInk, renderThumbnail } from 'qalm-ink';
+import { QalmInk, renderThumbnail, type InkRuler } from 'qalm-ink';
 import * as React from 'react';
 import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, useWindowDimensions, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { GestureDetector, usePinchGesture } from 'react-native-gesture-handler';
@@ -45,6 +45,7 @@ import { SwatchStrip } from './Swatches';
 import { Toolbar } from './Toolbar';
 import { FocusPill, usePillPlace } from './FocusPill';
 import { PresentBar } from './PresentBar';
+import { clampPresent, f5Action, presentKey } from './present.logic';
 import { Ruler } from './Ruler';
 import { defaultRuler, keepInView } from './ruler.logic';
 import { enterFocus, fullscreenShortcut, leaveFocus, type Panels } from './focus.logic';
@@ -135,7 +136,10 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     },
     [changeTools],
   );
-  const onPenButton = React.useCallback(() => setTool(penButtonTool(input.penGesture, toolRef.current, prevTool.current)), [input.penGesture, setTool]);
+  const onPenButton = React.useCallback(() => {
+    if (presentRef.current !== null) return; // presenting: the pen button never swaps the laser for the eraser
+    setTool(penButtonTool(input.penGesture, toolRef.current, prevTool.current));
+  }, [input.penGesture, setTool]);
 
   // ---- undo ----
   const undo = React.useMemo(() => new CrossPageUndo(), []);
@@ -370,6 +374,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     const onWheel = (ev: WheelEvent) => {
       if (!ev.ctrlKey && !ev.metaKey) return;
       ev.preventDefault();
+      if (presentRef.current !== null) return; // presenting: the page stays fitted (and the browser doesn't zoom)
       zoomSoon((zoomTarget.current ?? zoomRef.current) * Math.exp(-ev.deltaY * 0.01));
     };
     window.addEventListener('wheel', onWheel, { passive: false });
@@ -520,37 +525,29 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     trackModifiers();
     const onKey = (ev: KeyboardEvent) => {
       const target = ev.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      const mod = ev.ctrlKey || ev.metaKey;
       const k = ev.key.toLowerCase();
-      const a = selRef.current;
-      // Presenting: arrows, space and page keys turn pages; K switches the laser; Esc (or F5) stops.
-      if (presentRef.current !== null) {
-        if (mod || ev.altKey) return;
-        const n = pagesRef.current.length;
-        const at = presentRef.current;
-        const to =
-          k === 'arrowright' || k === 'arrowdown' || k === 'pagedown' || k === ' ' || k === 'enter'
-            ? at + 1
-            : k === 'arrowleft' || k === 'arrowup' || k === 'pageup' || k === 'backspace'
-              ? at - 1
-              : k === 'home'
-                ? 0
-                : k === 'end'
-                  ? n - 1
-                  : null;
-        if (to !== null) {
-          ev.preventDefault();
-          setPresentAt(Math.max(0, Math.min(n - 1, to)));
-        } else if (k === 'escape' || k === 'f5') {
-          ev.preventDefault();
-          stopPresentingRef.current();
-        } else if (k === 'k') changeTools({ laserMode: toolsRef.current.laserMode === 'dot' ? 'trail' : 'dot' });
+      const mod = ev.ctrlKey || ev.metaKey;
+      // F5 never reloads the page (a comment or text box being typed would be lost), even while typing; outside a text
+      // field it presents (or stops presenting).
+      const typing = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      if (k === 'f5' && !mod && !ev.altKey) {
+        ev.preventDefault();
+        const f5 = f5Action(typing, presentRef.current !== null);
+        if (f5 === 'stop') stopPresentingRef.current();
+        else if (f5 === 'start') startPresentingRef.current();
         return;
       }
-      if (k === 'f5' && !mod && !ev.altKey) {
-        ev.preventDefault(); // not a reload
-        startPresentingRef.current();
+      if (typing) return;
+      const a = selRef.current;
+      // Presenting: arrows, space and page keys turn pages; K switches the laser; Esc stops.
+      if (presentRef.current !== null) {
+        if (mod || ev.altKey) return;
+        const act = presentKey(ev.key, presentRef.current, pagesRef.current.length, !!target?.closest?.('button, [role="button"]'));
+        if (act === null) return;
+        ev.preventDefault();
+        if (act === 'stop') stopPresentingRef.current();
+        else if (act === 'laser') changeTools({ laserMode: toolsRef.current.laserMode === 'dot' ? 'trail' : 'dot' });
+        else setPresentAt(act.page);
         return;
       }
       if (mod && k === 'z') {
@@ -808,6 +805,13 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     if (slot) requestAnimationFrame(() => vScroll.current?.scrollTo({ y: Math.max(0, slot.top - 80), animated: false }));
   }, [slots, presentAt]);
   const presenting = presentAt !== null;
+  // Pages deleted meanwhile (on another device): stay on a page that exists ("5 / 4" never shows); none left, stop.
+  React.useEffect(() => {
+    if (presentAt === null) return;
+    const at = clampPresent(presentAt, pages.length);
+    if (at === null) stopPresentingRef.current();
+    else if (at !== presentAt) setPresentAt(at);
+  }, [pages.length, presentAt]);
 
   const mac = Platform.OS === 'web' && (desktop()?.platform === 'darwin' || (typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)));
   const fsKey = Platform.OS === 'web' ? ` (${fullscreenShortcut(mac)})` : '';
@@ -1064,6 +1068,15 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
     () => (rulerOn && rulerPose && !presenting ? { ...rulerPose, cx: rulerPose.cx + areaOrigin.x, cy: rulerPose.cy + areaOrigin.y } : null),
     [rulerOn, rulerPose, presenting, areaOrigin],
   );
+  // The ruler as it is right now (window coordinates), also while a finger moves it: an overlay reads it at pen-down
+  // on web, so a stroke follows the ruler where it is even before its pose settles (RULER_SETTLE_MS).
+  const rulerNow = React.useRef<InkRuler | null>(null);
+  const rulerSeen = React.useRef<InkRuler | null>(null);
+  if (rulerSeen.current !== rulerWindow) {
+    rulerSeen.current = rulerWindow;
+    rulerNow.current = rulerWindow;
+  }
+  const getRuler = React.useCallback(() => rulerNow.current, []);
   const edCtx = React.useMemo<EditorCtx | null>(
     () =>
       notebook
@@ -1091,6 +1104,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             reportPage,
             touchPage,
             ruler: rulerWindow,
+            getRuler,
           }
         : null,
     [notebook, notebookId, tools, setTool, onPenButton, input, notePenSeen, undo, registry, selection, editingText, activeCommentId, ui.comments, presenting, selectThread, reportPage, touchPage, rulerWindow],
@@ -1303,6 +1317,9 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                   pxPerMm={(slots[current] && pages[current] ? (slots[current]!.width * liveScale) / pages[current]!.size.w : 1) * UNITS_PER_MM}
                   input={input}
                   onChange={setRulerPose}
+                  onLive={(p) => {
+                    rulerNow.current = { ...p, cx: p.cx + areaOrigin.x, cy: p.cy + areaOrigin.y };
+                  }}
                   onClose={() => setRulerOn(false)}
                 />
               </View>
@@ -1311,7 +1328,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
             {/* Floating toolbar; in fullscreen, the focus pill; presenting, only the page arrows and the laser */}
             {presenting ? (
               <PresentBar
-                index={presentAt!}
+                index={Math.min(presentAt!, Math.max(0, pages.length - 1))}
                 count={pages.length}
                 onPage={(d) => setPresentAt((x) => (x === null ? x : Math.max(0, Math.min(pages.length - 1, x + d))))}
                 laserMode={tools.laserMode}

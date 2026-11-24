@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_PILL, pillCompact, PILL_MARGIN, PILL_MIN_SCALE } from '../src/editor/focus.logic';
 import { defaultRuler, dragRuler, keepInView, MIN_MM_TICK_PX, rotateRuler, rulerTicks, twoFingerRuler } from '../src/editor/ruler.logic';
 import { centredScroll, fitZoom, layoutPages } from '../src/editor/view';
+import { clampPresent, f5Action, presentKey } from '../src/editor/present.logic';
 
 const deg = (d: number) => (d * Math.PI) / 180;
 const r0: RulerPose = { cx: 400, cy: 300, angle: 0, length: 600, thickness: 72 };
@@ -96,5 +97,39 @@ describe('focus pill on a phone', () => {
     expect(pillCompact(DEFAULT_PILL, { w: 390, h: 800 }, room / PILL_MIN_SCALE - 1)).toBe(false);
     // On a side edge the room is the height.
     expect(pillCompact({ edge: 'left', along: 0.5 }, { w: 390, h: 800 }, 520)).toBe(false);
+  });
+});
+
+describe('presentation keys', () => {
+  it('turns pages with arrows, space, enter and the page keys, never past either end', () => {
+    expect(presentKey('ArrowRight', 2, 5)).toEqual({ page: 3 });
+    expect(presentKey(' ', 2, 5)).toEqual({ page: 3 });
+    expect(presentKey('Enter', 4, 5)).toEqual({ page: 4 });
+    expect(presentKey('PageUp', 0, 5)).toEqual({ page: 0 });
+    expect(presentKey('Backspace', 3, 5)).toEqual({ page: 2 });
+    expect(presentKey('Home', 3, 5)).toEqual({ page: 0 });
+    expect(presentKey('End', 1, 5)).toEqual({ page: 4 });
+  });
+  it('Space or Enter on a focused button only presses the button (one page, not two)', () => {
+    expect(presentKey(' ', 2, 5, true)).toBeNull();
+    expect(presentKey('Enter', 2, 5, true)).toBeNull();
+    expect(presentKey('ArrowRight', 2, 5, true)).toEqual({ page: 3 });
+  });
+  it('K switches the laser, Esc and F5 stop, other keys are left alone', () => {
+    expect(presentKey('k', 0, 1)).toBe('laser');
+    expect(presentKey('Escape', 0, 1)).toBe('stop');
+    expect(presentKey('F5', 0, 1)).toBe('stop');
+    expect(presentKey('p', 0, 1)).toBeNull();
+  });
+  it('stays on a page that exists when pages are deleted elsewhere, and stops when none is left', () => {
+    expect(clampPresent(4, 4)).toBe(3);
+    expect(clampPresent(2, 4)).toBe(2);
+    expect(clampPresent(0, 0)).toBeNull();
+  });
+  it('F5 never reloads; while typing it does nothing else either', () => {
+    expect(f5Action(true, false)).toBe('none');
+    expect(f5Action(true, true)).toBe('none');
+    expect(f5Action(false, false)).toBe('start');
+    expect(f5Action(false, true)).toBe('stop');
   });
 });

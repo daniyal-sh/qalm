@@ -91,6 +91,12 @@ object Laser {
     if (i > 0) pts.subList(0, i).clear()
   }
 
+  /**
+   * The tool a stroke uses: the barrel button or the eraser end erases that stroke, except with the laser (pointing
+   * never changes the page).
+   */
+  fun toolFor(tool: String, eraserHeld: Boolean): String = if (eraserHeld && tool != "laser") "eraser" else tool
+
   /** 1 when new, 0 at FADE_MS. */
   fun alpha(age: Long): Float = (1f - age.toFloat() / FADE_MS).coerceIn(0f, 1f)
 }
