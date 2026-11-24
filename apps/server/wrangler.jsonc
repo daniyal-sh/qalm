@@ -69,7 +69,7 @@
     },
 
     // Production on https://qalm-api.apollolearn.app (deploy: pnpm --filter @qalm/server deploy:prod). The web app is
-    // on https://qalm.apollolearn.app/app (apps/site). Resources created 2026-11-24 (handover.md §7).
+    // on https://qalm.apollolearn.app/app (apps/site). Setup: docs/development.md, "Self-hosting on Cloudflare".
     "production": {
       "name": "qalm-api",
       "workers_dev": false,

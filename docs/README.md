@@ -2,7 +2,7 @@
 
 | Doc | What's in it |
 |---|---|
-| [Development guide](../handover.md) | How to run, test, build and self-host qalm; the decisions behind it and the known gaps |
+| [development.md](development.md) | How to run, test, build and self-host qalm; the decisions behind it and the known gaps |
 | [decisions.md](decisions.md) | v1 scope: what's in, what's out |
 | [tech-spec.md](tech-spec.md) | Architecture and the contracts between packages: data model, ink, sync, server, MCP |
 | [qink-live.md](qink-live.md) | Q-ink Live: the format AI agents read, and the MCP tools (`wait`, `read`, `transcribe`, `comment`) |

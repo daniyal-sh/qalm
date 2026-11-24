@@ -16,7 +16,7 @@ pnpm typecheck && pnpm test
 ```
 
 How to run the server, the web app and the desktop app is in the [README](README.md#quick-start). The architecture is
-in [docs/tech-spec.md](docs/tech-spec.md), and the development guide is [handover.md](handover.md).
+in [docs/tech-spec.md](docs/tech-spec.md), and the development guide is [docs/development.md](docs/development.md).
 
 ## Checks a pull request must pass
 
