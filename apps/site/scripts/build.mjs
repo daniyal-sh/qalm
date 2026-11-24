@@ -3,7 +3,7 @@
 //   dist/app/    the Expo web export, built with the base path /app
 // The app reads EXPO_PUBLIC_QALM_SERVER_URL at build time: set it for staging or production (see handover.md).
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +25,10 @@ rmSync(dist, { recursive: true, force: true });
 run([join(app, 'scripts', 'web-assets.mjs')]);
 // --clear: Metro's cache must not hand back modules transformed for the root base path (export:web, desktop).
 run([expoCli, 'export', '-p', 'web', '--clear', '--output-dir', join(dist, 'app')]);
-if (!existsSync(join(dist, 'app', 'index.html'))) throw new Error('site: the web export has no index.html');
+const appHtml = join(dist, 'app', 'index.html');
+if (!existsSync(appHtml)) throw new Error('site: the web export has no index.html');
 cpSync(join(site, 'public'), dist, { recursive: true });
+// The site's icon, so browsers don't ask for /favicon.ico (the export has none of its own).
+const html = readFileSync(appHtml, 'utf8');
+if (!html.includes('rel="icon"')) writeFileSync(appHtml, html.replace('</head>', '<link rel="icon" href="/favicon.svg" type="image/svg+xml">\n</head>'));
 console.log(`site: ${dist} (landing at /, app at /app/)`);

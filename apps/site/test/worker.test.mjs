@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import worker, { isAppRoute } from '../src/worker.js';
+import { isAppRoute } from '../src/routes.js';
+import worker from '../src/worker.js';
 
 test('app routes fall back; files and other paths do not', () => {
   for (const p of ['/app', '/app/', '/app/notebook/3f2a-11', '/app/auth/email/verify', '/app/settings']) assert.equal(isAppRoute(p), true, p);

@@ -22,7 +22,7 @@
   "vars": {
     "EMAIL_PROVIDER": "console",
     // App sign-in links in emails open the web app's verify route, which POSTs the token back (see .dev.vars.example).
-    "MAGIC_LINK_URL": "https://qalm.app/auth/email/verify"
+    "MAGIC_LINK_URL": "https://qalm.apollolearn.app/app/auth/email/verify"
   },
   "observability": { "enabled": true },
 

@@ -212,9 +212,9 @@ D1 migrations: `0001_init`, `0002_user_assets`, `0003_notebook_deleted`, `0004_a
   into the app; this needs a web redirect page). Real Resend email delivery is untested.
 - **Agents:** no real MCP client has connected yet, and image-token costs per provider haven't been measured.
 - **Builds:** the macOS DMG and the Windows arm64 installer haven't been built. Nothing is signed.
-- **Not deployed.** The Cloudflare resource ids in `apps/server/wrangler.jsonc` are placeholders.
-  `MAGIC_LINK_URL` assumes the web app lives at `https://qalm.app/auth/email/verify`; for local dev use
-  `http://localhost:8081/auth/email/verify`.
+- **Production isn't deployed yet.** Staging is live. The production resource ids in `apps/server/wrangler.jsonc`
+  (`env.production`) are `REPLACE_ME_…` placeholders: see the production checklist in §7. For local dev,
+  `MAGIC_LINK_URL` is `http://localhost:8081/auth/email/verify` (the dev web app stays at the root).
 - **Round 2, untested on devices:** pen styles/smoothing feel, the 50 ms native ink hand-off, tap-vs-scroll and handle
   dragging with touch/stylus, swatch drag in the toolbar, the new dialogs/sheets and the maths fallback font on
   iOS/Android, thumbnails and chunked pictures on a real GPU. Swatch sync and the thread index were only tested with
@@ -242,9 +242,14 @@ pnpm typecheck && pnpm test     # all packages
 pnpm --filter @qalm/server migrate:local
 pnpm --filter @qalm/server dev  # wrangler dev, http://127.0.0.1:8787
 
-# app on web (offline-only unless EXPO_PUBLIC_QALM_SERVER_URL is set at build time)
+# app on web (offline-only unless EXPO_PUBLIC_QALM_SERVER_URL is set at build time). Dev and export:web stay at the
+# root (http://localhost:8081/); only the site build (below) uses the base path /app.
 EXPO_PUBLIC_QALM_SERVER_URL=http://127.0.0.1:8787 pnpm --filter @qalm/app web
-pnpm --filter @qalm/app export:web      # -> apps/app/dist
+pnpm --filter @qalm/app export:web      # -> apps/app/dist, at the root (the desktop app uses this)
+
+# website: landing at /, the web app at /app/ (one Worker, apps/site)
+EXPO_PUBLIC_QALM_SERVER_URL=http://127.0.0.1:8787 pnpm --filter @qalm/site build:site   # -> apps/site/dist (+ dist/app)
+pnpm --filter @qalm/site preview        # wrangler dev on http://127.0.0.1:8790 (not 8787: that's the API)
 
 # desktop (Windows)
 pnpm --filter @qalm/desktop build       # web export + icons + electron-builder --dir -> apps/desktop/release/win-unpacked/qalm.exe
@@ -268,15 +273,39 @@ listed in `apps/server/.dev.vars.example`.
 - **Stop only your own processes.** Never kill `workerd`, `java` or `node` machine-wide; the owner runs other projects
   on this machine.
 
+**Web layout** (owner's decision; `apps/site`):
+- `/` is the landing page: `apps/site/public/` (today a placeholder `index.html` + `404.html` + `favicon.svg`).
+  **Drop the real landing page in as `apps/site/public/index.html`** (from `mockups/landing.html`, being designed on
+  another branch); link to the app with `/app`. Other landing files go next to it; anything outside `/app` that
+  doesn't exist gets `404.html`, never the app.
+- `/app/…` is the Expo web export, built by `apps/site/scripts/build.mjs` with `QALM_WEB_BASE_URL=/app`
+  (`apps/app/app.config.js` turns it into Expo's `experiments.baseUrl`; web only, unset everywhere else). Every
+  script, font, `canvaskit.wasm` and `pdf.worker.min.mjs` loads from `/app/…` (index.ts and qalm-ink find their base
+  from the bundle's own URL), and expo-router strips `/app` from routes.
+- One Worker (`apps/site/wrangler.jsonc`): static assets first. `src/worker.js` runs only for `/app` routes
+  (`run_worker_first`, minus `/app/_expo/*`, `/app/assets/*` and the wasm/mjs files) and gives the SPA fallback: a
+  missing `/app/…` path without a file extension (`/app/notebook/<id>`, `/app/auth/email/verify?token=…`) gets
+  `/app/index.html`; a missing file (`.js`, `.ttf`, …) stays 404. `/app` redirects to `/app/`.
+- API + MCP stay on their own Worker and origin (`apps/server`). Sign-in emails link to `MAGIC_LINK_URL`, the full
+  URL of the app's verify route, so the server has no idea where the app lives beyond that var.
+- The desktop app is unaffected: it bundles the root export (`export:web`) and serves it on `app://qalm/`. Native
+  iOS/Android ignore the base path.
+
 **Staging on Cloudflare** (owner's account, workers.dev subdomain `apollolearn`):
-- Web app: `https://qalm-web-staging.apollolearn.workers.dev` (Worker `qalm-web-staging`, static assets from
-  `apps/app/wrangler.jsonc`, SPA fallback).
+- Website: `https://qalm-web-staging.apollolearn.workers.dev/` (landing) and `…/app` (the web app); Worker
+  `qalm-web-staging`, env `staging` in `apps/site/wrangler.jsonc`. (Before #50 the app was at the root, from
+  `apps/app/wrangler.jsonc`, which is gone.)
 - API + MCP: `https://qalm-api-staging.apollolearn.workers.dev` (`/mcp` for agents; Worker `qalm-api-staging`, env
   `staging` in `apps/server/wrangler.jsonc`): D1 `qalm-staging`, R2 `qalm-assets-staging`, KV `qalm-oauth-staging`.
 - Secrets: `JWT_SECRET` (random), `RESEND_API_KEY` (owner sets it: `npx wrangler secret put RESEND_API_KEY --env
   staging` in `apps/server`). Email is sent as `qalm <qalm@apollolearn.app>` via the owner's Resend domain.
-- Deploy: `pnpm --filter @qalm/server migrate:staging`, `pnpm --filter @qalm/server deploy:staging`, then
-  `EXPO_PUBLIC_QALM_SERVER_URL=https://qalm-api-staging.apollolearn.workers.dev pnpm --filter @qalm/app deploy:staging`.
+- `MAGIC_LINK_URL` is `https://qalm-web-staging.apollolearn.workers.dev/app/auth/email/verify`.
+- Deploy:
+  ```bash
+  pnpm --filter @qalm/server migrate:staging
+  pnpm --filter @qalm/server deploy:staging
+  EXPO_PUBLIC_QALM_SERVER_URL=https://qalm-api-staging.apollolearn.workers.dev pnpm --filter @qalm/site deploy:staging
+  ```
 - Client builds against staging: desktop `EXPO_PUBLIC_QALM_SERVER_URL=https://qalm-api-staging.apollolearn.workers.dev pnpm
   --filter @qalm/desktop build`. Android (in `apps/app`, same env var): `npx expo prebuild -p android --no-install`, then in
   `android/` `./gradlew assembleRelease -PreactNativeArchitectures=x86_64 --max-workers=1 -I ../scripts/android-windows.gradle`
@@ -286,6 +315,34 @@ listed in `apps/server/.dev.vars.example`.
 - Shells inside T3 inherit `ELECTRON_RUN_AS_NODE=1`: launch the exe with `env -u ELECTRON_RUN_AS_NODE` or it runs as Node and exits.
 - `apollolearn.app` DNS is on Vercel, so custom domains (e.g. `qalm.apollolearn.app`) need either moving its DNS to
   Cloudflare or hosting the web app on Vercel. Decide before production.
+
+**Production on Cloudflare** (configured, not deployed):
+- Website: `https://qalm.apollolearn.app/` (landing) and `https://qalm.apollolearn.app/app` (the web app); Worker
+  `qalm-web`, env `production` in `apps/site/wrangler.jsonc` (custom domain).
+- API + MCP: `https://qalm-api.apollolearn.app` (`/mcp` for agents); Worker `qalm-api`, env `production` in
+  `apps/server/wrangler.jsonc` (custom domain): D1 `qalm-prod`, R2 `qalm-assets-prod`, KV `qalm-oauth-prod`.
+  `PUBLIC_URL=https://qalm-api.apollolearn.app`, `MAGIC_LINK_URL=https://qalm.apollolearn.app/app/auth/email/verify`,
+  email via Resend as `qalm <qalm@apollolearn.app>`.
+- Checklist (in `apps/server` unless noted):
+  1. The `apollolearn.app` zone must be on this Cloudflare account for the custom domains (see the DNS note above).
+     Wrangler creates the DNS records and certificates for `qalm.apollolearn.app` and `qalm-api.apollolearn.app` on
+     the first deploy.
+  2. Create the resources: `npx wrangler d1 create qalm-prod`, `npx wrangler r2 bucket create qalm-assets-prod`,
+     `npx wrangler kv namespace create qalm-oauth-prod`.
+  3. Put the D1 `database_id` and the KV `id` into `env.production` in `apps/server/wrangler.jsonc`, replacing
+     `REPLACE_ME_D1_QALM_PROD_ID` and `REPLACE_ME_KV_QALM_OAUTH_PROD_ID`. Commit.
+  4. Secrets: `npx wrangler secret put JWT_SECRET --env production` (a new random value, not staging's) and
+     `npx wrangler secret put RESEND_API_KEY --env production`. Apple/Google secrets too, once those are set up.
+  5. Migrate and deploy:
+     ```bash
+     pnpm --filter @qalm/server migrate:prod
+     pnpm --filter @qalm/server deploy:prod
+     EXPO_PUBLIC_QALM_SERVER_URL=https://qalm-api.apollolearn.app pnpm --filter @qalm/site deploy:prod
+     ```
+  6. Check: the landing at `/`, `/app` opens the app, a reload of `/app/notebook/<id>` works, an email sign-in link
+     opens `/app/auth/email/verify`, and `https://qalm-api.apollolearn.app/health` answers.
+- Client builds for production: `EXPO_PUBLIC_QALM_SERVER_URL=https://qalm-api.apollolearn.app` for the desktop and
+  Android builds (same commands as staging).
 
 ## 8. Suggested next steps
 
