@@ -3,6 +3,7 @@
  * icons used everywhere else (header, menus, sheets). Material's filled glyphs read heavier and mixed two styles.
  */
 import * as React from 'react';
+import { Platform } from 'react-native';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
 export type ToolIconName =
@@ -170,9 +171,15 @@ function Shape({ name, color }: { name: ToolIconName; color: string }) {
   }
 }
 
+/**
+ * Decorative (the button carries the label): hidden from screen readers. On web, react-native-svg hands its props to the
+ * DOM <svg> as they are, so it gets `aria-hidden` there instead of the native-only props React rejects on DOM elements.
+ */
+const HIDDEN = Platform.OS === 'web' ? ({ 'aria-hidden': true } as object) : { accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' as const };
+
 export function ToolIcon({ name, size = 22, color }: { name: ToolIconName; size?: number; color: string }) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+    <Svg width={size} height={size} viewBox="0 0 24 24" {...HIDDEN}>
       <Shape name={name} color={color} />
     </Svg>
   );
