@@ -189,3 +189,23 @@ export function hitAnchor(anchors: Anchor[], x: number, y: number, radius = 10):
   }
   return null;
 }
+
+/** A notebook imported from a PDF (any page has a PDF background): its pages get an insert-page button between them. */
+export const isPdfNotebook = (pages: readonly Pick<PageInfo, 'background'>[]) => pages.some((p) => p.background.kind === 'pdf');
+
+/**
+ * The page added after `pages[at]`. After a written page it continues that page's size and paper. After a PDF page it
+ * takes the PDF page's size (so it lines up when scrolling and exporting) and the paper of the nearest written page,
+ * earlier pages first, so "Apply to all pages" on any written page sets the paper of pages inserted later (and undoing
+ * it does too). With no written page yet: blank, the notebook's paper. No page: the notebook's defaults.
+ */
+export function newPageAfter(pages: readonly Pick<PageInfo, 'size' | 'paper' | 'paperColor' | 'background'>[], at: number): Partial<PageInfo> {
+  const after = pages[at];
+  if (!after) return {};
+  if (after.background.kind === 'paper') return { size: after.size, paper: after.paper, paperColor: after.paperColor };
+  const written = (i: number) => pages[i]?.background.kind === 'paper';
+  for (let d = 1; d < pages.length; d++) {
+    for (const i of [at - d, at + d]) if (written(i)) return { size: after.size, paper: pages[i]!.paper, paperColor: pages[i]!.paperColor };
+  }
+  return { size: after.size };
+}
