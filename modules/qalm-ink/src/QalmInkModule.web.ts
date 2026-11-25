@@ -26,10 +26,15 @@ function remember(key: string, png: Promise<string>): void {
  * `pdfjs-dist/build/pdf.worker.min.mjs` next to its web build (e.g. copy it into `public/`).
  * Set `GlobalWorkerOptions.workerSrc` yourself before the first call to use another location.
  */
-/** The directory index.html is served from: Expo's bundle URLs contain `/_expo/static/`. Falls back to the page URL. */
+/**
+ * The directory index.html is served from: an exported build's bundle URLs contain `/_expo/static/`. Otherwise (the
+ * dev server, whose bundle is `/apps/app/index.ts.bundle`) the site root, where `public/` is served. Never the page
+ * URL: on a deep route like `/notebook/<id>` it would point at `/notebook/pdf.worker.min.mjs`, which the SPA answers
+ * with index.html, so the worker fails to load and every PDF page renders blank.
+ */
 function appBase(): string {
   const src = Array.from(document.scripts).find((s) => s.src.includes('/_expo/static/'))?.src;
-  return src ? src.slice(0, src.indexOf('_expo/static/')) : document.baseURI;
+  return src ? src.slice(0, src.indexOf('_expo/static/')) : new URL('/', document.baseURI).href;
 }
 
 function loadPdfJs(): Promise<PdfJs> {
