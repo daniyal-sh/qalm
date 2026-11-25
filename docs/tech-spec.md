@@ -55,6 +55,12 @@ lec:{notebookId}:{sessionId}   lecture session doc: meta, timeline (deflated JSO
   swatches: Y.Map<'pen'|'highlighter', Y.Array<string>>   saved colours, in order; a missing key = the brand palette
 ```
 
+**Pages between PDF pages:** in a notebook imported from a PDF (any page has a PDF background), the gap under every
+page but the last has a **+ Page** button (the last page has the notebook's "Add page" below it). It inserts a written
+page right after that page, like ⋮ → "Add page after": the same size as the page above, so it lines up with the PDF
+when scrolling and in the exported PDF, and the paper of the nearest written page (`newPageAfter`), blank until one
+exists. "Apply to all pages" therefore also sets the paper of pages inserted later, and undoing it does too.
+
 **Changing paper later:** a page's `paper`/`paperColor` are set in place on its `pages` map (`Notebook.setPagePaper`,
 one transaction, so one undo step on the notebook stack, even for "Apply to all pages"). PDF pages keep their PDF and
 are skipped: their pattern and colour don't apply. Ink isn't rewritten. Instead, renderers draw items through

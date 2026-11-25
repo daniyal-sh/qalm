@@ -71,6 +71,8 @@ import {
   windowRange,
   centredScroll,
   fitZoom,
+  isPdfNotebook,
+  newPageAfter,
   type ToolId,
 } from './view';
 
@@ -285,6 +287,7 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   }, [dockComments]);
   const base = baseWidth(viewport.w);
   const slots = React.useMemo(() => layoutPages(pages, base, zoom, GAP, 96), [pages, base, zoom]);
+  const pdfNotebook = React.useMemo(() => isPdfNotebook(pages), [pages]);
   const totalH = contentHeight(slots, GAP) + 80;
   const widestPx = React.useMemo(() => slots.reduce((m, x) => Math.max(m, x.width), 0), [slots]);
   const contentW = Math.max(viewport.w, widestPx + 48);
@@ -905,8 +908,8 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
   const addPage = (afterIndex?: number) => {
     if (!notebook || lockedNow()) return;
     const after = afterIndex !== undefined ? pages[afterIndex] : pages[pages.length - 1];
-    // A page after a PDF page gets the notebook's paper.
-    const id = notebook.addPage(after && after.background.kind === 'paper' ? { size: after.size, paper: after.paper, paperColor: after.paperColor } : {}, afterIndex !== undefined ? afterIndex + 1 : undefined);
+    // After a PDF page: the PDF page's size and the paper of the nearest written page (newPageAfter).
+    const id = notebook.addPage(newPageAfter(pages, afterIndex ?? pages.length - 1), afterIndex !== undefined ? afterIndex + 1 : undefined);
     // The new page becomes the current one: scroll to it once it's laid out; Paste, Ask and images go there.
     pendingScroll.current = { pageId: id };
     lastPage.current = id;
@@ -1326,6 +1329,16 @@ export function EditorScreen({ notebookId }: { notebookId: string }) {
                               {i + 1}
                               {info.background.kind === 'pdf' ? ' · PDF' : ''}
                             </Text>
+                            {pdfNotebook && i < pages.length - 1 ? (
+                              <Button
+                                label="Page"
+                                accessibilityLabel={`Insert a page after page ${i + 1}`}
+                                icon="plus"
+                                size="sm"
+                                variant="ghost"
+                                onPress={() => addPage(i)}
+                              />
+                            ) : null}
                             <IconButton icon="more-horizontal" label={`Page ${i + 1} options`} size={32} onPress={(e) => pageMenu(i, { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY })} />
                           </View>
                           )}
