@@ -26,6 +26,8 @@ import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 import java.util.UUID
 import kotlin.math.PI
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
@@ -135,6 +137,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     val style: String,
     val smoothing: Int,
     val downTime: Long,
+    /** Tells strokes apart on the render thread (partial redraws compare frames of one stroke). */
+    val seq: Long,
   ) {
     val points = ArrayList<InkPoint>()
     var predicted: List<InkPoint> = emptyList()
@@ -159,6 +163,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   class Pending(val id: String, val path: Path, val color: Int, val alpha: Int, val lineWidth: Float = 0f)
 
   private var live: Live? = null
+  private var strokeSeq = 0L
   private val pending = ArrayList<Pending>()
   private var hover: FloatArray? = null // view px
   /** The laser's trail (page units, uptime ms), fading after the pen lifts too. Never saved. */
@@ -330,6 +335,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
       style = penStyle,
       smoothing = smoothing,
       downTime = ev.eventTime,
+      seq = ++strokeSeq,
     )
     if (kind == "ink") l.line = rulerLine(ev.getX(idx), ev.getY(idx), l.width / 2)
     live = l
@@ -349,8 +355,12 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
       val predicted = predictor.predict()
       if (predicted != null) {
         val pIdx = predicted.findPointerIndex(l.pointerId)
-        if (pIdx >= 0) {
-          l.predicted = (0 until predicted.historySize).map { point(predicted, pIdx, it, l) } + point(predicted, pIdx, -1, l)
+        val last = l.points.lastOrNull()
+        if (pIdx >= 0 && last != null) {
+          // Only the position is guessed: at the last real pressure and tilt, a guess taken back on the next move
+          // doesn't also make the tip swell and shrink.
+          l.predicted = ((0 until predicted.historySize).map { point(predicted, pIdx, it, l) } + point(predicted, pIdx, -1, l))
+            .map { it.copy(p = last.p, tilt = last.tilt, az = last.az) }
         }
         predicted.recycle()
       }
@@ -498,6 +508,9 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     val laser: List<Laser.Pt> = emptyList(),
     val laserNow: Long = 0L,
     val laserDot: FloatArray? = null,
+    /** The live stroke's outline (page units) that [fill] traces, and which stroke it is: for partial redraws. */
+    val outline: List<DoubleArray>? = null,
+    val seq: Long = -1,
   )
 
   /** Pens are opaque; a highlighter uses its colour's own alpha (#rrggbbaa) or HIGHLIGHTER_ALPHA (tech-spec §2). */
@@ -517,11 +530,9 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
         fillColor = l.colorInt,
         fillAlpha = alphaFor(l),
       )
-      l.kind == "ink" -> Frame(
-        fill = QalmFreehand.toPath(QalmFreehand.outline(l.tool, l.width, l.points + l.predicted, l.style, l.smoothing)),
-        fillColor = l.colorInt,
-        fillAlpha = alphaFor(l),
-      )
+      l.kind == "ink" -> QalmFreehand.outline(l.tool, l.width, l.points + l.predicted, l.style, l.smoothing).let {
+        Frame(fill = QalmFreehand.toPath(it), fillColor = l.colorInt, fillAlpha = alphaFor(l), outline = it, seq = l.seq)
+      }
       l.kind == "lasso" -> Frame(
         lasso = Path().apply {
           val a = l.points.firstOrNull()
@@ -691,6 +702,13 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     private var renderer: CanvasFrontBufferedRenderer<Frame>? = null
     private val empty = Frame()
 
+    // What the front buffer shows now. Render thread only. The buffer keeps its contents between draws.
+    private var shown: Frame? = null
+    private var shownW = 0
+    private var shownH = 0
+    private var shownSx = 0f
+    private var shownSy = 0f
+
     override fun attach() {
       if (renderer == null) renderer = CanvasFrontBufferedRenderer(view, this)
     }
@@ -712,9 +730,40 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
       renderer?.renderMultiBufferedLayer(emptyList())
     }
 
+    /**
+     * The display reads this buffer while it is drawn, so a move of the live stroke clears and redraws only the box
+     * where its outline changed (InkDamage). Clearing it all on every sample tore and flickered at the tip.
+     */
     override fun onDrawFrontBufferedLayer(canvas: Canvas, bufferWidth: Int, bufferHeight: Int, param: Frame) {
+      val sx = unitPxX().toFloat()
+      val sy = unitPxY().toFloat()
+      val was = shown
+      val prev = was?.outline
+      val cur = param.outline
+      shown = param
+      val sameStroke = was != null && prev != null && cur != null && was.seq == param.seq &&
+        bufferWidth == shownW && bufferHeight == shownH && sx == shownSx && sy == shownSy
+      shownW = bufferWidth
+      shownH = bufferHeight
+      shownSx = sx
+      shownSy = sy
+      if (sameStroke && prev != null && cur != null) {
+        val box = InkDamage.changedBounds(prev, cur) ?: return // nothing moved
+        canvas.save()
+        // Whole px, with room for antialiasing.
+        canvas.clipRect(
+          floor(box[0] * sx).toFloat() - 2f,
+          floor(box[1] * sy).toFloat() - 2f,
+          ceil(box[2] * sx).toFloat() + 2f,
+          ceil(box[3] * sy).toFloat() + 2f,
+        )
+        canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+        paintFrame(canvas, param, sx, sy)
+        canvas.restore()
+        return
+      }
       canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-      paintFrame(canvas, param, unitPxX().toFloat(), unitPxY().toFloat())
+      paintFrame(canvas, param, sx, sy)
     }
 
     override fun onDrawMultiBufferedLayer(canvas: Canvas, bufferWidth: Int, bufferHeight: Int, params: Collection<Frame>) {

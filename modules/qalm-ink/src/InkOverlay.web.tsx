@@ -3,6 +3,7 @@ import * as React from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { liveOutline } from './freehand';
+import { changedBounds } from './inkDamage';
 import {
   type InkOverlayProps,
   type InkPenStyle,
@@ -107,9 +108,13 @@ function shapePath(shape: ShapePreview): Path2D {
   return path;
 }
 
-function outlinePath(live: Live, pts: InkPoint[]): Path2D {
+function outlineOf(live: Live, pts: InkPoint[]): number[][] {
+  return liveOutline(live.tool, live.width, pts, live.style, live.smoothing);
+}
+
+function outlinePath(outline: number[][]): Path2D {
   const path = new Path2D();
-  traceOutline(liveOutline(live.tool, live.width, pts, live.style, live.smoothing), {
+  traceOutline(outline, {
     moveTo: (x, y) => path.moveTo(x, y),
     lineTo: (x, y) => path.lineTo(x, y),
     quadTo: (cx, cy, x, y) => path.quadraticCurveTo(cx, cy, x, y),
@@ -164,8 +169,15 @@ export function InkOverlay(props: InkOverlayProps) {
     const ctx = canvas.getContext('2d', { desynchronized: true, alpha: true });
     if (!ctx) return;
     const s = state.current;
+    /** What the canvas shows now: the live stroke's outline, at this size and scale (for partial redraws). */
+    let shown: { live: Live; outline: number[][]; w: number; h: number; kx: number; ky: number } | null = null;
 
-    const draw = () => {
+    /**
+     * Redraws the overlay. `partial` (a pen move): only the box where the live stroke changed since the last draw
+     * is cleared and redrawn (changedBounds). The canvas is desynchronized, so it can be on screen while it is
+     * drawn. Clearing all of it on every move tore and flickered at the tip, and redrew the whole stroke each time.
+     */
+    const draw = (partial = false) => {
       const { pageSize } = propsRef.current;
       const dpr = window.devicePixelRatio || 1;
       const cssW = canvas.clientWidth;
@@ -175,13 +187,50 @@ export function InkOverlay(props: InkOverlayProps) {
       if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
         canvas.height = h;
+        partial = false;
       }
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, w, h);
-      if (!cssW || !pageSize.w) return;
+      if (!cssW || !pageSize.w) {
+        ctx.clearRect(0, 0, w, h);
+        shown = null;
+        return;
+      }
       const k = (cssW * dpr) / pageSize.w; // page unit → device px
-      ctx.setTransform(k, 0, 0, (cssH * dpr) / pageSize.h, 0, 0);
+      const ky = (cssH * dpr) / pageSize.h;
+      const live = s.live;
+      const outline = live?.kind === 'ink' && !live.snap ? outlineOf(live, live.points.concat(live.predicted)) : null;
+      const was = shown;
+      shown = live && outline ? { live, outline, w, h, kx: k, ky } : null;
+      let clip: [number, number, number, number] | null = null;
+      if (partial && shown && was && was.live === live && was.w === w && was.h === h && was.kx === k && was.ky === ky) {
+        const box = changedBounds(was.outline, shown.outline);
+        if (!box) return; // nothing moved
+        // Whole device px, with room for antialiasing.
+        const x0 = Math.max(0, Math.floor(box[0] * k) - 2);
+        const y0 = Math.max(0, Math.floor(box[1] * ky) - 2);
+        clip = [x0, y0, Math.min(w, Math.ceil(box[2] * k) + 2) - x0, Math.min(h, Math.ceil(box[3] * ky) + 2) - y0];
+      }
+      ctx.save();
+      if (clip) {
+        ctx.beginPath();
+        ctx.rect(...clip);
+        ctx.clip();
+        ctx.clearRect(...clip);
+      } else ctx.clearRect(0, 0, w, h);
+      ctx.setTransform(k, 0, 0, ky, 0, 0);
+      try {
+        paint(live, outline, { w, h, k, ky, dpr });
+      } finally {
+        ctx.restore();
+      }
+    };
 
+    /** Draws everything in page units (the transform is set); `w`, `h` are the canvas's device px. */
+    const paint = (
+      live: Live | null,
+      outline: number[][] | null,
+      { w, h, k, ky, dpr }: { w: number; h: number; k: number; ky: number; dpr: number },
+    ) => {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       for (const f of s.finished) {
@@ -197,7 +246,6 @@ export function InkOverlay(props: InkOverlayProps) {
       }
       ctx.globalAlpha = 1;
 
-      const live = s.live;
       if (live?.kind === 'ink' && live.snap) {
         // The snapped shape under the pen, as PageCanvas will draw it (round caps and joins, the pen's width).
         const paint = inkPaint(live.tool, live.color);
@@ -216,11 +264,11 @@ export function InkOverlay(props: InkOverlayProps) {
         ctx.lineWidth = live.width;
         ctx.stroke(path);
         ctx.globalAlpha = 1;
-      } else if (live?.kind === 'ink') {
+      } else if (live?.kind === 'ink' && outline) {
         const paint = inkPaint(live.tool, live.color);
         ctx.globalAlpha = paint.alpha;
         ctx.fillStyle = paint.rgb;
-        ctx.fill(outlinePath(live, live.points.concat(live.predicted)));
+        ctx.fill(outlinePath(outline));
         ctx.globalAlpha = 1;
       } else if (live?.kind === 'lasso' && live.points.length > 1) {
         ctx.beginPath();
@@ -274,7 +322,7 @@ export function InkOverlay(props: InkOverlayProps) {
           ] as const) {
             l.setTransform(1, 0, 0, 1, 0, 0);
             l.clearRect(0, 0, w, h);
-            l.setTransform(k, 0, 0, (cssH * dpr) / pageSize.h, 0, 0);
+            l.setTransform(k, 0, 0, ky, 0, 0);
             l.lineCap = 'round';
             l.lineJoin = 'round';
             l.lineWidth = lw * px;
@@ -292,7 +340,7 @@ export function InkOverlay(props: InkOverlayProps) {
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.globalAlpha = 1;
             ctx.drawImage(lc, 0, 0);
-            ctx.setTransform(k, 0, 0, (cssH * dpr) / pageSize.h, 0, 0);
+            ctx.setTransform(k, 0, 0, ky, 0, 0);
           }
         }
         if (s.laserDot && P.tool === 'laser') {
@@ -368,6 +416,16 @@ export function InkOverlay(props: InkOverlayProps) {
         az,
         t: Math.max(0, ev.timeStamp - live.t0),
       };
+    };
+
+    /**
+     * Predicted samples at the last real pressure and tilt: only the position is guessed, so a guess taken back on
+     * the next move doesn't also make the tip swell and shrink.
+     */
+    const predict = (live: Live, events: PointerEvent[]): InkPoint[] => {
+      const last = live.points[live.points.length - 1];
+      if (!last) return [];
+      return events.map((e) => ({ ...toPoint(e, live), p: last.p, tilt: last.tilt, az: last.az }));
     };
 
     const reject = (reason: string) => propsRef.current.onRejectedTouch?.({ nativeEvent: { reason } });
@@ -553,7 +611,7 @@ export function InkOverlay(props: InkOverlayProps) {
           color: inkPaint(live.tool, live.color).rgb,
           alpha: inkPaint(live.tool, live.color).alpha,
           // Exactly what PageCanvas will draw: the shape, or the stroke without predicted points.
-          path: shape ? shapePath(shape) : outlinePath(live, live.points),
+          path: shape ? shapePath(shape) : outlinePath(outlineOf(live, live.points)),
           lineWidth: shape ? live.width : undefined,
         });
         setTimeout(() => {
@@ -639,9 +697,9 @@ export function InkOverlay(props: InkOverlayProps) {
         // A pointer handed over from the ruler (a synthetic pointerdown) has no coalesced events on its first moves either way.
         const coalesced = ev.getCoalescedEvents?.() ?? [];
         for (const c of coalesced.length ? coalesced : [ev]) addPoint(live, c);
-        live.predicted = live.kind === 'ink' && !live.snap ? (ev.getPredictedEvents?.() ?? []).map((p) => toPoint(p, live)) : [];
+        live.predicted = live.kind === 'ink' && !live.snap ? predict(live, ev.getPredictedEvents?.() ?? []) : [];
         if (live.kind === 'erase') emitErase(live, false);
-        draw();
+        draw(true);
         return;
       }
       if (!live && ev.buttons === 0 && ev.pointerType !== 'touch') {
@@ -713,7 +771,7 @@ export function InkOverlay(props: InkOverlayProps) {
     canvas.addEventListener('touchstart', onTouchStart, { passive: false });
     canvas.addEventListener('contextmenu', onContextMenu);
     canvas.dataset.qalmInk = '1'; // the ruler hands pens over to the overlay under it (forwardToInk)
-    const ro = new ResizeObserver(draw);
+    const ro = new ResizeObserver(() => draw());
     ro.observe(canvas);
     draw();
     return () => {
