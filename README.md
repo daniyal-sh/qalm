@@ -79,16 +79,91 @@ your handwriting with its own vision, answers questions you ask on the page, and
 
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="apps/site/public/showcase/ai-desktop-dark.png"><img src="apps/site/public/showcase/ai-desktop-light.png" alt="A tutor agent following along: its reply, with maths, in the comments beside the ink." width="860"></picture></p>
 
-Connect in two steps:
+Every agent connects to the same address, a remote MCP server (Streamable HTTP, sign-in with OAuth):
 
-1. Add qalm to your agent and approve it in the browser window that opens:
+```text
+https://qalm-api.apollolearn.app/mcp
+```
 
-   ```bash
-   claude mcp add --transport http qalm https://qalm-api.apollolearn.app/mcp
-   ```
+### 1. Add qalm to your agent
 
-2. In qalm, open a notebook's menu and choose **Turn on AI access**. Settings → AI access shows connected agents,
-   lets you choose whether each can comment or save readings, and lists what they did.
+<details open>
+<summary><b>Claude Code</b></summary>
+
+```bash
+claude mcp add --transport http qalm https://qalm-api.apollolearn.app/mcp
+```
+
+Then sign in: run `claude mcp login qalm` in your shell, or `/mcp` inside Claude Code and pick **qalm**. A browser
+window opens: sign in to qalm and allow it.
+
+</details>
+
+<details>
+<summary><b>Codex</b> (the CLI, IDE extension and desktop app share one config)</summary>
+
+```bash
+codex mcp add qalm --url https://qalm-api.apollolearn.app/mcp
+codex mcp login qalm
+```
+
+`login` opens the browser to sign in to qalm. Or add it to `~/.codex/config.toml` yourself, then run the `login` line:
+
+```toml
+[mcp_servers.qalm]
+url = "https://qalm-api.apollolearn.app/mcp"
+```
+
+</details>
+
+<details>
+<summary><b>Claude</b> (claude.ai, desktop and mobile apps)</summary>
+
+1. On claude.ai or in the desktop app, open **Customize → Connectors**, choose **+ Add**, then **Add custom
+   connector**.
+2. Name it `qalm`, paste the address above and choose **Continue**. Keep the sign-in Claude detects; if it asks which
+   OAuth client to use, pick **Register automatically**. Choose **Add**, then sign in to qalm and allow it.
+3. In a chat, choose **+ → Connectors** and turn qalm on.
+
+Once added, it works in the mobile apps too. The Free plan allows one custom connector.
+
+</details>
+
+<details>
+<summary><b>ChatGPT</b> (web only)</summary>
+
+1. On chatgpt.com, open **Plugins**, choose **+**, then **Add custom MCP server**.
+2. Name it `qalm`, paste the address above under **Connection**, and choose **OAuth** for authentication. Tick
+   **I understand and want to continue**, then **Create as a plugin**. Sign in to qalm and allow it.
+3. In a chat, type `@` and pick qalm. The choice lasts for one message, so mention it again each time.
+
+Custom MCP servers need ChatGPT Business, Enterprise or Edu for full access. On Pro, ChatGPT can only use read tools,
+so it can read your notebook but not leave comments. Plus, Go and Free don't support them yet.
+
+</details>
+
+Any other MCP client that supports remote servers with OAuth works the same way: give it the address and approve it.
+
+### 2. Turn it on in qalm
+
+Open a notebook's menu and choose **Turn on AI access**, then press **Play AI** in the notebook's header. The agent sees
+that notebook only while it's open and playing; **Pause** or closing it stops sharing. **Settings → AI access** shows
+connected agents, lets you choose whether each can comment or save readings, and lists what they did.
+
+### 3. Tell your agent what to do
+
+Coding agents (Claude Code, Codex) can keep following while you write. Paste one of these:
+
+> **Tutor:** Use qalm to follow my notebook as a tutor. Keep calling `wait` for updates. When I ask something or make
+> a mistake, reply with a short comment beside my ink. Keep going until I say stop.
+
+> **Only when asked:** Use qalm and keep calling `wait`. Only reply, with a comment, when I tap Ask in the notebook.
+> Otherwise stay quiet.
+
+Chat apps (Claude, ChatGPT) act only when you send a message, so ask for one look at a time (in ChatGPT, start with
+`@qalm`):
+
+> Use qalm to read what I just wrote in my notebook and check my working. Leave a comment on anything that's wrong.
 
 How the agent sees your page (regions of new ink, cropped and sent on a pause or when you tap **Ask**) is described in
 [docs/qink-live.md](docs/qink-live.md).

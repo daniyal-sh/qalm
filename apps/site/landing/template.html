@@ -135,6 +135,23 @@ h3{font-size:18px;line-height:1.3;letter-spacing:-.01em;font-weight:600}
 .ai-head b{color:var(--assistant);font-weight:500}
 .ai-demo .down{display:grid;place-items:center;color:var(--faint);height:18px}
 .ai-demo .down svg{width:18px;height:18px}
+.connect{margin-top:16px;padding:clamp(22px,3.5vw,40px)}
+.connect h3{font-size:20px;letter-spacing:-.01em;margin:0}
+.steps{margin:18px 0 0;padding:0;list-style:none;counter-reset:s;display:grid;gap:16px}
+.steps li{min-width:0;counter-increment:s;position:relative;padding-left:40px;color:var(--ink-2);line-height:1.55}
+.steps li::before{content:counter(s);position:absolute;left:0;top:-1px;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent-ink);font:600 13px/1 var(--sans)}
+.steps b{color:var(--ink);font-weight:600}
+.connect code{font-family:var(--mono);font-size:.86em;overflow-wrap:anywhere}
+.addr{display:block;width:max-content;max-width:100%;margin-top:8px;padding:8px 12px;border-radius:var(--r8);background:var(--surface-2);border:1px solid var(--line-2);color:var(--ink);user-select:all}
+.how{display:grid;gap:4px;margin-top:10px;font-size:14px;color:var(--muted)}
+.how b{display:inline-block;min-width:96px}
+@media (max-width:640px){.how b{display:block;min-width:0}.how>span{margin-bottom:6px}}
+.say{margin-top:22px;padding-top:18px;border-top:1px solid var(--line-2);display:grid;gap:8px}
+.say p{margin:0;color:var(--ink-2)}
+.say .mini-label{margin:0}
+.say q{font-style:italic}
+.connect .more{margin:18px 0 0;font-size:14px;color:var(--muted)}
+.connect .more a{color:var(--accent-ink)}
 
 /* sync */
 .devices{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,4fr) minmax(0,3fr);gap:clamp(16px,3vw,40px);align-items:end;margin-top:clamp(40px,6vw,72px)}
@@ -500,6 +517,22 @@ a.plat:hover{border-color:var(--ink-2)}
             <div class="body">Looks right. To check, differentiate: x ln x + x/2 − x/2 = x ln x.</div>
           </div>
         </div>
+      </div>
+      <div class="card connect" id="connect" aria-labelledby="connect-title">
+        <h3 id="connect-title">Connect in three steps</h3>
+        <ol class="steps">
+          <li><b>Add qalm to your agent</b> as a remote MCP server, with this address:
+            <code class="addr">{{MCP_URL}}</code>
+            <span class="how"><span><b>Claude</b> Customize → Connectors → + Add → Add custom connector</span><span><b>ChatGPT</b> Plugins → + → Add custom MCP server (Business, Enterprise, Edu; read-only on Pro)</span><span><b>Claude Code</b> <code>claude mcp add --transport http qalm {{MCP_URL}}</code></span><span><b>Codex</b> <code>codex mcp add qalm --url {{MCP_URL}}</code></span></span></li>
+          <li><b>Approve it.</b> A browser window opens: sign in to qalm and allow the agent.</li>
+          <li><b>Share a notebook.</b> In its menu choose <b>Turn on AI access</b>, then press <b>Play AI</b> in the notebook's header.</li>
+        </ol>
+        <div class="say">
+          <p class="mini-label">Then tell your agent</p>
+          <p><q>Use qalm to follow my notebook as a tutor. Keep calling wait. When I ask something or make a mistake, reply with a short comment beside my ink.</q></p>
+          <p><q>Use qalm and keep calling wait. Only reply, with a comment, when I tap Ask. Otherwise stay quiet.</q></p>
+        </div>
+        <p class="more">Step-by-step for each app: <a href="{{GITHUB}}#bring-your-own-ai">the guide on GitHub</a>.</p>
       </div>
       <div class="shots one">{{SHOT_AI}}</div>
     </div>
