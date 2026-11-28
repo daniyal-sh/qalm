@@ -94,13 +94,13 @@ https://qalm-api.apollolearn.app/mcp
 claude mcp add --transport http qalm https://qalm-api.apollolearn.app/mcp
 ```
 
-Then, inside Claude Code, run `/mcp`, pick **qalm** and choose **Authenticate**. A browser window opens: sign in to
-qalm and allow it.
+Then sign in: run `claude mcp login qalm` in your shell, or `/mcp` inside Claude Code and pick **qalm**. A browser
+window opens: sign in to qalm and allow it.
 
 </details>
 
 <details>
-<summary><b>Codex</b> (CLI, IDE extension and app share one config)</summary>
+<summary><b>Codex</b> (the CLI, IDE extension and desktop app share one config)</summary>
 
 ```bash
 codex mcp add qalm --url https://qalm-api.apollolearn.app/mcp
@@ -119,22 +119,26 @@ url = "https://qalm-api.apollolearn.app/mcp"
 <details>
 <summary><b>Claude</b> (claude.ai, desktop and mobile apps)</summary>
 
-1. On claude.ai or in the desktop app, open **Settings → Connectors → Add custom connector**.
-2. Name it `qalm`, paste the address above and choose **Add**, then **Connect**. Sign in to qalm and allow it.
-3. In a chat, turn qalm on from the tools menu (**+** in the message box).
+1. On claude.ai or in the desktop app, open **Customize → Connectors**, choose **+ Add**, then **Add custom
+   connector**.
+2. Name it `qalm`, paste the address above and choose **Continue**. Keep the sign-in Claude detects; if it asks which
+   OAuth client to use, pick **Register automatically**. Choose **Add**, then sign in to qalm and allow it.
+3. In a chat, choose **+ → Connectors** and turn qalm on.
 
-Custom connectors you add on the web or desktop also work in the mobile apps.
+Once added, it works in the mobile apps too. The Free plan allows one custom connector.
 
 </details>
 
 <details>
-<summary><b>ChatGPT</b></summary>
+<summary><b>ChatGPT</b> (web only)</summary>
 
-1. On chatgpt.com, open **Settings → Apps → Advanced settings** and turn on **Developer mode** (needs a plan that
-   allows it, such as Plus or Pro).
-2. Back in **Apps**, choose **Create app**. Name it `qalm`, paste the address above as the MCP server URL, pick
-   **OAuth** for authentication, and create it. Sign in to qalm and allow it.
-3. In a chat, pick qalm from the **+** menu (under **Developer mode**) so ChatGPT can use it.
+1. On chatgpt.com, open **Plugins**, choose **+**, then **Add custom MCP server**.
+2. Name it `qalm`, paste the address above under **Connection**, and choose **OAuth** for authentication. Tick
+   **I understand and want to continue**, then **Create as a plugin**. Sign in to qalm and allow it.
+3. In a chat, type `@` and pick qalm. The choice lasts for one message, so mention it again each time.
+
+Custom MCP servers need ChatGPT Business, Enterprise or Edu for full access. On Pro, ChatGPT can only use read tools,
+so it can read your notebook but not leave comments. Plus, Go and Free don't support them yet.
 
 </details>
 
@@ -156,7 +160,8 @@ Coding agents (Claude Code, Codex) can keep following while you write. Paste one
 > **Only when asked:** Use qalm and keep calling `wait`. Only reply, with a comment, when I tap Ask in the notebook.
 > Otherwise stay quiet.
 
-Chat apps (Claude, ChatGPT) act only when you send a message, so ask for one look at a time:
+Chat apps (Claude, ChatGPT) act only when you send a message, so ask for one look at a time (in ChatGPT, start with
+`@qalm`):
 
 > Use qalm to read what I just wrote in my notebook and check my working. Leave a comment on anything that's wrong.
 

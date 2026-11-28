@@ -523,7 +523,7 @@ a.plat:hover{border-color:var(--ink-2)}
         <ol class="steps">
           <li><b>Add qalm to your agent</b> as a remote MCP server, with this address:
             <code class="addr">{{MCP_URL}}</code>
-            <span class="how"><span><b>Claude</b> Settings → Connectors → Add custom connector</span><span><b>ChatGPT</b> Settings → Apps → Advanced settings → Developer mode, then Create</span><span><b>Claude Code</b> <code>claude mcp add --transport http qalm {{MCP_URL}}</code></span><span><b>Codex</b> <code>codex mcp add qalm --url {{MCP_URL}}</code></span></span></li>
+            <span class="how"><span><b>Claude</b> Customize → Connectors → + Add → Add custom connector</span><span><b>ChatGPT</b> Plugins → + → Add custom MCP server (Business, Enterprise, Edu; read-only on Pro)</span><span><b>Claude Code</b> <code>claude mcp add --transport http qalm {{MCP_URL}}</code></span><span><b>Codex</b> <code>codex mcp add qalm --url {{MCP_URL}}</code></span></span></li>
           <li><b>Approve it.</b> A browser window opens: sign in to qalm and allow the agent.</li>
           <li><b>Share a notebook.</b> In its menu choose <b>Turn on AI access</b>, then press <b>Play AI</b> in the notebook's header.</li>
         </ol>
