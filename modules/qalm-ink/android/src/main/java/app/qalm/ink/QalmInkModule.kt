@@ -45,7 +45,7 @@ class QalmInkModule : Module() {
     }
 
     View(QalmInkView::class) {
-      Events("onStrokeEnd", "onErase", "onLasso", "onPenButton", "onRejectedTouch", "onShapeHold", "onPenSeen")
+      Events("onStrokeStart", "onStrokeEnd", "onErase", "onLasso", "onPenButton", "onRejectedTouch", "onShapeHold", "onPenSeen")
 
       Prop("pageSize") { view: QalmInkView, v: PageSizeRecord ->
         view.pageW = if (v.w > 0) v.w else 595.0

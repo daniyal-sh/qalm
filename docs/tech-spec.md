@@ -419,6 +419,16 @@ getStrokePoints' streamline state after its last final input, and outline points
 always recomputed. The result is bit-identical to `QalmFreehand.outline`, which stays the reference (JVM tests compare
 the two on every sample). One sample takes about 6 µs on the JVM instead of 45 µs at 500 points and 88 µs at 2000.
 
+**Page redraws wait for the pen (Android):** pen input reaches `QalmInkView` on the UI thread, and react-native-skia
+redraws `PageCanvas` there too. On a page drawn from picture chunks (300 strokes, below the bake threshold) that redraw
+was one ~90–120 ms block starting 5–45 ms after every stroke end, so the next stroke's first samples often waited behind
+it (blank or baked pages: 5–15 ms). So after an ink stroke `PageView` keeps rendering the previous `PageCanvas` element
+(the whole element: anchors and image uris are rebuilt from the items too) and lets the page catch up once the pen has
+been up 300 ms, at a stroke end after 1.5 s of holding, or after 2.5 s regardless (below the overlay's 4 s
+pending fallback). The overlay keeps the new strokes on screen meanwhile, since their ids reach `committedIds` only
+then. The Android overlay emits `onStrokeStart` so a hold never ends under the pen. Erasing, the lasso and scribble-erase
+release it at once (`apps/app/src/editor/inkHold.ts`).
+
 When the pen lifts, the overlay redraws the stroke from its real points only (no predicted points), which is exactly the geometry
 PageCanvas will draw, and emits `onStrokeEnd` with a new stroke `id`. It **keeps drawing that stroke until its id appears in
 `committedIds`, and then for a short hand-off** (2 animation frames on web, 50 ms on iOS and Android), so nothing flickers at hand-off.

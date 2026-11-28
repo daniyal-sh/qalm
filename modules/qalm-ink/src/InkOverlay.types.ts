@@ -128,6 +128,11 @@ export interface InkOverlayProps {
    * shows new items a few frames after React commits them). A finished stroke stays a short hand-off after its id arrives.
    */
   committedIds: string[];
+  /**
+   * A stroke began (any tool). Android only: the app holds page redraws while the pen keeps writing, since Skia
+   * redraws the page on the UI thread that pen input arrives on (tech-spec §3).
+   */
+  onStrokeStart?(e: { nativeEvent: Record<string, never> }): void;
   onStrokeEnd(e: { nativeEvent: StrokeEndEvent }): void;
   /** Emitted while erasing: each event carries the path segment since the previous event (page units). */
   onErase(e: { nativeEvent: EraseEvent }): void;
