@@ -127,7 +127,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
 
   // MARK: Layers
   private let strokesLayer = CALayer()      // pending (finished) strokes, then the live one on top
-  private let liveLayer = CAShapeLayer()
+  private let liveInk = LiveInkLayer()      // the pen or highlighter stroke in progress, redrawn only where it changed
+  private let liveLayer = CAShapeLayer()    // a snapped shape in progress
   private let lassoLayer = CAShapeLayer()
   private let cursorLayer = CAShapeLayer()  // hover preview and eraser cursor
   private let trailLayer = CAShapeLayer()   // partial erase: where the eraser just went
@@ -151,6 +152,10 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
       l.actions = ["path": NSNull(), "position": NSNull(), "bounds": NSNull(), "hidden": NSNull(),
                    "fillColor": NSNull(), "strokeColor": NSNull(), "opacity": NSNull()]
     }
+    liveInk.actions = ["contents": NSNull(), "position": NSNull(), "bounds": NSNull(), "hidden": NSNull(),
+                       "opacity": NSNull(), "compositingFilter": NSNull()]
+    liveInk.needsDisplayOnBoundsChange = true
+    strokesLayer.addSublayer(liveInk)
     strokesLayer.addSublayer(liveLayer)
     lassoLayer.fillColor = nil
     lassoLayer.strokeColor = QalmInkView.lassoColor.cgColor
@@ -284,14 +289,15 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     super.layoutSubviews()
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    for l in [strokesLayer, liveLayer, lassoLayer, cursorLayer, trailLayer] {
+    for l in [strokesLayer, liveInk, liveLayer, lassoLayer, cursorLayer, trailLayer] {
       l.frame = bounds
     }
     laserView.frame = bounds
     let scale = window?.screen.scale ?? traitCollection.displayScale
     if scale > 0 {
-      for l in [strokesLayer, liveLayer, lassoLayer, cursorLayer, trailLayer] { l.contentsScale = scale }
+      for l in [strokesLayer, liveInk, liveLayer, lassoLayer, cursorLayer, trailLayer] { l.contentsScale = scale }
     }
+    liveInk.setNeedsDisplay()
     CATransaction.commit()
     rebuildAllPaths()
   }
@@ -684,24 +690,31 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     CATransaction.setDisableActions(true)
     liveLayer.path = nil
     lassoLayer.path = nil
-    styleStrokeLayer(liveLayer, tool: a.tool, color: a.color)
+    let style = strokeStyle(tool: a.tool, color: a.color)
+    liveInk.reset(fill: style.fill)
+    liveInk.opacity = style.opacity
+    liveInk.compositingFilter = style.filter
     CATransaction.commit()
   }
 
   private func styleStrokeLayer(_ l: CAShapeLayer, tool: Tool, color: UIColor) {
+    let style = strokeStyle(tool: tool, color: color)
     l.fillRule = .nonZero
     l.strokeColor = nil
+    l.fillColor = style.fill
+    l.opacity = style.opacity
+    l.compositingFilter = style.filter
+  }
+
+  /// A stroke's fill, and its layer's opacity and compositing filter (the live layer and the pending ones).
+  private func strokeStyle(tool: Tool, color: UIColor) -> (fill: CGColor, opacity: Float, filter: Any?) {
     if tool == .highlighter {
       // A #rrggbbaa highlighter carries its own opacity; #rrggbb uses the default (tech-spec §2).
       let alpha = color.cgColor.alpha
-      l.fillColor = color.withAlphaComponent(1).cgColor
-      l.opacity = alpha < 1 ? Float(alpha) : FreehandSettings.highlighterAlpha
-      l.compositingFilter = QalmInkView.useMultiplyForHighlighter ? "multiplyBlendMode" : nil
-    } else {
-      l.fillColor = color.cgColor
-      l.opacity = 1
-      l.compositingFilter = nil
+      let filter: Any? = QalmInkView.useMultiplyForHighlighter ? "multiplyBlendMode" : nil
+      return (color.withAlphaComponent(1).cgColor, alpha < 1 ? Float(alpha) : FreehandSettings.highlighterAlpha, filter)
     }
+    return (color.cgColor, 1, nil)
   }
 
   /// Exactly @qalm/core `strokeOutline`: style and smoothing apply to pens only.
@@ -723,6 +736,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     CATransaction.setDisableActions(true)
     defer { CATransaction.commit() }
     if let kind = a.snapKind {
+      liveInk.show([], sx: sx, sy: sy)  // the stroke as drawn gives way to the shape
       styleShapeLayer(liveLayer, color: a.color, width: a.width)
       liveLayer.path = shapePath(kind: kind, pts: a.snapCur)
       return
@@ -730,7 +744,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     let pts = predicted.isEmpty ? a.points : a.points + predicted
     switch a.tool {
     case .pen, .highlighter:
-      liveLayer.path = pts.isEmpty ? nil : Freehand.path(from: outline(pts, a), sx: sx, sy: sy)
+      liveInk.show(pts.isEmpty ? [] : outline(pts, a), sx: sx, sy: sy)
     case .lasso:
       let path = CGMutablePath()
       if lassoRect, let first = pts.first, let last = pts.last {
@@ -780,7 +794,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
           styleStrokeLayer(l, tool: a.tool, color: a.color)
           l.path = Freehand.path(from: outlinePts, sx: sx, sy: sy)
         }
-        strokesLayer.insertSublayer(l, below: liveLayer)
+        strokesLayer.insertSublayer(l, below: liveInk)
+        liveInk.reset(fill: nil)
         liveLayer.path = nil
         CATransaction.commit()
         pending[a.id] = Pending(layer: l, outline: outlinePts, shape: snapped)
@@ -840,6 +855,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
   private func clearLive() {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
+    liveInk.reset(fill: nil)
     liveLayer.path = nil
     lassoLayer.path = nil
     trailLayer.path = nil

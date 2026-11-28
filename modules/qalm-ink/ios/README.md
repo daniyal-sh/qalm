@@ -11,6 +11,8 @@ These files were written on Windows without Xcode and **have not been compiled y
 | `QalmInkModule.swift` | `Module` definition: `Name("QalmInk")`, the view's props and events, and `renderPdfPage` |
 | `QalmInkView.swift` | `ExpoView` overlay with palm rejection, the live stroke, pending strokes until `committedIds`, eraser, lasso, hover preview and the Pencil double-tap and squeeze |
 | `InkGestureRecognizer.swift` | Touch pipe. It "claims" a touch sequence so ink never scrolls the page. Fingers in `drawWith: 'pen'` never reach it |
+| `LiveInkLayer.swift` | The pen or highlighter stroke in progress: a layer that keeps its pixels and redraws only the box where the outline changed |
+| `InkDamage.swift` | `changedBounds`, ported exactly from `src/inkDamage.ts`: the box where two outlines of a stroke differ |
 | `Freehand.swift` | Port of perfect-freehand (MIT) `getStrokePoints` and `getStrokeOutlinePoints`, the spec §2 settings, and the outline-to-path step |
 | `PdfPageRenderer.swift` | PDFKit renders the page to PNG in `Caches/qalm-pdf/`, keyed by file (plus size and mtime), page and width |
 
@@ -31,7 +33,9 @@ If `s.platforms` stays below 16.1, the code still compiles because `zOffset` and
 - **Point fields:** `p` is `force / maximumPossibleForce`, or 0.5 for fingers (iPad fingers report no force). `tilt` is `altitudeAngle`, `az` is `azimuthAngle(in:)`, and `t` is in ms since
   the stroke started. Pencil force estimates are patched when `touchesEstimatedPropertiesUpdated` arrives.
 - **Live stroke:** each touch batch appends the coalesced touches, adds `predictedTouches` for that frame only, and rebuilds the
-  perfect-freehand outline (`last: true`, as in the spec) into a `CAShapeLayer`, with no implicit animations.
+  perfect-freehand outline (`last: true`, as in the spec). `LiveInkLayer` keeps its backing store and invalidates only the box
+  `changedBounds` returns (padded 2 pt), so each move fills about the same area at any stroke length. A snapped shape in progress
+  is drawn on a `CAShapeLayer` above it.
 - **Outline to path:** this uses the same construction as perfect-freehand's `getSvgPathFromStroke` (`M p0 Q p1 mid(p1,p2) T …
   Z`), filled with non-zero winding. **`@qalm/core`'s `strokeSvgPath`/PageCanvas must build the path the same way**, or hand-off will be off by a few sub-pixels.
 - **Hand-off:** when the pen lifts, the stroke moves to a pending layer that stays until its id is in `committedIds`. There's a
@@ -112,5 +116,7 @@ If `s.platforms` stays below 16.1, the code still compiles because `zOffset` and
 - Props typed `[String: Any]` (`pageSize`, `input`).
 - `promise.resolve()` with no argument, and `promise.reject(code, message)`.
 - `UIPencilInteraction.Tap` / `.Squeeze` and `squeeze.phase == .ended` (iOS 17.5 SDK, Xcode 15.4+).
-- `CAShapeLayer.compositingFilter = "multiplyBlendMode"`.
+- `CAShapeLayer.compositingFilter = "multiplyBlendMode"` (and the same on `LiveInkLayer`).
+- `LiveInkLayer` relies on a `CALayer` keeping its backing store outside a `setNeedsDisplay(_:)` rect. If it doesn't, the start
+  of a live stroke vanishes while writing (easy to see).
 - `UIGestureRecognizer` subclass state changes (`import UIKit.UIGestureRecognizerSubclass`), and `touchesEstimatedPropertiesUpdated`.
