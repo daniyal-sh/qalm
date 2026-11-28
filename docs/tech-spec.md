@@ -410,6 +410,15 @@ then position). `pointerrawupdate` has no predicted events, so there the overlay
 (`predictTip.ts`): one point from the last 24 ms of velocity, 12 ms ahead, at most 3 mm, position only. Firefox and
 Safari have no `pointerrawupdate` and keep `pointermove` with `getPredictedEvents`.
 
+**Incremental live outline (Android):** with unbuffered dispatch a move can arrive 240–480 times a second, and
+running the whole perfect-freehand port on every one cost O(stroke length) per sample. `LiveOutline` keeps the part
+of each stage that no later point can change, plus that stage's loop state, and reruns the loops only from there:
+stabilize's kept points up to the second-last real point, each smoothing pass to one point less than its input,
+getStrokePoints' streamline state after its last final input, and outline points that are at least
+`END_NOISE_THRESHOLD` before the end and whose next point is final. Predicted points and the last real point are
+always recomputed. The result is bit-identical to `QalmFreehand.outline`, which stays the reference (JVM tests compare
+the two on every sample). One sample takes about 6 µs on the JVM instead of 45 µs at 500 points and 88 µs at 2000.
+
 When the pen lifts, the overlay redraws the stroke from its real points only (no predicted points), which is exactly the geometry
 PageCanvas will draw, and emits `onStrokeEnd` with a new stroke `id`. It **keeps drawing that stroke until its id appears in
 `committedIds`, and then for a short hand-off** (2 animation frames on web, 50 ms on iOS and Android), so nothing flickers at hand-off.

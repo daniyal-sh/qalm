@@ -15,17 +15,17 @@ import kotlin.math.sin
  * Same constants, same loops, same float accumulation, so the live stroke matches the Skia one exactly.
  */
 object QalmFreehand {
-  private const val RATE_OF_PRESSURE_CHANGE = 0.275
-  private const val FIXED_PI = PI + 0.0001
-  private const val START_CAP_SEGMENTS = 13
-  private const val END_CAP_SEGMENTS = 29
-  private const val CORNER_CAP_SEGMENTS = 13
-  private const val END_NOISE_THRESHOLD = 3.0
-  private const val MIN_STREAMLINE_T = 0.15
-  private const val STREAMLINE_T_RANGE = 0.85
-  private const val MIN_RADIUS = 0.01
-  private const val DEFAULT_FIRST_PRESSURE = 0.25
-  private const val DEFAULT_PRESSURE = 0.5
+  internal const val RATE_OF_PRESSURE_CHANGE = 0.275
+  internal const val FIXED_PI = PI + 0.0001
+  internal const val START_CAP_SEGMENTS = 13
+  internal const val END_CAP_SEGMENTS = 29
+  internal const val CORNER_CAP_SEGMENTS = 13
+  internal const val END_NOISE_THRESHOLD = 3.0
+  internal const val MIN_STREAMLINE_T = 0.15
+  internal const val STREAMLINE_T_RANGE = 0.85
+  internal const val MIN_RADIUS = 0.01
+  internal const val DEFAULT_FIRST_PRESSURE = 0.25
+  internal const val DEFAULT_PRESSURE = 0.5
 
   data class Options(
     val size: Double,
@@ -138,25 +138,25 @@ object QalmFreehand {
     getStrokeOutlinePoints(getStrokePoints(points, o), o)
 
   // ---- vec ----
-  private fun add(a: DoubleArray, b: DoubleArray) = doubleArrayOf(a[0] + b[0], a[1] + b[1])
-  private fun sub(a: DoubleArray, b: DoubleArray) = doubleArrayOf(a[0] - b[0], a[1] - b[1])
-  private fun mul(a: DoubleArray, n: Double) = doubleArrayOf(a[0] * n, a[1] * n)
-  private fun div(a: DoubleArray, n: Double) = doubleArrayOf(a[0] / n, a[1] / n)
-  private fun per(a: DoubleArray) = doubleArrayOf(a[1], -a[0])
-  private fun neg(a: DoubleArray) = doubleArrayOf(-a[0], -a[1])
-  private fun dpr(a: DoubleArray, b: DoubleArray) = a[0] * b[0] + a[1] * b[1]
-  private fun isEqual(a: DoubleArray, b: DoubleArray) = a[0] == b[0] && a[1] == b[1]
-  private fun len(a: DoubleArray) = hypot(a[0], a[1])
-  private fun uni(a: DoubleArray) = div(a, len(a))
-  private fun dist(a: DoubleArray, b: DoubleArray) = hypot(a[1] - b[1], a[0] - b[0])
-  private fun dist2(a: DoubleArray, b: DoubleArray): Double {
+  internal fun add(a: DoubleArray, b: DoubleArray) = doubleArrayOf(a[0] + b[0], a[1] + b[1])
+  internal fun sub(a: DoubleArray, b: DoubleArray) = doubleArrayOf(a[0] - b[0], a[1] - b[1])
+  internal fun mul(a: DoubleArray, n: Double) = doubleArrayOf(a[0] * n, a[1] * n)
+  internal fun div(a: DoubleArray, n: Double) = doubleArrayOf(a[0] / n, a[1] / n)
+  internal fun per(a: DoubleArray) = doubleArrayOf(a[1], -a[0])
+  internal fun neg(a: DoubleArray) = doubleArrayOf(-a[0], -a[1])
+  internal fun dpr(a: DoubleArray, b: DoubleArray) = a[0] * b[0] + a[1] * b[1]
+  internal fun isEqual(a: DoubleArray, b: DoubleArray) = a[0] == b[0] && a[1] == b[1]
+  internal fun len(a: DoubleArray) = hypot(a[0], a[1])
+  internal fun uni(a: DoubleArray) = div(a, len(a))
+  internal fun dist(a: DoubleArray, b: DoubleArray) = hypot(a[1] - b[1], a[0] - b[0])
+  internal fun dist2(a: DoubleArray, b: DoubleArray): Double {
     val dx = a[0] - b[0]
     val dy = a[1] - b[1]
     return dx * dx + dy * dy
   }
-  private fun lrp(a: DoubleArray, b: DoubleArray, t: Double) = add(a, mul(sub(b, a), t))
-  private fun prj(a: DoubleArray, b: DoubleArray, c: Double) = add(a, mul(b, c))
-  private fun rotAround(a: DoubleArray, c: DoubleArray, r: Double): DoubleArray {
+  internal fun lrp(a: DoubleArray, b: DoubleArray, t: Double) = add(a, mul(sub(b, a), t))
+  internal fun prj(a: DoubleArray, b: DoubleArray, c: Double) = add(a, mul(b, c))
+  internal fun rotAround(a: DoubleArray, c: DoubleArray, r: Double): DoubleArray {
     val s = sin(r)
     val co = cos(r)
     val px = a[0] - c[0]
@@ -174,7 +174,7 @@ object QalmFreehand {
     val runningLength: Double,
   )
 
-  private fun validPressure(pt: DoubleArray): Double? =
+  internal fun validPressure(pt: DoubleArray): Double? =
     if (pt.size > 2 && !pt[2].isNaN() && pt[2] >= 0) pt[2] else null
 
   fun getStrokePoints(input: List<DoubleArray>, o: Options): List<StrokePoint> {
@@ -235,7 +235,7 @@ object QalmFreehand {
     return min(1.0, prevPressure + (rp - prevPressure) * (sp * RATE_OF_PRESSURE_CHANGE))
   }
 
-  private fun strokeRadius(size: Double, thinning: Double, pressure: Double) = size * (0.5 - thinning * (0.5 - pressure))
+  internal fun strokeRadius(size: Double, thinning: Double, pressure: Double) = size * (0.5 - thinning * (0.5 - pressure))
 
   fun getStrokeOutlinePoints(points: List<StrokePoint>, o: Options): List<DoubleArray> {
     val size = o.size
