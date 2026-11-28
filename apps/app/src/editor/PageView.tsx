@@ -265,11 +265,11 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   }, [items, live, editing, eraseTick, replayed]);
   // Android: the page waits while the pen keeps writing (inkHold.ts); the overlay shows the new strokes meanwhile.
   const [, bumpHold] = React.useReducer((x: number) => x + 1, 0);
-  const hold = React.useMemo(() => new InkHold<Item[]>(bumpHold), []);
+  const hold = React.useMemo(() => new InkHold<React.ReactElement>(bumpHold), []);
   React.useEffect(() => () => hold.dispose(), [hold]);
-  const canvasItems = hold.pick(shown);
-  const canvasItemsRef = React.useRef(canvasItems);
-  canvasItemsRef.current = canvasItems;
+  // The whole PageCanvas element is held (the same element: React skips it), not just its items: other props
+  // (comment anchors, image uris) are rebuilt from the items too and would redraw it anyway.
+  const canvasRef = React.useRef<React.ReactElement | null>(null);
   const liveCanvas = React.useMemo(() => (live?.kind === 'sim' && sel ? { ids: sel, transform: live.sim } : undefined), [live, sel]);
 
   const drawn = React.useMemo(createDrawnIds, []);
@@ -392,18 +392,23 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
     ed.setEditingText({ pageId: info.id, itemId: id, draft: item });
   };
 
+  const canvas = hold.pick(
+    <PageCanvas
+      info={info}
+      items={shown}
+      width={width}
+      live={liveCanvas}
+      anchors={anchors}
+      pdfImage={pdf}
+      assetUri={assetUri}
+      onDrawn={onDrawn}
+    />,
+  );
+  canvasRef.current = canvas;
+
   return (
     <View ref={rootRef} style={{ width, height }}>
-      <PageCanvas
-        info={info}
-        items={canvasItems}
-        width={width}
-        live={liveCanvas}
-        anchors={anchors}
-        pdfImage={pdf}
-        assetUri={assetUri}
-        onDrawn={onDrawn}
-      />
+      {canvas}
       <HandoffInkOverlay
         drawn={drawn}
         pageSize={info.size}
@@ -434,7 +439,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
             }
           }
           const stroke = makeStroke(e);
-          if (HOLD_INK) hold.inkEnd(canvasItemsRef.current);
+          if (HOLD_INK) hold.inkEnd(canvasRef.current!);
           if (e.shape && t.snapShapes && e.tool === 'pen') commitSnapped(page, stroke, e.shape);
           else page.addItem(stroke);
         }}
