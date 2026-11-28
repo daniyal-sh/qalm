@@ -395,6 +395,13 @@ only the position: they take the last real pressure and tilt, so a guess taken b
 keeps the latest prediction when Apple Pencil refines the force of earlier samples. Redrawing without it there
 made the tip blink.
 
+**iOS live layer:** the pen or highlighter stroke in progress is drawn by `LiveInkLayer`, a `CALayer` that keeps its
+backing store. Each move invalidates only the `changedBounds` box (padded 2 pt) and Core Graphics fills the same
+`Freehand.path`, non-zero, clipped to it, so a move costs about the same at any stroke length. A `CAShapeLayer` re-rasterised
+the whole path on the CPU every frame. The highlighter's opacity and multiply filter are set on the layer. A new stroke or a
+layout, scale or page-size change redraws it whole. Snapped shapes, the lasso, the cursor and pending strokes keep their
+`CAShapeLayer`s.
+
 When the pen lifts, the overlay redraws the stroke from its real points only (no predicted points), which is exactly the geometry
 PageCanvas will draw, and emits `onStrokeEnd` with a new stroke `id`. It **keeps drawing that stroke until its id appears in
 `committedIds`, and then for a short hand-off** (2 animation frames on web, 50 ms on iOS and Android), so nothing flickers at hand-off.
