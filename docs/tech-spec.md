@@ -402,6 +402,14 @@ the whole path on the CPU every frame. The highlighter's opacity and multiply fi
 layout, scale or page-size change redraws it whole. Snapped shapes, the lasso, the cursor and pending strokes keep their
 `CAShapeLayer`s.
 
+On web, Chromium (and Electron, whose `app://qalm` scheme is registered as secure) fires `pointerrawupdate` as soon as a
+sample arrives, while `pointermove` waits for the next animation frame. While a stroke is live the overlay takes its
+samples (coalesced ones too) from `pointerrawupdate` and draws on each one, which saves up to a frame. The later
+`pointermove` carries the same samples, so a sample is taken only if it is newer than the last one taken (timestamp,
+then position). `pointerrawupdate` has no predicted events, so there the overlay always predicts itself
+(`predictTip.ts`): one point from the last 24 ms of velocity, 12 ms ahead, at most 3 mm, position only. Firefox and
+Safari have no `pointerrawupdate` and keep `pointermove` with `getPredictedEvents`.
+
 When the pen lifts, the overlay redraws the stroke from its real points only (no predicted points), which is exactly the geometry
 PageCanvas will draw, and emits `onStrokeEnd` with a new stroke `id`. It **keeps drawing that stroke until its id appears in
 `committedIds`, and then for a short hand-off** (2 animation frames on web, 50 ms on iOS and Android), so nothing flickers at hand-off.
