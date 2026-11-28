@@ -13,6 +13,7 @@ import { useEditor } from './context';
 import { applyFormatTo, type Sel } from './format.logic';
 import { adjustLiveShape, commitErase, commitSnapped, eraseAlong, scribbleErase, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_WIDTH, dropEmptyText, formatText, TEXT_LINE_HEIGHT, hitText, typeText, liveShape, makeStroke, pointsBBox, transformPatch } from './items';
 import { EraseFade, type Fading } from './EraseFade';
+import { InkHold } from './inkHold';
 import { isAdditive } from './modifiers';
 import { PAPER_ACCENT, SelectionFrame, type LiveEdit } from './SelectionFrame';
 import { pageDocQueue, pdfQueue } from './renderQueue';
@@ -150,6 +151,9 @@ function usePageDoc(docId: string | null, priority: number): { h: DocHandle | nu
   return React.useMemo(() => ({ h, drawn: () => done.current() }), [h]);
 }
 
+/** Only Android draws the page on the thread pen input arrives on (and only it emits onStrokeStart). */
+const HOLD_INK = Platform.OS === 'android';
+
 /**
  * The ids PageCanvas has actually drawn (its `onDrawn`), newest 64. Kept outside PageView's state so a report only
  * re-renders the overlay, not the whole page.
@@ -259,6 +263,13 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, live, editing, eraseTick, replayed]);
+  // Android: the page waits while the pen keeps writing (inkHold.ts); the overlay shows the new strokes meanwhile.
+  const [, bumpHold] = React.useReducer((x: number) => x + 1, 0);
+  const hold = React.useMemo(() => new InkHold<Item[]>(bumpHold), []);
+  React.useEffect(() => () => hold.dispose(), [hold]);
+  const canvasItems = hold.pick(shown);
+  const canvasItemsRef = React.useRef(canvasItems);
+  canvasItemsRef.current = canvasItems;
   const liveCanvas = React.useMemo(() => (live?.kind === 'sim' && sel ? { ids: sel, transform: live.sim } : undefined), [live, sel]);
 
   const drawn = React.useMemo(createDrawnIds, []);
@@ -385,7 +396,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
     <View ref={rootRef} style={{ width, height }}>
       <PageCanvas
         info={info}
-        items={shown}
+        items={canvasItems}
         width={width}
         live={liveCanvas}
         anchors={anchors}
@@ -406,6 +417,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
         recognizeShape={t.snapShapes && t.tool === 'pen' ? liveShape : undefined}
         adjustShape={adjustLiveShape}
         onPenSeen={ed.onPenSeen}
+        onStrokeStart={HOLD_INK ? () => hold.strokeStart() : undefined}
         onStrokeEnd={({ nativeEvent: e }) => {
           // A stroke (or scribble) the pen began before a lecture paused: dropped, like everything while locked.
           if (lockedRef.current) return void drawn.dismiss(e.id);
@@ -415,16 +427,19 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
           if (e.tool === 'pen' && !e.shape && !e.ruler && ed.input.scribbleErase) {
             const gone = scribbleErase(page, e.points, e.width);
             if (gone) {
+              hold.release();
               drawn.dismiss(e.id);
               setFading((f) => [...f, { key: ++fadeKey.current, items: gone }]);
               return;
             }
           }
           const stroke = makeStroke(e);
+          if (HOLD_INK) hold.inkEnd(canvasItemsRef.current);
           if (e.shape && t.snapShapes && e.tool === 'pen') commitSnapped(page, stroke, e.shape);
           else page.addItem(stroke);
         }}
         onErase={({ nativeEvent: e }) => {
+          hold.release();
           if (lockedRef.current) {
             // Paused mid-gesture: the partial erase so far is dropped, not committed.
             eraseRef.current = null;
@@ -451,6 +466,7 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
         ruler={ed.ruler}
         getRuler={ed.getRuler}
         onLasso={({ nativeEvent: e }) => {
+          hold.release();
           const pts = e.polygon;
           const last = pts[pts.length - 1];
           if (!last) return;

@@ -117,6 +117,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   }
 
   // ---- events ----
+  private val onStrokeStart by EventDispatcher()
   private val onStrokeEnd by EventDispatcher()
   private val onErase by EventDispatcher()
   private val onLasso by EventDispatcher()
@@ -342,6 +343,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
     if (kind == "ink") l.line = rulerLine(ev.getX(idx), ev.getY(idx), l.width / 2)
     live = l
     hover = null
+    onStrokeStart(mapOf<String, Any>())
     addPoint(l, point(ev, idx, -1, l))
     requestUnbufferedDispatch(ev) // deliver every sample as it arrives, not batched per frame
     render(l)
