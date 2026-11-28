@@ -267,6 +267,8 @@ export const PageView = React.memo(function PageView({ info, index, width, zoom,
   const [, bumpHold] = React.useReducer((x: number) => x + 1, 0);
   const hold = React.useMemo(() => new InkHold<React.ReactElement>(bumpHold), []);
   React.useEffect(() => () => hold.dispose(), [hold]);
+  // A zoom or a new page size must not wait for the pen: the held canvas would be drawn at the old size.
+  React.useEffect(() => hold.release(), [hold, width, info.size.w, info.size.h]);
   // The whole PageCanvas element is held (the same element: React skips it), not just its items: other props
   // (comment anchors, image uris) are rebuilt from the items too and would redraw it anyway.
   const canvasRef = React.useRef<React.ReactElement | null>(null);
