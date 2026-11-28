@@ -20,6 +20,7 @@ import {
 } from './InkOverlay.types';
 import { laserRuns, type LaserPt } from './laser';
 import { traceOutline } from './outlinePath';
+import { predictTip } from './predictTip';
 import { MM_PER_CSS_PX as MM_PER_PX, palmVerdict, pointerContact, secondFingerRetracts, touchContact } from './palm';
 import { fingerGesture, type FingerOwner } from './twoFingerPan';
 /** A snapped shape pulses this long (web has no haptics): a halo that shrinks and fades. */
@@ -46,6 +47,9 @@ const LASER_DOT_GLOW_PX = 9;
 const LASER_DOT_PX = 4;
 
 const NO_PEN = { x: 0, y: 0, t: -Infinity };
+
+/** Our own prediction reaches at most this far ahead of the pen (mm), used with pointerrawupdate. */
+const PREDICT_MAX_MM = 3;
 
 interface Live {
   pointerId: number;
@@ -75,6 +79,9 @@ interface Live {
   lastX: number;
   lastY: number;
   travelMm: number;
+  /** With pointerrawupdate: the timestamp of the newest sample taken, and the client positions taken at it (dedupe). */
+  takenT: number;
+  takenAt: [number, number][];
 }
 
 interface Finished {
@@ -566,6 +573,9 @@ export function InkOverlay(props: InkOverlayProps) {
         lastX: ev.clientX,
         lastY: ev.clientY,
         travelMm: 0,
+        // A pointer handed over from the ruler comes from a synthetic pointerdown, stamped later than the real samples.
+        takenT: ev.isTrusted ? ev.timeStamp : -Infinity,
+        takenAt: [[ev.clientX, ev.clientY]],
       };
       s.live = live;
       if (line) canvas.dataset.ruler = '1'; // for tests: this stroke follows the ruler
@@ -682,6 +692,47 @@ export function InkOverlay(props: InkOverlayProps) {
       if ((ev.button === 0 || ev.button === 2) && !s.live) start(ev, false); // mouse: the right button erases
     };
 
+    /**
+     * Chromium (secure contexts, so Electron's app:// too) fires pointerrawupdate as soon as a sample arrives, while
+     * pointermove waits for the next animation frame. While a stroke is live, samples are taken from both, each once:
+     * pointermove carries the samples rawupdate already took (same timestamps). rawupdate has no predicted events, so
+     * here every draw predicts with predictTip (one source, so the tip never blinks).
+     */
+    const raw = typeof window !== 'undefined' && 'onpointerrawupdate' in window;
+
+    const takeRaw = (live: Live, ev: PointerEvent) => {
+      const coalesced = ev.getCoalescedEvents?.() ?? [];
+      let took = false;
+      for (const c of coalesced.length ? coalesced : [ev]) {
+        if (c.timeStamp < live.takenT) continue;
+        if (c.timeStamp === live.takenT) {
+          if (live.takenAt.some(([x, y]) => x === c.clientX && y === c.clientY)) continue;
+          live.takenAt.push([c.clientX, c.clientY]);
+        } else {
+          live.takenT = c.timeStamp;
+          live.takenAt = [[c.clientX, c.clientY]];
+        }
+        addPoint(live, c);
+        took = true;
+      }
+      if (!took || s.live !== live) return;
+      const mmPerUnit = (live.rect.width / propsRef.current.pageSize.w) * MM_PER_PX;
+      live.predicted = live.kind === 'ink' && !live.snap ? predictTip(live.points, PREDICT_MAX_MM / mmPerUnit) : [];
+      if (live.kind === 'erase') emitErase(live, false);
+      draw(true);
+    };
+
+    const onRawUpdate = (ev: PointerEvent) => {
+      const live = s.live;
+      if (!live || ev.pointerId !== live.pointerId) return; // hover and everything else stay with pointermove
+      if (ev.pointerType === 'touch' && palmSizeExceeded(ev)) {
+        retract(); // the contact grew into a palm
+        reject('palm-size');
+        return;
+      }
+      takeRaw(live, ev);
+    };
+
     const onMove = (ev: PointerEvent) => {
       if (ev.pointerType === 'pen') {
         notePen(ev);
@@ -694,6 +745,7 @@ export function InkOverlay(props: InkOverlayProps) {
           reject('palm-size');
           return;
         }
+        if (raw) return takeRaw(live, ev); // the samples it carries were taken by pointerrawupdate already
         // A pointer handed over from the ruler (a synthetic pointerdown) has no coalesced events on its first moves either way.
         const coalesced = ev.getCoalescedEvents?.() ?? [];
         for (const c of coalesced.length ? coalesced : [ev]) addPoint(live, c);
@@ -764,6 +816,7 @@ export function InkOverlay(props: InkOverlayProps) {
 
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('pointermove', onMove);
+    if (raw) canvas.addEventListener('pointerrawupdate', onRawUpdate as EventListener);
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointercancel', onCancel);
     canvas.addEventListener('pointerleave', onLeave);
@@ -777,6 +830,7 @@ export function InkOverlay(props: InkOverlayProps) {
     return () => {
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointermove', onMove);
+      if (raw) canvas.removeEventListener('pointerrawupdate', onRawUpdate as EventListener);
       canvas.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointercancel', onCancel);
       canvas.removeEventListener('pointerleave', onLeave);
