@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import { hero, animatedSvgInner, penStyles, regionCrop } from './pieces.mjs';
 import { layout, penStroke, highlighterStroke, freePath, rng } from './ink.mjs';
-import { BUILD_NOTE, ICONS, SHARED_CSS, fill, footer, head, header, icon } from './site.mjs';
+import { BUILD_NOTE, GITHUB, ICONS, MCP_URL, SHARED_CSS, fill, footer, head, header, icon } from './site.mjs';
 
 const f1 = (n) => Math.round(n * 10) / 10;
 const paths = (arr, color) => arr.map((d) => `<path d="${d}"${color ? ` fill="${color}"` : ''}/>`).join('');
@@ -164,6 +164,8 @@ export function renderLanding() {
     I_DOWNLOAD: ICONS.download,
     I_CHECK: ICONS.check,
     I_CROSS: ICONS.cross,
+    MCP_URL,
+    GITHUB,
     UL_W: 300,
     UNDERLINE: underline().replace(/^<svg[^>]*>|<\/svg>$/g, ''),
     BUILD_NOTE,

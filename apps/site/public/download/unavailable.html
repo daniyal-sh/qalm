@@ -104,7 +104,10 @@ h1,h2,h3,p{margin:0}
 .site-nav{display:flex;gap:4px;margin-left:auto}
 .site-nav a{padding:10px 12px;border-radius:var(--r8);text-decoration:none;color:var(--muted);font-size:15px;font-weight:500}
 .site-nav a:hover{color:var(--ink);background:var(--soft)}
-@media (max-width:860px){.site-nav{display:none}.site-head .btn{margin-left:auto}}
+.site-head .gh{display:grid;place-items:center;width:40px;height:40px;margin-left:-12px;border-radius:var(--r8);color:var(--muted)}
+.site-head .gh:hover{color:var(--ink);background:var(--soft)}
+.site-head .gh svg{width:20px;height:20px}
+@media (max-width:860px){.site-nav{display:none}.site-head .gh{margin-left:auto;margin-right:-12px}}
 
 /* ---------- hand-drawn underline ---------- */
 .underline{display:inline-block;position:relative;white-space:nowrap}
@@ -192,6 +195,7 @@ h1,h2,h3,p{margin:0}
   <div class="wrap">
     <a class="lockup" href="/" aria-label="qalm by Apollo, home"><svg class="mark" aria-hidden="true" focusable="false" viewBox="4.4 10.5 91.19 83" fill="none"><defs><mask id="qalm-head-back" maskUnits="userSpaceOnUse" x="-0.6" y="5.5" width="101.19" height="93"><rect x="-0.6" y="5.5" width="101.19" height="93" fill="#fff"/><path d="M50 90 C44 76 33 65 33 51 C33 39 40 28 50 14 C60 28 67 39 67 51 C67 65 56 76 50 90Z" fill="#000"/><circle cx="87.61" cy="47.45" r="7.8" fill="#000"/></mask><mask id="qalm-head-halo" maskUnits="userSpaceOnUse" x="-0.6" y="5.5" width="101.19" height="93"><rect x="-0.6" y="5.5" width="101.19" height="93" fill="#fff"/><circle cx="87.61" cy="47.45" r="7.8" fill="#000"/></mask></defs><path class="orbit" d="M92.29 36.61A45 15 -20 0 0 7.71 67.39" stroke-width="5" stroke-linecap="round" mask="url(#qalm-head-back)"/><path class="nib" d="M50 90 C44 76 33 65 33 51 C33 39 40 28 50 14 C60 28 67 39 67 51 C67 65 56 76 50 90Z" stroke-width="6" stroke-linejoin="round"/><path class="nib" d="M50 82V58" stroke-width="4.5" stroke-linecap="round"/><circle class="nibfill" cx="50" cy="51" r="4.2"/><path class="orbit" d="M7.71 67.39A45 15 -20 0 0 92.29 36.61" stroke-width="5" stroke-linecap="round" mask="url(#qalm-head-halo)"/><circle class="planet" cx="87.61" cy="47.45" r="6.2"/></svg><span class="name"><b>qalm</b><small>by Apollo</small></span></a>
     <nav class="site-nav" aria-label="Site"><a href="/">Home</a><a href="/#pen">Features</a></nav>
+    <a class="gh" href="https://github.com/daniyal-sh/qalm" aria-label="qalm on GitHub" title="qalm on GitHub"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2.15c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/></svg></a>
     <a class="btn btn-sm" href="/app/">Open qalm</a>
   </div>
 </header>
@@ -212,7 +216,7 @@ h1,h2,h3,p{margin:0}
 <footer class="site-foot">
   <div class="wrap">
     <a class="lockup" href="/" aria-label="qalm by Apollo, home"><svg class="mark" aria-hidden="true" focusable="false" viewBox="4.4 10.5 91.19 83" fill="none"><defs><mask id="qalm-foot-back" maskUnits="userSpaceOnUse" x="-0.6" y="5.5" width="101.19" height="93"><rect x="-0.6" y="5.5" width="101.19" height="93" fill="#fff"/><path d="M50 90 C44 76 33 65 33 51 C33 39 40 28 50 14 C60 28 67 39 67 51 C67 65 56 76 50 90Z" fill="#000"/><circle cx="87.61" cy="47.45" r="7.8" fill="#000"/></mask><mask id="qalm-foot-halo" maskUnits="userSpaceOnUse" x="-0.6" y="5.5" width="101.19" height="93"><rect x="-0.6" y="5.5" width="101.19" height="93" fill="#fff"/><circle cx="87.61" cy="47.45" r="7.8" fill="#000"/></mask></defs><path class="orbit" d="M92.29 36.61A45 15 -20 0 0 7.71 67.39" stroke-width="5" stroke-linecap="round" mask="url(#qalm-foot-back)"/><path class="nib" d="M50 90 C44 76 33 65 33 51 C33 39 40 28 50 14 C60 28 67 39 67 51 C67 65 56 76 50 90Z" stroke-width="6" stroke-linejoin="round"/><path class="nib" d="M50 82V58" stroke-width="4.5" stroke-linecap="round"/><circle class="nibfill" cx="50" cy="51" r="4.2"/><path class="orbit" d="M7.71 67.39A45 15 -20 0 0 92.29 36.61" stroke-width="5" stroke-linecap="round" mask="url(#qalm-foot-halo)"/><circle class="planet" cx="87.61" cy="47.45" r="6.2"/></svg><span class="name"><b>qalm</b><small>by Apollo</small></span></a>
-    <nav aria-label="Legal and contact"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/data-rights">Data rights</a><a href="/contact">Contact</a></nav>
+    <nav aria-label="Legal and contact"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/data-rights">Data rights</a><a href="/contact">Contact</a><a href="https://github.com/daniyal-sh/qalm">GitHub</a></nav>
     <p class="copy">© 2026 Apollo. Made for people who think with a pen.</p>
   </div>
 </footer>
