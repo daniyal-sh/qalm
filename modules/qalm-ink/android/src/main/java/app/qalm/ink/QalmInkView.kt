@@ -142,6 +142,8 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
   ) {
     val points = ArrayList<InkPoint>()
     var predicted: List<InkPoint> = emptyList()
+    /** The outline, recomputed per sample from the tail only (LiveOutline: exactly QalmFreehand.outline). */
+    val outliner by lazy { LiveOutline(tool, width, style, smoothing) }
     var holdX = 0.0
     var holdY = 0.0
     var holdT = 0.0
@@ -432,7 +434,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
         val pend = if (shapeKind != null) {
           Pending(id, shapePath(shapeKind, l.snapCur), l.colorInt, alphaFor(l), l.width.toFloat())
         } else {
-          Pending(id, QalmFreehand.toPath(QalmFreehand.outline(l.tool, l.width, l.points, l.style, l.smoothing)), l.colorInt, alphaFor(l))
+          Pending(id, QalmFreehand.toPath(l.outliner.outline(l.points, emptyList())), l.colorInt, alphaFor(l))
         }
         synchronized(pending) { pending.add(pend) }
         layer.commit()
@@ -530,7 +532,7 @@ class QalmInkView(context: Context, appContext: AppContext) : ExpoView(context, 
         fillColor = l.colorInt,
         fillAlpha = alphaFor(l),
       )
-      l.kind == "ink" -> QalmFreehand.outline(l.tool, l.width, l.points + l.predicted, l.style, l.smoothing).let {
+      l.kind == "ink" -> l.outliner.outline(l.points, l.predicted).let {
         Frame(fill = QalmFreehand.toPath(it), fillColor = l.colorInt, fillAlpha = alphaFor(l), outline = it, seq = l.seq)
       }
       l.kind == "lasso" -> Frame(
