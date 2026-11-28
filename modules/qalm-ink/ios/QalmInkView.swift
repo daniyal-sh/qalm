@@ -73,6 +73,8 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     var lastLocation: CGPoint
     var travel: CGFloat = 0  // points the touch has moved
     var points: [Pt] = []
+    /// The latest predicted touches, drawn until the next move replaces them (not stored with the stroke).
+    var predicted: [Pt] = []
     var pendingEstimates: [NSNumber: Int] = [:]
     var erasedUpTo = 0  // eraser: points already emitted
     var claimToken = 0
@@ -311,7 +313,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
       }
     }
     CATransaction.commit()
-    if let a = active { render(a, predicted: []) }
+    if let a = active { render(a, predicted: a.predicted) }
   }
 
   // MARK: Touch input (called by InkGestureRecognizer)
@@ -387,8 +389,15 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
       }
     }
     append(a, touch: a.touch, event: event)
-    let predicted = (event.predictedTouches(for: a.touch) ?? []).map { makePoint($0, a) }
-    render(a, predicted: predicted)
+    // Only the position is guessed: at the last real pressure and tilt, a guess taken back on the next move
+    // doesn't also make the tip swell and shrink.
+    let last = a.points.last
+    a.predicted = (event.predictedTouches(for: a.touch) ?? []).map { (t: UITouch) -> Pt in
+      var q = makePoint(t, a)
+      if let l = last { q.p = l.p; q.tilt = l.tilt; q.az = l.az }
+      return q
+    }
+    render(a, predicted: a.predicted)
     if a.tool == .eraser { emitErase(a, isFinal: false) }
   }
 
@@ -416,7 +425,9 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
       if touch.estimatedPropertiesExpectingUpdates.isEmpty { a.pendingEstimates[idx] = nil }
       changed = true
     }
-    if changed { render(a, predicted: []) }
+    // Keep the prediction: redrawing without it here, then with it on the next move, made the tip blink while
+    // Apple Pencil refined the force of recent samples (several times a second).
+    if changed { render(a, predicted: a.predicted) }
   }
 
   func inkRecognizerDidReset() {
@@ -706,7 +717,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
                            FreehandSettings.pen(width: a.width, style: a.style, smoothing: a.smoothing))
   }
 
-  /// Redraw the in-progress stroke. `predicted` points are drawn this frame only and then discarded.
+  /// Redraw the in-progress stroke. `predicted` points are drawn but never become part of the stroke.
   private func render(_ a: Active, predicted: [Pt]) {
     CATransaction.begin()
     CATransaction.setDisableActions(true)

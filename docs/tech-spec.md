@@ -387,6 +387,14 @@ A dense page shows its paper until its first base is ready (the overlay holds an
 - iOS: coalesced and predicted `UITouch`es, drawn into a dedicated layer every frame (a Metal or Core Graphics live layer).
 - Web: a canvas overlay with `getCoalescedEvents`, `getPredictedEvents` and a `desynchronized` 2D context.
 
+Each move redraws only the box where the live stroke's outline changed since the last draw (`changedBounds`,
+`modules/qalm-ink/src/inkDamage.ts`, ported to Kotlin). The start of a stroke's outline comes out identical every
+frame, so the box sits around the pen. The Android front buffer and the desynchronized web canvas are on screen
+while they are drawn, and clearing them whole on every sample tore and flickered at the tip. Predicted points guess
+only the position: they take the last real pressure and tilt, so a guess taken back doesn't make the tip pulse. iOS
+keeps the latest prediction when Apple Pencil refines the force of earlier samples. Redrawing without it there
+made the tip blink.
+
 When the pen lifts, the overlay redraws the stroke from its real points only (no predicted points), which is exactly the geometry
 PageCanvas will draw, and emits `onStrokeEnd` with a new stroke `id`. It **keeps drawing that stroke until its id appears in
 `committedIds`, and then for a short hand-off** (2 animation frames on web, 50 ms on iOS and Android), so nothing flickers at hand-off.
