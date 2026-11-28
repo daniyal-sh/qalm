@@ -154,7 +154,6 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     }
     liveInk.actions = ["contents": NSNull(), "position": NSNull(), "bounds": NSNull(), "hidden": NSNull(),
                        "opacity": NSNull(), "compositingFilter": NSNull()]
-    liveInk.needsDisplayOnBoundsChange = true
     strokesLayer.addSublayer(liveInk)
     strokesLayer.addSublayer(liveLayer)
     lassoLayer.fillColor = nil
@@ -297,7 +296,7 @@ final class QalmInkView: ExpoView, UIGestureRecognizerDelegate, UIPencilInteract
     if scale > 0 {
       for l in [strokesLayer, liveInk, liveLayer, lassoLayer, cursorLayer, trailLayer] { l.contentsScale = scale }
     }
-    liveInk.setNeedsDisplay()
+    liveInk.redrawAll()
     CATransaction.commit()
     rebuildAllPaths()
   }

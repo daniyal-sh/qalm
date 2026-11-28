@@ -15,17 +15,24 @@ final class LiveInkLayer: CALayer {
   /// Points of padding around a changed box, for antialiasing.
   private static let pad: CGFloat = 2
 
-  /// A new stroke (or none): start empty and redraw everything.
+  /// A new stroke (or none): start empty. The backing store is dropped, not cleared: it is a full-screen bitmap and
+  /// every page on screen has an overlay, so idle overlays must not hold one. The stroke's first `show` redraws all
+  /// of it.
   func reset(fill: CGColor?) {
     outline = []
     self.fill = fill
-    setNeedsDisplay()
+    contents = nil
+  }
+
+  /// The size or scale changed during a stroke: the kept pixels no longer line up, so redraw everything.
+  func redrawAll() {
+    if fill != nil { setNeedsDisplay() }
   }
 
   /// Draw `next` (page units) at `sx`/`sy` points per unit, redrawing only where it differs from what is shown.
   func show(_ next: [FHVec], sx: CGFloat, sy: CGFloat) {
-    if sx != scaleX || sy != scaleY {
-      // A layout or page-size change: everything moves.
+    if sx != scaleX || sy != scaleY || outline.isEmpty {
+      // A layout or page-size change (everything moves), or the first draw since `reset` (a fresh backing store).
       outline = next
       scaleX = sx
       scaleY = sy
