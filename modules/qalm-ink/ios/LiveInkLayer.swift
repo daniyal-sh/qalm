@@ -31,6 +31,7 @@ final class LiveInkLayer: CALayer {
 
   /// Draw `next` (page units) at `sx`/`sy` points per unit, redrawing only where it differs from what is shown.
   func show(_ next: [FHVec], sx: CGFloat, sy: CGFloat) {
+    if next.isEmpty && outline.isEmpty { return } // nothing shown, nothing to show (e.g. while a shape is held)
     if sx != scaleX || sy != scaleY || outline.isEmpty {
       // A layout or page-size change (everything moves), or the first draw since `reset` (a fresh backing store).
       outline = next
